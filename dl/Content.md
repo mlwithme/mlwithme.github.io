@@ -1,0 +1,1 @@
+<div align=center><img width="1500" src="statics/images/dl/content.jpg"/> </div>
