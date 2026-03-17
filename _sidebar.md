@@ -1,8 +1,21 @@
 -  [========== 机器学习（思维导图） ==========](ml/Content.md)
-
 - 第 1 章 环境配置
     - [1.1 安装使用Conda](ml/Chapter01_Installation/Ch01.1_Installation.md)
     - [1.2 开发环境安装配置](ml/Chapter01_Installation/Ch01.2_IDE.md)
     - [引用](ml/Chapter01_Installation/Ch01_Ref.md)
-
+- 第 2 章 线性回归
+  - [2.1 模型的建立与求解](ml/Chapter02_LinearRegression/Ch02.1_ModelBuilding.md)
+  - [2.2多变量线性回归](ml/Chapter02_LinearRegression/Ch02.2_MultiVariable.md)
+  - [2.3 多项式回归](ml/Chapter02_LinearRegression/Ch02.3_Polynomial.md)
+  - [2.4 回归模型评估](ml/Chapter02_LinearRegression/Ch02.4_RegressionEval.md)
+  - [2.5 梯度下降](ml/Chapter02_LinearRegression/Ch02.5_GradientDescend.md)
+  - [2.6 正态分布](ml/Chapter02_LinearRegression/Ch02.6_NormalDistribution.md)
+  - [2.7 目标函数推导](ml/Chapter02_LinearRegression/Ch02.7_ObjectiveFunction.md)
+  - [引用](ml/Chapter02_LinearRegression/Ch02_Ref.md)
+- 第 3 章 逻辑回归
+  - [3.1 模型的建立与求解](ml/Chapter03_LogisticRegression/Ch03.1_ModelBuilding.md)
+  - [3.2 多分类任务](ml/Chapter03_LogisticRegression/Ch03.2_MultiClass.md)
+  - [3.3 常见的分类评估指标](ml/Chapter03_LogisticRegression/Ch03.3_ClassificationMetrics.md)
+  - [3.4 目标函数推导](ml/Chapter03_LogisticRegression/Ch03.4_ObjectiveFunction.md)
+  - [引用](ml/Chapter03_LogisticRegression/Ch03_Ref.md)
 -  [========== 深度学习（思维导图） ==========](dl/Content.md)
