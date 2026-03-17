@@ -193,7 +193,7 @@
   - [10.18 百川大模型使用](dl/Chapter10/Ch10.18_Baichuan.md)
   - [10.19 百川大模型实现](dl/Chapter10/Ch10.19_BaichuanImp.md)
   - [10.20 GPT-4与GPTs介绍](dl/Chapter10/Ch10.20_GPT4.md)
--  [=== RAG大模型应用开发（思维导图） ===]()
+-  [=== RAG大模型应用开发（思维导图） ===](rag/Content.md)
 - 第 1 章 RAG 基础概念
   - 第1.1节什么是RAG？
   - 第1.2节RAG概览
