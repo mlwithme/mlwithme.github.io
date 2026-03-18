@@ -91,5 +91,5 @@
 <div align=center><img width="150" src="https://moonhotel.oss-cn-shanghai.aliyuncs.com/images/gongzhonghao.jpg"/> </div><center>公众号</center>
 <br>
 
-总访问量：<span id="busuanzi_value_site_pv"></span> 次  
-总访客数：<span id="busuanzi_value_site_uv"></span> 人
+页面总访问量：<span id="busuanzi_value_site_pv"></span> 次  
+网站总访客数：<span id="busuanzi_value_site_uv"></span> 人
