@@ -19,9 +19,10 @@
 </center>
 
 
-<div align=center><img width="500" src="statics/subscription.jpg"/> </div>
+
+<div align=center><img width="500" src="https://moonhotel.oss-cn-shanghai.aliyuncs.com/images/subscription.jpg"/> </div>
 <br>
-<div align=center><img width="300" src="statics/store.jpg"/> </div>
+<div align=center><img width="300" src="https://moonhotel.oss-cn-shanghai.aliyuncs.com/images/store.jpg"/> </div>
 
 
 # 常见问题
@@ -31,12 +32,12 @@ Q1：内容适合初学者学习吗？
 完全适合！知识库内容自写作之初就完全是为初学者、跨学科人员所量身打造。作为一个过来人和从业者，我深知大家在学习过程的难点和容易踩的坑，所以在内容的组织结构上、行文逻辑上，都完全是以一个小白的视角在进行叙述。
 对于一个机器学习算法的学习过程，我们将它归结成了五个层次（三个阶段）：
 
-<div align=center><img width="450" src="statics/images/ml/p2-17.png"/></div>
+<div align=center><img width="450" src="https://moonhotel.oss-cn-shanghai.aliyuncs.com/images/p2-17.png"/></div>
 
 其中阶段一可以看成是先从大树主干爬上树顶一窥大树全貌的过程，因为对于一个算法来说，最基本就是它背后的思想，而这也是一个算法的灵魂所在；阶段二和阶段三就可以看成是遍历完整个大树后的层次，是对细枝末节具体的探索。
 那为什么会是上面这个排序呢？可以打乱吗？我们的回答是：当然可以，只要是适合自己的方法，那就是好方法。不过掌柜依旧强烈建议按照上述顺序来进行学习。可遗憾的是现在绝大多数人（或资料）的学习顺序都是①②④⑤③或者是①②④③⑤。这两种学习顺序的弊端就在于很多算法在数学推导中是有难度的（例如支持向量机），当克服不了这个难度时很多人就不会接着往下进行了。最后呈现的结果便是，既没有彻底弄清原理，又没有学会如何使用。相反，我们一贯主张的是：先学会怎么用，再探究为什么。
 
-<div align=center><img width="1000" src="statics/images/ml/stages.png"/></div>
+<div align=center><img width="1000" src="https://moonhotel.oss-cn-shanghai.aliyuncs.com/images/stages.png"/></div>
 
 # 读者评论
 
