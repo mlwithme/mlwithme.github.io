@@ -25,7 +25,6 @@
   - [4.4 正则化](ml/Chapter04_ModelOptimization/Ch04.4_Regularization.md)
   - [4.5 偏差、方差与交叉验证](ml/Chapter04_ModelOptimization/Ch04.5_BiasAndVariance.md)
   - [4.6 实例分析手写体识别](ml/Chapter04_ModelOptimization/Ch04.6_HandWriting.md)
-  - [4.7 精确率召回率曲线](ml/Chapter04_ModelOptimization/Ch04.7_PRCurve.md)
   - [引用](ml/Chapter04_ModelOptimization/Ch04_Ref.md)
 - 第 5 章 K近邻
   - [5.1 K近邻思想](ml/Chapter05_KNearestNeighbor/Ch05.1_BasicIdea.md)
