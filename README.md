@@ -1,36 +1,11 @@
 # 从零学AI指南手册
 
-<center>
-
- **公众号/B站/知乎/小红书** ：@跟我学机器学习
-
-</center>
-
-# 订阅知识库
-
-<center>
-大厂算法工程师 | 写作九年累计数百万字
-
-出版《跟我一起学机器学习》|《跟我一起学深度学习》|《一本書晉升深度學習世界級大師》
-
-深谙AI算法入门之道！
-
-扫描 **订阅** 解锁全部内容，两个月轻松入门AI！
-</center>
 
 
 
-<div align=center><img width="500" src="https://moonhotel.oss-cn-shanghai.aliyuncs.com/images/subscription.jpg"/> </div>
-<br>
-<div align=center><img width="300" src="https://moonhotel.oss-cn-shanghai.aliyuncs.com/images/store.jpg"/> </div>
+「从零学AI指南手册」内容自写作之初就完全是为初学者、跨学科人员所量身打造，包括机器学习、深度学习、大模型原理及 RAG 开发等内容。 作为一个过来人和从业者，我深知大家在学习过程的难点和容易踩的坑，所以在内容的组织结构上、行文逻辑上，都完全是以一个小白的视角在进行叙述。
 
-
-# 常见问题
-
-Q1：内容适合初学者学习吗？
-
-完全适合！知识库内容自写作之初就完全是为初学者、跨学科人员所量身打造。作为一个过来人和从业者，我深知大家在学习过程的难点和容易踩的坑，所以在内容的组织结构上、行文逻辑上，都完全是以一个小白的视角在进行叙述。
-对于一个机器学习算法的学习过程，我们将它归结成了五个层次（三个阶段）：
+对于「机器学习」算法的学习过程，我们将它归结成了五个层次（三个阶段）：
 
 <div align=center><img width="450" src="https://moonhotel.oss-cn-shanghai.aliyuncs.com/images/p2-17.png"/></div>
 
@@ -38,6 +13,13 @@ Q1：内容适合初学者学习吗？
 那为什么会是上面这个排序呢？可以打乱吗？我们的回答是：当然可以，只要是适合自己的方法，那就是好方法。不过掌柜依旧强烈建议按照上述顺序来进行学习。可遗憾的是现在绝大多数人（或资料）的学习顺序都是①②④⑤③或者是①②④③⑤。这两种学习顺序的弊端就在于很多算法在数学推导中是有难度的（例如支持向量机），当克服不了这个难度时很多人就不会接着往下进行了。最后呈现的结果便是，既没有彻底弄清原理，又没有学会如何使用。相反，我们一贯主张的是：先学会怎么用，再探究为什么。
 
 <div align=center><img width="1000" src="https://moonhotel.oss-cn-shanghai.aliyuncs.com/images/stages.png"/></div>
+
+对于「深度学习」算法的学习过程，我们始终坚持以“数形结合”的方式来进行阐述，因为正如华罗庚先生说过：“数无形时少直觉，形少数时难入微，数形结合百般好，隔离分家万事休”。在学习深度学习相关内容的过程中，如果只看论文那我们只能了解到算法模型的整体思想但无法精确刻画其中的细节之处；但如果只看代码又会发现均是各种矩阵之间的四则运算但并不知道其中的含义。
+
+因此，我们子啊介绍每一个算法模型，即先通过图示直观地来介绍模型的整体思想和原理，再通过实际的数学计算过程或代码来刻画其中的细节和模糊之处。用图形去形象化，用代码去唯一化，做到真正“数+形”的结合，让大家能够真正的做到看得懂、学得会、写得出。为了将各个算法的建模原理表述清楚，这部分内容使用近400余幅示意插图。
+
+<div align=center><img width="800" src="https://moonhotel.oss-cn-shanghai.aliyuncs.com/images/20260318200337.png"/> </div>
+
 
 # 读者评论
 
@@ -86,3 +68,30 @@ Q1：内容适合初学者学习吗？
 “您真的太牛啦，我最近看您写得那些神经网络的文章，讲得特别清晰易懂，而且注释得超级详细呀，尤其是卷积那块，网上搜罗了一堆，原理都差不多，但就是有几个细节不是很清楚，看了你的文章茅塞顿开，真的是太详细啦~[哇]”
 ——@深海青鱼
 
+# 订阅知识库
+
+<center>
+大厂算法工程师 | 写作九年累计数百万字
+
+出版《跟我一起学机器学习》|《跟我一起学深度学习》|《一本書晉升深度學習世界級大師》
+
+深谙AI算法入门之道！
+
+扫描 **订阅** 解锁全部内容，两个月轻松入门AI！
+</center>
+
+
+
+<div align=center><img width="500" src="https://moonhotel.oss-cn-shanghai.aliyuncs.com/images/subscription.jpg"/> </div>
+<br>
+<div align=center><img width="300" src="https://moonhotel.oss-cn-shanghai.aliyuncs.com/images/store.jpg"/> </div>
+
+<center>
+
+ 全平台账号 **公众号/B站/知乎/小红书** ：@跟我学机器学习
+</center>
+
+<div align=center><img width="150" src="https://moonhotel.oss-cn-shanghai.aliyuncs.com/images/gongzhonghao.jpg"/> </div><center>公众号</center>
+<br>
+<br>
+<br>
