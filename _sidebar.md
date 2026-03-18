@@ -95,7 +95,6 @@
   - [1.1 深度学习的发展阶段](dl/Chapter01/Ch01.1_event_line.md)
   - [1.2 深度学习中的关键人物](dl/Chapter01/Ch01.2_KeyFigure.md)
   - [1.3 深度学习框架介绍](dl/Chapter01/Ch01.3_Framework.md)
-  - [1.4 本书的体系结构](dl/Chapter01/Ch01.4_Structure.md)
 - 第 2 章 环境配置
   - [2.1 体系结构介绍](dl/Chapter02/Ch02.1_Structure.md)
   - [2.2 深度学习环境安装](dl/Chapter02/Ch02.2_Installation.md)
