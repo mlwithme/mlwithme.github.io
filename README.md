@@ -1,8 +1,5 @@
 # 从零学AI指南手册
 
-
-
-
 「从零学AI指南手册」内容自写作之初就完全是为初学者、跨学科人员所量身打造，包括机器学习、深度学习、大模型原理及 RAG 开发等内容。 作为一个过来人和从业者，我深知大家在学习过程的难点和容易踩的坑，所以在内容的组织结构上、行文逻辑上，都完全是以一个小白的视角在进行叙述。
 
 对于「机器学习」算法的学习过程，我们将它归结成了五个层次（三个阶段）：
@@ -93,5 +90,6 @@
 
 <div align=center><img width="150" src="https://moonhotel.oss-cn-shanghai.aliyuncs.com/images/gongzhonghao.jpg"/> </div><center>公众号</center>
 <br>
-<br>
-<br>
+
+总访问量：<span id="busuanzi_value_site_pv"></span> 次  
+总访客数：<span id="busuanzi_value_site_uv"></span> 人
