@@ -83,5 +83,5 @@
 
 <br>
 
-页面总访问量：<span id="busuanzi_value_site_pv"></span> 次  
-网站总访客数：<span id="busuanzi_value_site_uv"></span> 人
+<font color = white >页面总访问量：<span id="busuanzi_value_site_pv"></span> 次</font>  
+<font color = white >网站总访客数：<span id="busuanzi_value_site_uv"></span> 人</font>
