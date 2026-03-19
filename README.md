@@ -65,30 +65,13 @@
 “您真的太牛啦，我最近看您写得那些神经网络的文章，讲得特别清晰易懂，而且注释得超级详细呀，尤其是卷积那块，网上搜罗了一堆，原理都差不多，但就是有几个细节不是很清楚，看了你的文章茅塞顿开，真的是太详细啦~[哇]”
 ——@深海青鱼
 
-# 订阅知识库
-
-<center>
-大厂算法工程师 | 写作九年累计数百万字
-
-出版《跟我一起学机器学习》|《跟我一起学深度学习》|《一本書晉升深度學習世界級大師》
-
-深谙AI算法入门之道！
-
-扫描 **订阅** 解锁全部内容，两个月轻松入门AI！
-</center>
-
-
-
-<div align=center><img width="500" src="https://moonhotel.oss-cn-shanghai.aliyuncs.com/images/subscription.jpg"/> </div>
-<br>
-<div align=center><img width="300" src="https://moonhotel.oss-cn-shanghai.aliyuncs.com/images/store.jpg"/> </div>
-
 <center>
 
  全平台账号 **公众号/B站/知乎/小红书** ：@跟我学机器学习
 </center>
 
 <div align=center><img width="150" src="https://moonhotel.oss-cn-shanghai.aliyuncs.com/images/gongzhonghao.jpg"/> </div><center>公众号</center>
+
 <br>
 
 页面总访问量：<span id="busuanzi_value_site_pv"></span> 次  
