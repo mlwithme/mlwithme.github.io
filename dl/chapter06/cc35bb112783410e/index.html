@@ -9,7 +9,8 @@ https://github.com/alex-shpak/hugo-book
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="description" content="第 6 章 模型优化方法# 在第5章内容中，我们详细介绍了深度学习模型训练过程中会用到的一些辅助技能和工具，以提高模型在训练过程的效率。在本章内容中我们将从模型优化的角度来介绍如何更快以及更好地训练一个深度学习模型。在本章内容中，我们将会详细介绍深度学习中常见的模型优化策略和方法，包括学习率调度器、梯度裁剪策略以及各种不同的归一化技术。同时，我们也将介绍基于梯度下降算法的各种改进版本，包括动量法、AdaGrad、AdaDelta和Adam等。这些算法为构建和优化深度学习模型提供了全面的指导和实践方法，并且能够帮助模型在训练过程中更快地进行收敛。
-6.1 学习率调度器# 在深度学习模型训练过程中，当模型结果不太理想时最常用的做法之一就是动态调整学习率，即在模型的训练过程中采用某种策略让学习率动态变化。如最简单的方法可以是每迭代一轮学习率降为之前的一半。当然， 还可以通过其它一些更为复杂的策略来进行控制，例如在2017年谷歌发布的Transformer模型中，论文作者就采用了如下公式来动态调整学习率： $$ \text{learning_rate}=d_{\text{model}}^{-0.5}\cdot \text{min}(\text{Steps}^{-0.5},\text{Steps}\cdot \text{ Warmup_Steps}^{-1.5}) \tag{6-1} $$ 其中$d_{\text{model}}$表示模型的维度，$\text{Steps}$表示小批量迭代的次数，$\text{Warmup_Steps}$表示前期线性增长的迭代次数。
+6.1 学习率调度器# 在深度学习模型训练过程中，当模型结果不太理想时最常用的做法之一就是动态调整学习率，即在模型的训练过程中采用某种策略让学习率动态变化。如最简单的方法可以是每迭代一轮学习率降为之前的一半。当然， 还可以通过其它一些更为复杂的策略来进行控制，例如在2017年谷歌发布的Transformer模型中，论文作者就采用了如下公式来动态调整学习率：
+$$ \text{learning\_rate}=d\_{\text{model}}^{-0.5}\cdot \text{min}(\text{Steps}^{-0.5},\text{Steps}\cdot \text{ Warmup\_Steps}^{-1.5}) \tag{6-1} $$其中$d_{\text{model}}$表示模型的维度，$\text{Steps}$表示小批量迭代的次数，$\text{Warmup\_Steps}$表示前期线性增长的迭代次数。
 根据式(6-1)中的计算方式，模型在训练过程中学习率的变化情况将如图6-1所示。
 图 6-1. Transformer动态学习率变化图 如图6-1所示，3条曲线分别表示3组参数下学习率随着迭代次的变化情况，其中到达顶点之前的线性增长阶段便是“热身”（Warmup）阶段。
 当然，除了上述提到的两种学习率动态调整方式，常见的还有常数、线性、余弦变换等变换策略，并且还可以直接借助Transformers框架中的optimization模块来实现。在本节接下来的内容中，我们将会先介绍如何直接使用Transformers框架中的optimization模块来快速实现学习率动态调整的目的，然后再简单介绍一下各个方法背后的实现逻辑以及如何模仿来实现自定义的调整方法。
@@ -28,7 +29,8 @@ https://github.com/alex-shpak/hugo-book
 	<meta property="og:site_name" content="《从零学AI指南手册》">
 	<meta property="og:title" content="6.1 学习率调度器">
 	<meta property="og:description" content="第 6 章 模型优化方法# 在第5章内容中，我们详细介绍了深度学习模型训练过程中会用到的一些辅助技能和工具，以提高模型在训练过程的效率。在本章内容中我们将从模型优化的角度来介绍如何更快以及更好地训练一个深度学习模型。在本章内容中，我们将会详细介绍深度学习中常见的模型优化策略和方法，包括学习率调度器、梯度裁剪策略以及各种不同的归一化技术。同时，我们也将介绍基于梯度下降算法的各种改进版本，包括动量法、AdaGrad、AdaDelta和Adam等。这些算法为构建和优化深度学习模型提供了全面的指导和实践方法，并且能够帮助模型在训练过程中更快地进行收敛。
-6.1 学习率调度器# 在深度学习模型训练过程中，当模型结果不太理想时最常用的做法之一就是动态调整学习率，即在模型的训练过程中采用某种策略让学习率动态变化。如最简单的方法可以是每迭代一轮学习率降为之前的一半。当然， 还可以通过其它一些更为复杂的策略来进行控制，例如在2017年谷歌发布的Transformer模型中，论文作者就采用了如下公式来动态调整学习率： $$ \text{learning_rate}=d_{\text{model}}^{-0.5}\cdot \text{min}(\text{Steps}^{-0.5},\text{Steps}\cdot \text{ Warmup_Steps}^{-1.5}) \tag{6-1} $$ 其中$d_{\text{model}}$表示模型的维度，$\text{Steps}$表示小批量迭代的次数，$\text{Warmup_Steps}$表示前期线性增长的迭代次数。
+6.1 学习率调度器# 在深度学习模型训练过程中，当模型结果不太理想时最常用的做法之一就是动态调整学习率，即在模型的训练过程中采用某种策略让学习率动态变化。如最简单的方法可以是每迭代一轮学习率降为之前的一半。当然， 还可以通过其它一些更为复杂的策略来进行控制，例如在2017年谷歌发布的Transformer模型中，论文作者就采用了如下公式来动态调整学习率：
+$$ \text{learning\_rate}=d\_{\text{model}}^{-0.5}\cdot \text{min}(\text{Steps}^{-0.5},\text{Steps}\cdot \text{ Warmup\_Steps}^{-1.5}) \tag{6-1} $$其中$d_{\text{model}}$表示模型的维度，$\text{Steps}$表示小批量迭代的次数，$\text{Warmup\_Steps}$表示前期线性增长的迭代次数。
 根据式(6-1)中的计算方式，模型在训练过程中学习率的变化情况将如图6-1所示。
 图 6-1. Transformer动态学习率变化图 如图6-1所示，3条曲线分别表示3组参数下学习率随着迭代次的变化情况，其中到达顶点之前的线性增长阶段便是“热身”（Warmup）阶段。
 当然，除了上述提到的两种学习率动态调整方式，常见的还有常数、线性、余弦变换等变换策略，并且还可以直接借助Transformers框架中的optimization模块来实现。在本节接下来的内容中，我们将会先介绍如何直接使用Transformers框架中的optimization模块来快速实现学习率动态调整的目的，然后再简单介绍一下各个方法背后的实现逻辑以及如何模仿来实现自定义的调整方法。
@@ -47,7 +49,8 @@ https://github.com/alex-shpak/hugo-book
 
 	<meta itemprop="name" content="6.1 学习率调度器">
 	<meta itemprop="description" content="第 6 章 模型优化方法# 在第5章内容中，我们详细介绍了深度学习模型训练过程中会用到的一些辅助技能和工具，以提高模型在训练过程的效率。在本章内容中我们将从模型优化的角度来介绍如何更快以及更好地训练一个深度学习模型。在本章内容中，我们将会详细介绍深度学习中常见的模型优化策略和方法，包括学习率调度器、梯度裁剪策略以及各种不同的归一化技术。同时，我们也将介绍基于梯度下降算法的各种改进版本，包括动量法、AdaGrad、AdaDelta和Adam等。这些算法为构建和优化深度学习模型提供了全面的指导和实践方法，并且能够帮助模型在训练过程中更快地进行收敛。
-6.1 学习率调度器# 在深度学习模型训练过程中，当模型结果不太理想时最常用的做法之一就是动态调整学习率，即在模型的训练过程中采用某种策略让学习率动态变化。如最简单的方法可以是每迭代一轮学习率降为之前的一半。当然， 还可以通过其它一些更为复杂的策略来进行控制，例如在2017年谷歌发布的Transformer模型中，论文作者就采用了如下公式来动态调整学习率： $$ \text{learning_rate}=d_{\text{model}}^{-0.5}\cdot \text{min}(\text{Steps}^{-0.5},\text{Steps}\cdot \text{ Warmup_Steps}^{-1.5}) \tag{6-1} $$ 其中$d_{\text{model}}$表示模型的维度，$\text{Steps}$表示小批量迭代的次数，$\text{Warmup_Steps}$表示前期线性增长的迭代次数。
+6.1 学习率调度器# 在深度学习模型训练过程中，当模型结果不太理想时最常用的做法之一就是动态调整学习率，即在模型的训练过程中采用某种策略让学习率动态变化。如最简单的方法可以是每迭代一轮学习率降为之前的一半。当然， 还可以通过其它一些更为复杂的策略来进行控制，例如在2017年谷歌发布的Transformer模型中，论文作者就采用了如下公式来动态调整学习率：
+$$ \text{learning\_rate}=d\_{\text{model}}^{-0.5}\cdot \text{min}(\text{Steps}^{-0.5},\text{Steps}\cdot \text{ Warmup\_Steps}^{-1.5}) \tag{6-1} $$其中$d_{\text{model}}$表示模型的维度，$\text{Steps}$表示小批量迭代的次数，$\text{Warmup\_Steps}$表示前期线性增长的迭代次数。
 根据式(6-1)中的计算方式，模型在训练过程中学习率的变化情况将如图6-1所示。
 图 6-1. Transformer动态学习率变化图 如图6-1所示，3条曲线分别表示3组参数下学习率随着迭代次的变化情况，其中到达顶点之前的线性增长阶段便是“热身”（Warmup）阶段。
 当然，除了上述提到的两种学习率动态调整方式，常见的还有常数、线性、余弦变换等变换策略，并且还可以直接借助Transformers框架中的optimization模块来实现。在本节接下来的内容中，我们将会先介绍如何直接使用Transformers框架中的optimization模块来快速实现学习率动态调整的目的，然后再简单介绍一下各个方法背后的实现逻辑以及如何模仿来实现自定义的调整方法。
@@ -59,16 +62,16 @@ https://github.com/alex-shpak/hugo-book
 1. constant策略
 在optimization模块中可以通过get_constant_schedule函数来返回对应的常数动态学习率调整方法。顾名思义，常数学习率动态调整就是学习率是一个恒定不变的常数，也就是说相当于没用。为了方便后续对学习率的变化过程可视化，这里先随意定义一个网络模型，示例代码如下所示：
 1 class Model(nn.Module): 2 def __init__(self): 3 super(Model, self).__init__() 4 self.fc = nn.Linear(2,5) 5 6 def forward(self, x): 7 out = self.fc(x).sum() 8 return out进一步，在模型训练的过程中，我们可以通过以下方式来进行使用：">
-	<meta itemprop="wordCount" content="294">
+	<meta itemprop="wordCount" content="293">
 
 <title>6.1 学习率调度器 • 《从零学AI指南手册》</title>
 <link rel="icon" href="/favicon.png" >
 <link rel="manifest" href="/manifest.json">
 <link rel="canonical" href="https://mlwithme.github.io/dl/chapter06/cc35bb112783410e/">
-<link rel="stylesheet" href="/book.min.6097ccf1d338ddfaa037d2f96478059a71fa573d0f917d128bab595efea338ca.css" integrity="sha256-YJfM8dM43fqgN9L5ZHgFmnH6Vz0PkX0Si6tZXv6jOMo=" crossorigin="anonymous">
+<link rel="stylesheet" href="/book.min.42c24c4d3a9678b613e9cd06eeb162677bb05b99dfe5a650b15a9e11d21b72fd.css" integrity="sha256-QsJMTTqWeLYT6c0G7rFiZ3uwW5nf5aZQsVqeEdIbcv0=" crossorigin="anonymous">
 
 
-  <script defer type="module" src="/en.search.min.ffaad769e546b38d39820301bb9e5c193822f7bf0f46a855602e4e14707802e0.js" integrity="sha256-/6rXaeVGs405ggMBu55cGTgi978PRqhVYC5OFHB4AuA=" crossorigin="anonymous"></script>
+  <script defer type="module" src="/en.search.min.d6b14dbcd48978b2c41611d06e5387dc896ddf705e423dd9152973bfd6c6096a.js" integrity="sha256-1rFNvNSJeLLEFhHQblOH3Ilt33BeQj3ZFSlzv9bGCWo=" crossorigin="anonymous"></script>
 
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-23SZ6E8VY7"></script>
 <script>
@@ -138,8 +141,8 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <input type="checkbox" id="section-253e26e732e57a78f635dcf47df3d0a3" class="toggle"  />
-    <label for="section-253e26e732e57a78f635dcf47df3d0a3" class="flex">
+    <input type="checkbox" id="section-279cf10e5100caa4f65ba3f7dd8888a4" class="toggle"  />
+    <label for="section-279cf10e5100caa4f65ba3f7dd8888a4" class="flex">
       <a role="button" class="">
         第 1 章 RAG 基础概念</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -189,8 +192,8 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <input type="checkbox" id="section-810ee5a2a3a24c9b7c25ab5324ae7db7" class="toggle"  />
-    <label for="section-810ee5a2a3a24c9b7c25ab5324ae7db7" class="flex">
+    <input type="checkbox" id="section-83c662c2764f1c19f8005eab77fee110" class="toggle"  />
+    <label for="section-83c662c2764f1c19f8005eab77fee110" class="flex">
       <a role="button" class="">
         第 2 章 大模型接入与使用</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -268,8 +271,8 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <input type="checkbox" id="section-ed1727f01d0e40dc9b7961b72e42160e" class="toggle"  />
-    <label for="section-ed1727f01d0e40dc9b7961b72e42160e" class="flex">
+    <input type="checkbox" id="section-1e583d7a26333453241d87c5c16592bd" class="toggle"  />
+    <label for="section-1e583d7a26333453241d87c5c16592bd" class="flex">
       <a role="button" class="">
         第 3 章 文档标准化与语义检索</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -375,8 +378,8 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <input type="checkbox" id="section-caaf9d8eb5e5559f7ca8bb11c41da71a" class="toggle"  />
-    <label for="section-caaf9d8eb5e5559f7ca8bb11c41da71a" class="flex">
+    <input type="checkbox" id="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="toggle"  />
+    <label for="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="flex">
       <a role="button" class="">
         第 4 章 RAG 与 Agent</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -571,8 +574,8 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <input type="checkbox" id="section-a9b664bcf9e1dab8add449268565f466" class="toggle"  />
-    <label for="section-a9b664bcf9e1dab8add449268565f466" class="flex">
+    <input type="checkbox" id="section-cf7621e8efb1f3153eaca44a113dcdb9" class="toggle"  />
+    <label for="section-cf7621e8efb1f3153eaca44a113dcdb9" class="flex">
       <a role="button" class="">
         第 1 章 深度学习简介</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -636,8 +639,8 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <input type="checkbox" id="section-e6e0db5d4bc28bd97dfe8d5210249e63" class="toggle"  />
-    <label for="section-e6e0db5d4bc28bd97dfe8d5210249e63" class="flex">
+    <input type="checkbox" id="section-f9bf1a68c19405769f9c4a1495708a55" class="toggle"  />
+    <label for="section-f9bf1a68c19405769f9c4a1495708a55" class="flex">
       <a role="button" class="">
         第 2 章 环境配置</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -701,8 +704,8 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <input type="checkbox" id="section-0a2ca47f15332c8b06ae83247328edb4" class="toggle"  />
-    <label for="section-0a2ca47f15332c8b06ae83247328edb4" class="flex">
+    <input type="checkbox" id="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="toggle"  />
+    <label for="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="flex">
       <a role="button" class="">
         第 3 章 深度学习基础</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -906,8 +909,8 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <input type="checkbox" id="section-95b7e7417bf2b821a1b760975d3acc22" class="toggle"  />
-    <label for="section-95b7e7417bf2b821a1b760975d3acc22" class="flex">
+    <input type="checkbox" id="section-7a12cee83820a928df00362d70804a97" class="toggle"  />
+    <label for="section-7a12cee83820a928df00362d70804a97" class="flex">
       <a role="button" class="">
         第 4 章 卷积神经网络</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -1069,8 +1072,8 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <input type="checkbox" id="section-17076fe90a2d84e207bbd0c829983325" class="toggle"  />
-    <label for="section-17076fe90a2d84e207bbd0c829983325" class="flex">
+    <input type="checkbox" id="section-be9addfd3a15c372d609d09cabb94159" class="toggle"  />
+    <label for="section-be9addfd3a15c372d609d09cabb94159" class="flex">
       <a role="button" class="">
         第 5 章 模型训练与复用</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -1190,8 +1193,8 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <input type="checkbox" id="section-2d091d454d5c3f03f5e0a202c37cc226" class="toggle" checked />
-    <label for="section-2d091d454d5c3f03f5e0a202c37cc226" class="flex">
+    <input type="checkbox" id="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="toggle" checked />
+    <label for="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="flex">
       <a role="button" class="">
         第 6 章 模型优化方法</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -1353,8 +1356,8 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <input type="checkbox" id="section-f2f78ba4851131558fc284d927542d28" class="toggle"  />
-    <label for="section-f2f78ba4851131558fc284d927542d28" class="flex">
+    <input type="checkbox" id="section-517b751d7c44a7ac77d25d295ed44271" class="toggle"  />
+    <label for="section-517b751d7c44a7ac77d25d295ed44271" class="flex">
       <a role="button" class="">
         第 7 章 循环神经网络</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -1460,8 +1463,8 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <input type="checkbox" id="section-49992cff6143e64ae5d7f2209dcfb054" class="toggle"  />
-    <label for="section-49992cff6143e64ae5d7f2209dcfb054" class="flex">
+    <input type="checkbox" id="section-b9b861f64ba32bc68dfb977497de37d9" class="toggle"  />
+    <label for="section-b9b861f64ba32bc68dfb977497de37d9" class="flex">
       <a role="button" class="">
         第 8 章 时序与模型融合</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -1567,8 +1570,8 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <input type="checkbox" id="section-ca07c572acb4d7fd40854f5b367c247b" class="toggle"  />
-    <label for="section-ca07c572acb4d7fd40854f5b367c247b" class="flex">
+    <input type="checkbox" id="section-e54a1e28b1438b8266637bcb8dac1a44" class="toggle"  />
+    <label for="section-e54a1e28b1438b8266637bcb8dac1a44" class="flex">
       <a role="button" class="">
         第 9 章 自然语言处理</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -1758,8 +1761,8 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <input type="checkbox" id="section-8cdec04c2fd8683c5c7373c78d943528" class="toggle"  />
-    <label for="section-8cdec04c2fd8683c5c7373c78d943528" class="flex">
+    <input type="checkbox" id="section-f6636b2f9dc1df93b9fa64dd201716d9" class="toggle"  />
+    <label for="section-f6636b2f9dc1df93b9fa64dd201716d9" class="flex">
       <a role="button" class="">
         第10章 现代神经网络</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -2094,8 +2097,8 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <input type="checkbox" id="section-0a3254d1ca9963fd6975aa5bc0b3edcc" class="toggle"  />
-    <label for="section-0a3254d1ca9963fd6975aa5bc0b3edcc" class="flex">
+    <input type="checkbox" id="section-48f56957e94e3cf66f3022103a7dd0ff" class="toggle"  />
+    <label for="section-48f56957e94e3cf66f3022103a7dd0ff" class="flex">
       <a role="button" class="">
         第 1 章 环境配置</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -2145,8 +2148,8 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <input type="checkbox" id="section-4569258198323c16bc8a634ea44fd5db" class="toggle"  />
-    <label for="section-4569258198323c16bc8a634ea44fd5db" class="flex">
+    <input type="checkbox" id="section-56a896338a1c41249d22a3efa0e0063c" class="toggle"  />
+    <label for="section-56a896338a1c41249d22a3efa0e0063c" class="flex">
       <a role="button" class="">
         第 2 章 线性回归</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -2266,8 +2269,8 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <input type="checkbox" id="section-a6ca5e2f846ebd900d1a868e6718dc82" class="toggle"  />
-    <label for="section-a6ca5e2f846ebd900d1a868e6718dc82" class="flex">
+    <input type="checkbox" id="section-ccd0dc9386ea80613d4cedf91b30058d" class="toggle"  />
+    <label for="section-ccd0dc9386ea80613d4cedf91b30058d" class="flex">
       <a role="button" class="">
         第 3 章 逻辑回归</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -2359,8 +2362,8 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <input type="checkbox" id="section-9f462f716bd0e46ef79984b356eeb5a2" class="toggle"  />
-    <label for="section-9f462f716bd0e46ef79984b356eeb5a2" class="flex">
+    <input type="checkbox" id="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="toggle"  />
+    <label for="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="flex">
       <a role="button" class="">
         第 4 章 模型的改善与泛化</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -2480,8 +2483,8 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <input type="checkbox" id="section-327db48e4f4df6236855078634147679" class="toggle"  />
-    <label for="section-327db48e4f4df6236855078634147679" class="flex">
+    <input type="checkbox" id="section-40f463d9d502d24b86ea6120b7030123" class="toggle"  />
+    <label for="section-40f463d9d502d24b86ea6120b7030123" class="flex">
       <a role="button" class="">
         第 5 章 K近邻</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -2587,8 +2590,8 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <input type="checkbox" id="section-94d0a5f5555d92c51e0903b148e34993" class="toggle"  />
-    <label for="section-94d0a5f5555d92c51e0903b148e34993" class="flex">
+    <input type="checkbox" id="section-5a460dc18f1e79253296cf2cd0498446" class="toggle"  />
+    <label for="section-5a460dc18f1e79253296cf2cd0498446" class="flex">
       <a role="button" class="">
         第 6 章 文本特征与模型复用</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -2680,8 +2683,8 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <input type="checkbox" id="section-544be5d1e48c4fd8b33ba2f91964c6dd" class="toggle"  />
-    <label for="section-544be5d1e48c4fd8b33ba2f91964c6dd" class="flex">
+    <input type="checkbox" id="section-96f45a8b8c8b75adc70c78026d93dbf6" class="toggle"  />
+    <label for="section-96f45a8b8c8b75adc70c78026d93dbf6" class="flex">
       <a role="button" class="">
         第 7 章 朴素贝叶斯</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -2787,8 +2790,8 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <input type="checkbox" id="section-d1884c6b3e8f1260019220c57d615371" class="toggle"  />
-    <label for="section-d1884c6b3e8f1260019220c57d615371" class="flex">
+    <input type="checkbox" id="section-22476e49d5058c3e5e7e7366b7ab676f" class="toggle"  />
+    <label for="section-22476e49d5058c3e5e7e7366b7ab676f" class="flex">
       <a role="button" class="">
         第 8 章 决策树</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -2936,8 +2939,8 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <input type="checkbox" id="section-1f0a2178f0a580ba251c7da2649aa52f" class="toggle"  />
-    <label for="section-1f0a2178f0a580ba251c7da2649aa52f" class="flex">
+    <input type="checkbox" id="section-2feb6a51cabb61dba860f45c1881386b" class="toggle"  />
+    <label for="section-2feb6a51cabb61dba860f45c1881386b" class="flex">
       <a role="button" class="">
         第 9 章 集成学习与提升算法</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -3057,8 +3060,8 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <input type="checkbox" id="section-f63defd924ef7373144c8643a39fd7b2" class="toggle"  />
-    <label for="section-f63defd924ef7373144c8643a39fd7b2" class="flex">
+    <input type="checkbox" id="section-938ae119c3849b03ccb6f91cef4243dd" class="toggle"  />
+    <label for="section-938ae119c3849b03ccb6f91cef4243dd" class="flex">
       <a role="button" class="">
         第 10 章 支持向量机</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -3067,20 +3070,6 @@ https://github.com/alex-shpak/hugo-book
 
           
   <ul>
-    
-      
-        <li>
-          
-  
-  
-
-  
-    <a href="/ml/chapter10/dce7180d4eb047d7/" class="">
-      引用</a>
-  
-
-        </li>
-      
     
       
         <li>
@@ -3222,6 +3211,20 @@ https://github.com/alex-shpak/hugo-book
         </li>
       
     
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/dce7180d4eb047d7/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
   </ul>
 
         </li>
@@ -3234,8 +3237,8 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <input type="checkbox" id="section-bdcc54d1c295c5cc69c9c851c02886ea" class="toggle"  />
-    <label for="section-bdcc54d1c295c5cc69c9c851c02886ea" class="flex">
+    <input type="checkbox" id="section-9f4d9786d4ab755fde42c64d09b0d026" class="toggle"  />
+    <label for="section-9f4d9786d4ab755fde42c64d09b0d026" class="flex">
       <a role="button" class="">
         第 11 章 聚类分析</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -3411,8 +3414,8 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <input type="checkbox" id="section-bafa8c48214ccf62d333a6d0457c5f72" class="toggle"  />
-    <label for="section-bafa8c48214ccf62d333a6d0457c5f72" class="flex">
+    <input type="checkbox" id="section-d5e78c45312818bb3abd5c19c858f7e5" class="toggle"  />
+    <label for="section-d5e78c45312818bb3abd5c19c858f7e5" class="flex">
       <a role="button" class="">
         第 12 章 降维算法</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -3462,8 +3465,8 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <input type="checkbox" id="section-d5f143889a719ce66d602e75b72bffb9" class="toggle"  />
-    <label for="section-d5f143889a719ce66d602e75b72bffb9" class="flex">
+    <input type="checkbox" id="section-a82b41bb7eb95af72bc11e8a3d668acd" class="toggle"  />
+    <label for="section-a82b41bb7eb95af72bc11e8a3d668acd" class="flex">
       <a role="button" class="">
         第 13 章 自训练与标签传播</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -3581,6 +3584,36 @@ https://github.com/alex-shpak/hugo-book
   </ul>
 </nav>
 
+  
+  <section class="book-page-qr" aria-label="页面二维码">
+    <p class="book-page-qr-title">手机扫码查看</p>
+    <a
+      class="book-page-qr-image-link"
+      href="https://mlwithme.github.io/dl/chapter06/cc35bb112783410e/"
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label="打开当前页面链接"
+    >
+      <img
+        class="book-page-qr-image"
+        src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fdl%2Fchapter06%2Fcc35bb112783410e%2F"
+        alt="当前页面链接二维码"
+        loading="lazy"
+        decoding="async"
+        referrerpolicy="no-referrer"
+      >
+    </a>
+    <button
+      class="book-page-share-btn"
+      type="button"
+      data-share-url="https://mlwithme.github.io/dl/chapter06/cc35bb112783410e/"
+      data-share-title="6.1 学习率调度器"
+    >
+      转发分享
+    </button>
+  </section>
+
+
 
 
   </aside>
@@ -3593,13 +3626,11 @@ https://github.com/alex-shpak/hugo-book
   <article class="markdown book-article"><h1 id="第-6-章-模型优化方法">第 6 章 模型优化方法<a class="anchor" href="#%e7%ac%ac-6-%e7%ab%a0-%e6%a8%a1%e5%9e%8b%e4%bc%98%e5%8c%96%e6%96%b9%e6%b3%95">#</a></h1>
 <p>在第5章内容中，我们详细介绍了深度学习模型训练过程中会用到的一些辅助技能和工具，以提高模型在训练过程的效率。在本章内容中我们将从模型优化的角度来介绍如何更快以及更好地训练一个深度学习模型。在本章内容中，我们将会详细介绍深度学习中常见的模型优化策略和方法，包括学习率调度器、梯度裁剪策略以及各种不同的归一化技术。同时，我们也将介绍基于梯度下降算法的各种改进版本，包括动量法、AdaGrad、AdaDelta和Adam等。这些算法为构建和优化深度学习模型提供了全面的指导和实践方法，并且能够帮助模型在训练过程中更快地进行收敛。</p>
 <h1 id="61-学习率调度器">6.1 学习率调度器<a class="anchor" href="#61-%e5%ad%a6%e4%b9%a0%e7%8e%87%e8%b0%83%e5%ba%a6%e5%99%a8">#</a></h1>
-<p>在深度学习模型训练过程中，当模型结果不太理想时最常用的做法之一就是动态调整学习率，即在模型的训练过程中采用某种策略让学习率动态变化。如最简单的方法可以是每迭代一轮学习率降为之前的一半。当然， 还可以通过其它一些更为复杂的策略来进行控制，例如在2017年谷歌发布的Transformer模型中，论文作者就采用了如下公式来动态调整学习率：
-</p>
+<p>在深度学习模型训练过程中，当模型结果不太理想时最常用的做法之一就是动态调整学习率，即在模型的训练过程中采用某种策略让学习率动态变化。如最简单的方法可以是每迭代一轮学习率降为之前的一半。当然， 还可以通过其它一些更为复杂的策略来进行控制，例如在2017年谷歌发布的Transformer模型中，论文作者就采用了如下公式来动态调整学习率：</p>
 $$
-\text{learning_rate}=d_{\text{model}}^{-0.5}\cdot \text{min}(\text{Steps}^{-0.5},\text{Steps}\cdot \text{
-Warmup_Steps}^{-1.5}) \tag{6-1}
-$$<p>
-其中$d_{\text{model}}$表示模型的维度，$\text{Steps}$表示小批量迭代的次数，$\text{Warmup_Steps}$表示前期线性增长的迭代次数。</p>
+\text{learning\_rate}=d\_{\text{model}}^{-0.5}\cdot \text{min}(\text{Steps}^{-0.5},\text{Steps}\cdot \text{
+Warmup\_Steps}^{-1.5}) \tag{6-1}
+$$<p>其中$d_{\text{model}}$表示模型的维度，$\text{Steps}$表示小批量迭代的次数，$\text{Warmup\_Steps}$表示前期线性增长的迭代次数。</p>
 <p>根据式(6-1)中的计算方式，模型在训练过程中学习率的变化情况将如图6-1所示。</p>
 <div align=center><img width="350" src="/images/dl/2106260913134949230.jpg"/></div><center>图 6-1. Transformer动态学习率变化图</center>
 <p>如图6-1所示，3条曲线分别表示3组参数下学习率随着迭代次的变化情况，其中到达顶点之前的线性增长阶段便是“热身”（Warmup）阶段。</p>
@@ -3609,89 +3640,89 @@ $$<p>
 <div align=center><img width="400" src="/images/dl/Hugging.png"/> </div><center> 图 6-2. Hugging Face公司标志图</center>
 <p>Transformers 框架包含了各种最先进的NLP模型，如BERT、GPT、RoBERTa、T5等，并且还提供了大量预训练的模型和权重，用户可以直接使用这些预训练模型进行各种NLP任务的微调和迁移学习，无需从头开始训练模型，这大大节省了训练时间和资源。同时，Transformers 框架支持多种语言接口，包括Python、Java、JavaScript等，使得用户可以在不同的平台和环境中使用 Transformers 框架进行NLP任务的开发和部署。此外，Transformers 框架还支持分布式训练和模型并行化，使得用户能够高效地训练大规模的NLP模型。</p>
 <p>在使用之前首先需要通过如下命令完成<code>在Transformers</code>框架的安装：</p>
-<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#ae81ff">1</span> pip install transformers</span></span></code></pre></div><p>接着通过如下方式导入其中的<code>optimization</code>模块：</p>
-<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#ae81ff">1</span> <span style="color:#f92672">from</span> transformers <span style="color:#f92672">import</span> optimization</span></span></code></pre></div><p>在<code>optimization</code>模块中，一共包含了6种常见的学习率动态调整方式，包括constant、constant_with_warmup、linear、polynomial、cosine 和cosine_with_restarts，其分别通过一个函数来返回对应的实例化对象，下面我们开始分别对其使用方法进行介绍。以下完整示例代码可以参见<code>Code/Chapter06/C01_LearningRate/mian.py</code>文件。</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> pip install transformers</span></span></code></pre></div><p>接着通过如下方式导入其中的<code>optimization</code>模块：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">from</span> <span style="color:#0e84b5;font-weight:bold">transformers</span> <span style="color:#007020;font-weight:bold">import</span> optimization</span></span></code></pre></div><p>在<code>optimization</code>模块中，一共包含了6种常见的学习率动态调整方式，包括constant、constant_with_warmup、linear、polynomial、cosine 和cosine_with_restarts，其分别通过一个函数来返回对应的实例化对象，下面我们开始分别对其使用方法进行介绍。以下完整示例代码可以参见<code>Code/Chapter06/C01_LearningRate/mian.py</code>文件。</p>
 <p><strong>1. constant策略</strong></p>
 <p>在<code>optimization</code>模块中可以通过<code>get_constant_schedule</code>函数来返回对应的常数动态学习率调整方法。顾名思义，常数学习率动态调整就是学习率是一个恒定不变的常数，也就是说相当于没用。为了方便后续对学习率的变化过程可视化，这里先随意定义一个网络模型，示例代码如下所示：</p>
-<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#ae81ff">1</span> <span style="color:#66d9ef">class</span> <span style="color:#a6e22e">Model</span>(nn<span style="color:#f92672">.</span>Module):
-</span></span><span style="display:flex;"><span><span style="color:#ae81ff">2</span>     <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">__init__</span>(self):
-</span></span><span style="display:flex;"><span><span style="color:#ae81ff">3</span>         super(Model, self)<span style="color:#f92672">.</span><span style="color:#a6e22e">__init__</span>()
-</span></span><span style="display:flex;"><span><span style="color:#ae81ff">4</span>         self<span style="color:#f92672">.</span>fc <span style="color:#f92672">=</span> nn<span style="color:#f92672">.</span>Linear(<span style="color:#ae81ff">2</span>,<span style="color:#ae81ff">5</span>)
-</span></span><span style="display:flex;"><span><span style="color:#ae81ff">5</span> 
-</span></span><span style="display:flex;"><span><span style="color:#ae81ff">6</span>     <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">forward</span>(self, x):
-</span></span><span style="display:flex;"><span><span style="color:#ae81ff">7</span>         out <span style="color:#f92672">=</span> self<span style="color:#f92672">.</span>fc(x)<span style="color:#f92672">.</span>sum()
-</span></span><span style="display:flex;"><span><span style="color:#ae81ff">8</span>         <span style="color:#66d9ef">return</span> out</span></span></code></pre></div><p>进一步，在模型训练的过程中，我们可以通过以下方式来进行使用：</p>
-<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#ae81ff">1</span> <span style="color:#66d9ef">if</span> __name__ <span style="color:#f92672">==</span> <span style="color:#e6db74">&#39;__main__&#39;</span>:
-</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">2</span>     x <span style="color:#f92672">=</span> torch<span style="color:#f92672">.</span>rand([<span style="color:#ae81ff">3</span>, <span style="color:#ae81ff">2</span>])
-</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">3</span>     model <span style="color:#f92672">=</span> Model()
-</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">4</span>     steps <span style="color:#f92672">=</span> <span style="color:#ae81ff">1000</span>
-</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">5</span>     optimizer <span style="color:#f92672">=</span> torch<span style="color:#f92672">.</span>optim<span style="color:#f92672">.</span>Adam(model<span style="color:#f92672">.</span>parameters(), lr<span style="color:#f92672">=</span><span style="color:#ae81ff">1.0</span>)
-</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">6</span>     scheduler <span style="color:#f92672">=</span> optimization<span style="color:#f92672">.</span>get_constant_schedule(optimizer, last_epoch<span style="color:#f92672">=-</span><span style="color:#ae81ff">1</span>)
-</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">7</span>     name,lrs <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;constant&#34;</span>,[]
-</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">8</span>     <span style="color:#66d9ef">for</span> _ <span style="color:#f92672">in</span> range(steps):
-</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">9</span>         loss <span style="color:#f92672">=</span> model(x)
-</span></span><span style="display:flex;"><span><span style="color:#ae81ff">10</span>         optimizer<span style="color:#f92672">.</span>zero_grad()
-</span></span><span style="display:flex;"><span><span style="color:#ae81ff">11</span>         loss<span style="color:#f92672">.</span>backward()
-</span></span><span style="display:flex;"><span><span style="color:#ae81ff">12</span>         optimizer<span style="color:#f92672">.</span>step()
-</span></span><span style="display:flex;"><span><span style="color:#ae81ff">13</span>         scheduler<span style="color:#f92672">.</span>step()
-</span></span><span style="display:flex;"><span><span style="color:#ae81ff">14</span>         lrs<span style="color:#f92672">.</span>append(scheduler<span style="color:#f92672">.</span>get_last_lr())</span></span></code></pre></div><p>在上述代码中，第6行便是用来得到常数学习率变化的实例化对象，其中<code>last_epoch</code>用于在恢复训练时指定上次结束时的epoch数量，因为有些方法学习率的变化会与epoch数有关，如果不考虑模型恢复的话指定为-1即可，这部分内容将在本节末尾处进行详细介绍。第13行是对学习率进行更新。第14行是保存每次变化后的学习率便于可视化。</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">Model</span>(nn<span style="color:#666">.</span>Module):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">__init__</span>(<span style="color:#007020">self</span>):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>         <span style="color:#007020">super</span>(Model, <span style="color:#007020">self</span>)<span style="color:#666">.</span><span style="color:#06287e">__init__</span>()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>fc <span style="color:#666">=</span> nn<span style="color:#666">.</span>Linear(<span style="color:#40a070">2</span>,<span style="color:#40a070">5</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">5</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">6</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">forward</span>(<span style="color:#007020">self</span>, x):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">7</span>         out <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>fc(x)<span style="color:#666">.</span>sum()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">8</span>         <span style="color:#007020;font-weight:bold">return</span> out</span></span></code></pre></div><p>进一步，在模型训练的过程中，我们可以通过以下方式来进行使用：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">if</span> <span style="color:#bb60d5">__name__</span> <span style="color:#666">==</span> <span style="color:#4070a0">&#39;__main__&#39;</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     x <span style="color:#666">=</span> torch<span style="color:#666">.</span>rand([<span style="color:#40a070">3</span>, <span style="color:#40a070">2</span>])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>     model <span style="color:#666">=</span> Model()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>     steps <span style="color:#666">=</span> <span style="color:#40a070">1000</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>     optimizer <span style="color:#666">=</span> torch<span style="color:#666">.</span>optim<span style="color:#666">.</span>Adam(model<span style="color:#666">.</span>parameters(), lr<span style="color:#666">=</span><span style="color:#40a070">1.0</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>     scheduler <span style="color:#666">=</span> optimization<span style="color:#666">.</span>get_constant_schedule(optimizer, last_epoch<span style="color:#666">=-</span><span style="color:#40a070">1</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>     name,lrs <span style="color:#666">=</span> <span style="color:#4070a0">&#34;constant&#34;</span>,[]
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>     <span style="color:#007020;font-weight:bold">for</span> _ <span style="color:#007020;font-weight:bold">in</span> <span style="color:#007020">range</span>(steps):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>         loss <span style="color:#666">=</span> model(x)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>         optimizer<span style="color:#666">.</span>zero_grad()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>         loss<span style="color:#666">.</span>backward()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>         optimizer<span style="color:#666">.</span>step()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>         scheduler<span style="color:#666">.</span>step()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>         lrs<span style="color:#666">.</span>append(scheduler<span style="color:#666">.</span>get_last_lr())</span></span></code></pre></div><p>在上述代码中，第6行便是用来得到常数学习率变化的实例化对象，其中<code>last_epoch</code>用于在恢复训练时指定上次结束时的epoch数量，因为有些方法学习率的变化会与epoch数有关，如果不考虑模型恢复的话指定为-1即可，这部分内容将在本节末尾处进行详细介绍。第13行是对学习率进行更新。第14行是保存每次变化后的学习率便于可视化。</p>
 <p>在整个迭代过程结束之后便可以得到如图6-3所示的可视化结果。</p>
 <div align=center><img width="400" src="/images/dl/22011103990.jpg"/></div><center>图 6-3. constant学习率变化图</center>
 <p>如图6-3所示，模型在整个训练过程中学习率并没有发生变化，一直保持着1.0的初始值。</p>
 <p><strong>2. constant_with_warmup策略</strong></p>
 <p>在<code>optimization</code>模块中可以通过<code>get_constant_schedule_with_warmup</code>函数来返回constant_with_warmup策略对应的动态学习率调整实例化方法。从名字可以看出，该方法最终得到的是一个带warmup的常数学习率变化。在模型训练的过程中可以通过以下方式进行使用：</p>
-<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#ae81ff">1</span> scheduler <span style="color:#f92672">=</span> optimization<span style="color:#f92672">.</span>get_constant_schedule_with_warmup(
-</span></span><span style="display:flex;"><span><span style="color:#ae81ff">2</span>             optimizer, num_warmup_steps<span style="color:#f92672">=</span><span style="color:#ae81ff">300</span>)</span></span></code></pre></div><p>其中<code>num_warmup_steps</code>表示warmup的迭代次数。</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> scheduler <span style="color:#666">=</span> optimization<span style="color:#666">.</span>get_constant_schedule_with_warmup(
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>             optimizer, num_warmup_steps<span style="color:#666">=</span><span style="color:#40a070">300</span>)</span></span></code></pre></div><p>其中<code>num_warmup_steps</code>表示warmup的迭代次数。</p>
 <p>最后，该方法的可视化结果如图6-4所示。</p>
 <div align=center><img width="400" src="/images/dl/22011147540.jpg"/></div><center>图 6-4. constant_with_warmup学习率变化图学习率变化图</center>
 <p>从图6-4可以看出，constant_with_warmup仅仅只是在最初的300个steps中以线性的方式进行增长，之后便是同样保持为常数。</p>
 <p><strong>3. linear策略</strong></p>
 <p>从名字可以看出，该方法最终得到的是一个带warmup的线性变换学习率调整方法。在模型训练的过程中，可以通过以下方式进行使用：</p>
-<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#ae81ff">1</span> scheduler <span style="color:#f92672">=</span> optimization<span style="color:#f92672">.</span>get_linear_schedule_with_warmup(optimizer,
-</span></span><span style="display:flex;"><span><span style="color:#ae81ff">2</span>                        num_warmup_steps<span style="color:#f92672">=</span><span style="color:#ae81ff">300</span>,num_training_steps<span style="color:#f92672">=</span>steps)</span></span></code></pre></div><p>其中<code>num_training_steps</code>表示整个模型训练的step数。</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> scheduler <span style="color:#666">=</span> optimization<span style="color:#666">.</span>get_linear_schedule_with_warmup(optimizer,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>                        num_warmup_steps<span style="color:#666">=</span><span style="color:#40a070">300</span>,num_training_steps<span style="color:#666">=</span>steps)</span></span></code></pre></div><p>其中<code>num_training_steps</code>表示整个模型训练的step数。</p>
 <p>最后，该方法的可视化结果如图6-5所示。</p>
 <div align=center><img width="400" src="/images/dl/22011107675.jpg"/></div><center>图 6-5. linear学习率变化图学习率变化图</center>
 <p>从图6-5可以看出，linear动态学习率调整策略先是在最初的300个迭代过程中以线性方式进行增长，之后便是同样以线性的方式进行递减，直到衰减到0为止。</p>
 <p><strong>4. polynomial策略</strong></p>
 <p>在<code>optimization</code>模块中可以通过<code>get_polynomial_decay_schedule_with_warmup</code>函数来返回带热身的多项式动态学习率调整实例化方法。在模型训练的过程中可以通过以下方式进行使用：</p>
-<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#ae81ff">1</span> scheduler <span style="color:#f92672">=</span> optimization<span style="color:#f92672">.</span>get_polynomial_decay_schedule_with_warmup(optimizer,
-</span></span><span style="display:flex;"><span><span style="color:#ae81ff">2</span>             num_warmup_steps<span style="color:#f92672">=</span><span style="color:#ae81ff">300</span>,num_training_steps<span style="color:#f92672">=</span>steps, lr_end <span style="color:#f92672">=</span> <span style="color:#ae81ff">1e-7</span>, power<span style="color:#f92672">=</span><span style="color:#ae81ff">3</span>)</span></span></code></pre></div><p>其中<code>power</code>表示多项式的次数，当<code>power=1</code>时（默认）等价于<code>get_linear_schedule_with_warmup</code>函数。<code>lr_end</code>表示学习率衰减到的最小值。</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> scheduler <span style="color:#666">=</span> optimization<span style="color:#666">.</span>get_polynomial_decay_schedule_with_warmup(optimizer,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>             num_warmup_steps<span style="color:#666">=</span><span style="color:#40a070">300</span>,num_training_steps<span style="color:#666">=</span>steps, lr_end <span style="color:#666">=</span> <span style="color:#40a070">1e-7</span>, power<span style="color:#666">=</span><span style="color:#40a070">3</span>)</span></span></code></pre></div><p>其中<code>power</code>表示多项式的次数，当<code>power=1</code>时（默认）等价于<code>get_linear_schedule_with_warmup</code>函数。<code>lr_end</code>表示学习率衰减到的最小值。</p>
 <p>最后，该方法的可视化结果如图6-6所示。</p>
 <div align=center><img width="400" src="/images/dl/22011204924.jpg"/></div><center>图 6-6. polynomial学习率变化图（power=3）</center>
 <p>从图6-6可以看出，polynomial动态学习率调整策略先是在最初的300个迭代过程中以线性方式进行增长，之后便是多项式的方式进行递减，直到衰减到<code>lr_end</code>后保持不变。</p>
 <p><strong>5. cosine策略</strong></p>
 <p>在<code>optimization</code>模块中可以通过<code>get_cosine_schedule_with_warmup</code>来返回基于cosine函数变化的动态学习率调整方法。在模型训练过程中可以通过如下方式进行使用：</p>
-<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#ae81ff">1</span> scheduler <span style="color:#f92672">=</span> optimization<span style="color:#f92672">.</span>get_cosine_schedule_with_warmup(optimizer,
-</span></span><span style="display:flex;"><span><span style="color:#ae81ff">2</span>               num_warmup_steps<span style="color:#f92672">=</span><span style="color:#ae81ff">300</span>,num_training_steps<span style="color:#f92672">=</span>steps,num_cycles<span style="color:#f92672">=</span><span style="color:#ae81ff">2</span>)</span></span></code></pre></div><p>其中<code>num_cycles</code>表示循环的次数。</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> scheduler <span style="color:#666">=</span> optimization<span style="color:#666">.</span>get_cosine_schedule_with_warmup(optimizer,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>               num_warmup_steps<span style="color:#666">=</span><span style="color:#40a070">300</span>,num_training_steps<span style="color:#666">=</span>steps,num_cycles<span style="color:#666">=</span><span style="color:#40a070">2</span>)</span></span></code></pre></div><p>其中<code>num_cycles</code>表示循环的次数。</p>
 <p>最后，该方法的可视化结果如图6-7所示。</p>
 <div align=center><img width="400" src="/images/dl/22011247160.jpg"/></div><center>图 6-7. cosine学习率变化图（num_cycles=2）</center>
 <p>从图6-7可以看出，cosine动态学习率调整策略先是在最初的300个steps中以线性的方式进行增长，之后便是以余弦函数的方式进行周期性变换。</p>
 <p><strong>6. cosine_with_restarts策略</strong></p>
 <p>在<code>optimization</code>模块中可以通过<code>get_cosine_with_hard_restarts_schedule_with_warmup</code>来返回基于cosine函数的硬重启动态学习率调整方法。所谓硬重启是指学习率衰减到0之后直接变回到最大值再次进行衰减。在模型训练过程中可以通过如下方式进行使用：</p>
-<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#ae81ff">1</span> scheduler <span style="color:#f92672">=</span> optimization<span style="color:#f92672">.</span>get_cosine_with_hard_restarts_schedule_with_warmup(optimizer,
-</span></span><span style="display:flex;"><span><span style="color:#ae81ff">2</span>           num_warmup_steps<span style="color:#f92672">=</span><span style="color:#ae81ff">300</span>,num_training_steps<span style="color:#f92672">=</span>steps,num_cycles<span style="color:#f92672">=</span><span style="color:#ae81ff">2</span>)</span></span></code></pre></div><p>最后，该方法的可视化结果如图6-8所示。</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> scheduler <span style="color:#666">=</span> optimization<span style="color:#666">.</span>get_cosine_with_hard_restarts_schedule_with_warmup(optimizer,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>           num_warmup_steps<span style="color:#666">=</span><span style="color:#40a070">300</span>,num_training_steps<span style="color:#666">=</span>steps,num_cycles<span style="color:#666">=</span><span style="color:#40a070">2</span>)</span></span></code></pre></div><p>最后，该方法的可视化结果如图6-8所示。</p>
 <div align=center><img width="400" src="/images/dl/22011208587.jpg"/></div><center>图 6-8. cosine_with_restarts学习率变化图（num_cycles=2）</center>
 <p>从图6-8可以看出，cosine_with_restarts动态学习率调整策略先是在最初的300个迭代过程中以线性方式进行增长，之后便是以余弦函数的方式进行周期性衰减，当达到最小值时再直接恢复到初始学习率。</p>
 <p><strong>7. get_scheduler方法</strong></p>
 <p>通过上述6个函数便能够返回得到相应的动态学习率调整方法。当然，如果你并不需要修改一些特定的参数，例如多项式中的<code>power</code>和余弦变换中的<code>num_cycles</code>等，那么还可以使用一个更加简单的统一接口来调用上述6个方法，示例代码如下所示：</p>
-<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#ae81ff">1</span> <span style="color:#f92672">from</span> transformers <span style="color:#f92672">import</span> get_scheduler
-</span></span><span style="display:flex;"><span><span style="color:#ae81ff">2</span> <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">get_scheduler</span>(
-</span></span><span style="display:flex;"><span><span style="color:#ae81ff">3</span>     name: Union[str, SchedulerType],
-</span></span><span style="display:flex;"><span><span style="color:#ae81ff">4</span>     optimizer: Optimizer,
-</span></span><span style="display:flex;"><span><span style="color:#ae81ff">5</span>     num_warmup_steps: Optional[int] <span style="color:#f92672">=</span> <span style="color:#66d9ef">None</span>,
-</span></span><span style="display:flex;"><span><span style="color:#ae81ff">6</span>     num_training_steps: Optional[int] <span style="color:#f92672">=</span> <span style="color:#66d9ef">None</span>):</span></span></code></pre></div><p>在上述代码中，第3行<code>name</code>表示指定学习率调整的方式，可选项就是上面介绍的6种，并且通过constant、constant_with_warmup、linear、polynomial、cosine 和cosine_with_restarts这6个关键字就能够返回得到对应的方法；而对于其它特定的参数则会保持每个方法对应的默认值。例如通过<code>get_scheduler</code>函数返回<code>get_cosine_with_hard_restarts_schedule_with_warmup</code>时，<code>num_cycles</code>则为1</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">from</span> <span style="color:#0e84b5;font-weight:bold">transformers</span> <span style="color:#007020;font-weight:bold">import</span> get_scheduler
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">get_scheduler</span>(
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>     name: Union[<span style="color:#007020">str</span>, SchedulerType],
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span>     optimizer: Optimizer,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">5</span>     num_warmup_steps: Optional[<span style="color:#007020">int</span>] <span style="color:#666">=</span> <span style="color:#007020;font-weight:bold">None</span>,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">6</span>     num_training_steps: Optional[<span style="color:#007020">int</span>] <span style="color:#666">=</span> <span style="color:#007020;font-weight:bold">None</span>):</span></span></code></pre></div><p>在上述代码中，第3行<code>name</code>表示指定学习率调整的方式，可选项就是上面介绍的6种，并且通过constant、constant_with_warmup、linear、polynomial、cosine 和cosine_with_restarts这6个关键字就能够返回得到对应的方法；而对于其它特定的参数则会保持每个方法对应的默认值。例如通过<code>get_scheduler</code>函数返回<code>get_cosine_with_hard_restarts_schedule_with_warmup</code>时，<code>num_cycles</code>则为1</p>
 <p>例如可以以如下方式来使用cosine_with_restarts策略进行学习率动态调整：</p>
-<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#ae81ff">1</span> scheduler <span style="color:#f92672">=</span> get_scheduler(name<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;cosine_with_restarts&#34;</span>, optimizer<span style="color:#f92672">=</span>optimizer,
-</span></span><span style="display:flex;"><span><span style="color:#ae81ff">2</span>                          num_warmup_steps<span style="color:#f92672">=</span><span style="color:#ae81ff">300</span>, num_training_steps<span style="color:#f92672">=</span>steps)</span></span></code></pre></div><h2 id="612-实现原理">6.1.2 实现原理<a class="anchor" href="#612-%e5%ae%9e%e7%8e%b0%e5%8e%9f%e7%90%86">#</a></h2>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> scheduler <span style="color:#666">=</span> get_scheduler(name<span style="color:#666">=</span><span style="color:#4070a0">&#34;cosine_with_restarts&#34;</span>, optimizer<span style="color:#666">=</span>optimizer,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>                          num_warmup_steps<span style="color:#666">=</span><span style="color:#40a070">300</span>, num_training_steps<span style="color:#666">=</span>steps)</span></span></code></pre></div><h2 id="612-实现原理">6.1.2 实现原理<a class="anchor" href="#612-%e5%ae%9e%e7%8e%b0%e5%8e%9f%e7%90%86">#</a></h2>
 <p>在介绍完Transformes框架中常见的6种学习率动态调整方法及其使用示例后，我们再来简单地一下其背后的实现原理。对于Transformers框架中所实现的这6种学习率动态调整方法本质上也是基于PyTorch框架中的<code>LambdaLR</code>类而来，其定义</p>
-<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#ae81ff">1</span> <span style="color:#f92672">from</span> torch.optim.lr_scheduler <span style="color:#f92672">import</span> LambdaLR
-</span></span><span style="display:flex;"><span><span style="color:#ae81ff">2</span> <span style="color:#66d9ef">class</span> <span style="color:#a6e22e">LambdaLR</span>(_LRScheduler):
-</span></span><span style="display:flex;"><span><span style="color:#ae81ff">3</span>     <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">__init__</span>(self, optimizer, lr_lambda, last_epoch<span style="color:#f92672">=-</span><span style="color:#ae81ff">1</span>):
-</span></span><span style="display:flex;"><span><span style="color:#ae81ff">4</span>         <span style="color:#66d9ef">pass</span></span></span></code></pre></div><p>通过这个接口，只需要指定优化器、学习率系数的计算方式（函数）以及<code>last_epoch</code>参数来实例化类<code>LambdaLR</code>便可以返回得到相应的实例化对象。下面我们开始逐一进行介绍。</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">from</span> <span style="color:#0e84b5;font-weight:bold">torch.optim.lr_scheduler</span> <span style="color:#007020;font-weight:bold">import</span> LambdaLR
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">LambdaLR</span>(_LRScheduler):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">__init__</span>(<span style="color:#007020">self</span>, optimizer, lr_lambda, last_epoch<span style="color:#666">=-</span><span style="color:#40a070">1</span>):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span>         <span style="color:#007020;font-weight:bold">pass</span></span></span></code></pre></div><p>通过这个接口，只需要指定优化器、学习率系数的计算方式（函数）以及<code>last_epoch</code>参数来实例化类<code>LambdaLR</code>便可以返回得到相应的实例化对象。下面我们开始逐一进行介绍。</p>
 <p><strong>1. constant策略实现</strong></p>
 <p>对于constant的计算过程来说比较简单， 只需要传入一个返回值始终为1.0的匿名函数即可。因为返回的1将会作为一个系数乘以初始设定的学习率，以此来保证学习率不发生改变，实现代码如下所示：</p>
-<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#ae81ff">1</span> <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">get_constant_schedule</span>(Optimizer, last_epoch <span style="color:#f92672">=</span> <span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>):
-</span></span><span style="display:flex;"><span><span style="color:#ae81ff">2</span>     <span style="color:#66d9ef">return</span> LambdaLR(optimizer, <span style="color:#66d9ef">lambda</span> _: <span style="color:#ae81ff">1</span>, last_epoch<span style="color:#f92672">=</span>last_epoch)</span></span></code></pre></div><p>在上述代码中，<code>lambda _:1</code>就是对应返回值为1的匿名函数，其中<code>_</code>表示不需要传入参数。</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">get_constant_schedule</span>(Optimizer, last_epoch <span style="color:#666">=</span> <span style="color:#666">-</span><span style="color:#40a070">1</span>):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">return</span> LambdaLR(optimizer, <span style="color:#007020;font-weight:bold">lambda</span> _: <span style="color:#40a070">1</span>, last_epoch<span style="color:#666">=</span>last_epoch)</span></span></code></pre></div><p>在上述代码中，<code>lambda _:1</code>就是对应返回值为1的匿名函数，其中<code>_</code>表示不需要传入参数。</p>
 <p><strong>2. constant_with_warmup策略实现</strong></p>
 <p><subscribe>52</subscribe></p>
 <br>
@@ -3755,6 +3786,34 @@ $$<p>
             Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
           );
         }
+
+        document.querySelectorAll(".book-page-share-btn").forEach(function (btn) {
+          btn.addEventListener("click", async function () {
+            var url = btn.dataset.shareUrl;
+            var title = btn.dataset.shareTitle || document.title;
+            var originalText = btn.textContent;
+
+            try {
+              if (navigator.share) {
+                await navigator.share({ title: title, url: url });
+                return;
+              }
+
+              if (navigator.clipboard && url) {
+                await navigator.clipboard.writeText(url);
+                btn.textContent = "链接已复制";
+                window.setTimeout(function () {
+                  btn.textContent = originalText;
+                }, 1500);
+              }
+            } catch (err) {
+              btn.textContent = "分享失败";
+              window.setTimeout(function () {
+                btn.textContent = originalText;
+              }, 1500);
+            }
+          });
+        });
       });
     </script>
   
@@ -3785,6 +3844,36 @@ $$<p>
     <li><a href="#612-实现原理">6.1.2 实现原理</a></li>
   </ul>
 </nav>
+
+  
+  <section class="book-page-qr" aria-label="页面二维码">
+    <p class="book-page-qr-title">手机扫码查看</p>
+    <a
+      class="book-page-qr-image-link"
+      href="https://mlwithme.github.io/dl/chapter06/cc35bb112783410e/"
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label="打开当前页面链接"
+    >
+      <img
+        class="book-page-qr-image"
+        src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fdl%2Fchapter06%2Fcc35bb112783410e%2F"
+        alt="当前页面链接二维码"
+        loading="lazy"
+        decoding="async"
+        referrerpolicy="no-referrer"
+      >
+    </a>
+    <button
+      class="book-page-share-btn"
+      type="button"
+      data-share-url="https://mlwithme.github.io/dl/chapter06/cc35bb112783410e/"
+      data-share-title="6.1 学习率调度器"
+    >
+      转发分享
+    </button>
+  </section>
+
 
 
 

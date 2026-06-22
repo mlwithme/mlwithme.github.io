@@ -16,13 +16,14 @@ https://github.com/alex-shpak/hugo-book
 如图10-5所示便是自注意力机制的结构示意图，其核心过程就是通过Q（Query）和K（Value）计算得到注意力权重；然后再作用于V（Value）得到整个权重和输出，即序列中每个位置的向量表示。整个过程依旧如同9.10.3节内容中介绍的一致，查询Q先在键K中依次与其中的每一个键进行匹配计算便得到了一个权重向量，然后再将该向量作用于V便得到了最后的输出。不同点在于此处还引入了权重缩放和注意力掩码。
 图 10-5 自注意力机制结构图 具体地，自注意力机制的计算过程为 $$ \text{Attention}(Q,K,V)=\text{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V\in\mathbb{R}^{n\times d_v} \tag{10-7} $$ 其中$Q\in\mathbb{R}^{n\times d_{q}}$，$K\in\mathbb{R}^{n\times d_{k}}$，$V\in\mathbb{R}^{n\times d_{v}}$，三者的每一行均可以看做是一个字符的向量表示。
 根据式(10-7)可知$d_q=d_k$，而除以$\sqrt{d_k}$的过程就是图10-5中所指的缩放（Scale）过程。之所以要进行缩放一方面是因为，如果两个向量的维度为$d$，且每个维度均是独立的随机变量并都满足均值为0方差为1，那么这两个向量点积的均值则为0方差则为$d$，而除以$\sqrt{d_k}$则可以保证方差仍旧为1；另一方面，$d$越大则$QK^T$的值可能越大，而这便会导致$\text{Softmax}$函数的梯度变得非常小不利于网络训练，因此可以通过缩放来消除这部分影响。
-Proof:
-较大的输入值会导致梯度消失或爆炸的问题。通过除以 $\sqrt{d_k}$，可以使点积的数值保持在一个适中的范围，从而稳定梯度，使得模型训练更加稳定。
-假设向量$q$和向量$k$的维度均为$d$，且它们的每个维度均是独立的随机变量，则此时有 $$ \text{E}[q_i]=\text{E}[k_i]=0;\;\text{var}[q_i]=\text{var}[k_i]=1; \text{where}\;\;i\in[0,d] $$ 则此时有 $$ \begin{aligned} \text{E}[q\cdot k]&amp;=\text{E}\left[\sum_{i=1}^dq_ik_i\right]=\sum_{i=1}^d\text{E}[q_ik_i]=\sum_{i=1}^d\text{E}[q_i]\text{E}[k_i]=0\\[2ex] \text{var}[q\cdot k]&amp;=\text{var}\left[\sum_{i=1}^dq_ik_i\right]=\sum_{i=1}^d\text{var}[q_ik_i]=\sum_{i=1}^d\text{var}[q_i]\text{var}[k_i]=\sum_{i=1}^d1=d \end{aligned} $$ 同时，对于图10-5中的Mask操作是用于在多个样本并行计算时忽略掉填充位置上的注意力权重，这与9.10.4节内容中介绍的一致。
+同时，对于图10-5中的Mask操作是用于在多个样本并行计算时忽略掉填充位置上的注意力权重，这与9.10.4节内容中介绍的一致。
 2. 自注意力计算过程
 在清楚自注意力机制的原理后我们再通过一个实际的计算图示来从直观上理解自注意机制到底是怎么回事。现在，假设输入序列为“我 是 谁”，且已经通过某种方式得到了1个形状为$3\times4$的矩阵来进行表示，即图中的$X$。在通过图10-6所示的过程便能够计算得到$Q$、$K$和$V$这3个矩阵。
 图10-6 $Q$、$K$和$V$计算示意图 从图10-6的计算过程可以看出，$Q$、$K$和$V$ 其实就是输入$X$分别进行3次线性变换而得到，不过这一计算过程仅仅只局限于Encoder和Decoder在各自输入部分利用自注意力机制进行编码时的过程， Encoder和Decoder交互部分的$Q$、$K$和$V$另有指代。此时，对于计算得到的$Q$、$K$和$V$可以理解为这是对于同一个输入不同的3种状态。在计算得到$Q$、$K$和$V$之后便可以根据式(10-7)计算得到注意力权重矩阵，如图10-7所示。
 图 10-7 注意力权重矩阵计算过程图（已经$\text{Softmax}$处理） 如图10-7所示，在经过上述计算过程后我们便得到了注意力权重矩阵。此时，对于权重矩阵的第1行来说，表示在编码“我”这个位置上的信息时应该将0.7的注意力放在“我”上，0.2的注意力放在“是”上，0.1的注意力放在“谁”上。同理，对于权重矩阵第 3 行来说，表示在编码“谁”这个位置上的信息时应该将 0.2 的注意力放在“我”上，将 0.1 的注意力放在“是”上，将 0.7的注意力放在“谁”上。从这一过程可以看出，通过这个权重矩阵模型在编码对应位置上的信息时，就能够知道应该以何种方式将注意力分配到不同的位置上。
+在通过图10-7所示的过程计算得到权重矩阵后，便可以将其作用于$V$ ，进而得到自注意力机制的最终编码输出结果，计算过程如图10-8所示。
+图 10-8 自注意力输出结果 从图10-8可以看出，对于最终输出“是”的编码向量来说，它其实就是原始 “我 是 谁”3 个向量的加权和，而这也就体现了在对“是”进行编码时注意力 权重分配的全过程。可以看出通过这种自注意力机制的方式的确解决了作者所提出 的“传统序列模型在编码过程中都需顺序进行的弊端”的问题。
+10.2.3 多头注意力机制# 从上述计算过程可以发现，自注意力机制在对当前位置的信息进行编码时会将注意力过度集中于自身所在的位置，因为在计算注意力权重时自己与自己所在位置的相似性是最高的，而这可能导致模型忽略了其它位置上的信息。
 ">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
@@ -37,13 +38,14 @@ Proof:
 如图10-5所示便是自注意力机制的结构示意图，其核心过程就是通过Q（Query）和K（Value）计算得到注意力权重；然后再作用于V（Value）得到整个权重和输出，即序列中每个位置的向量表示。整个过程依旧如同9.10.3节内容中介绍的一致，查询Q先在键K中依次与其中的每一个键进行匹配计算便得到了一个权重向量，然后再将该向量作用于V便得到了最后的输出。不同点在于此处还引入了权重缩放和注意力掩码。
 图 10-5 自注意力机制结构图 具体地，自注意力机制的计算过程为 $$ \text{Attention}(Q,K,V)=\text{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V\in\mathbb{R}^{n\times d_v} \tag{10-7} $$ 其中$Q\in\mathbb{R}^{n\times d_{q}}$，$K\in\mathbb{R}^{n\times d_{k}}$，$V\in\mathbb{R}^{n\times d_{v}}$，三者的每一行均可以看做是一个字符的向量表示。
 根据式(10-7)可知$d_q=d_k$，而除以$\sqrt{d_k}$的过程就是图10-5中所指的缩放（Scale）过程。之所以要进行缩放一方面是因为，如果两个向量的维度为$d$，且每个维度均是独立的随机变量并都满足均值为0方差为1，那么这两个向量点积的均值则为0方差则为$d$，而除以$\sqrt{d_k}$则可以保证方差仍旧为1；另一方面，$d$越大则$QK^T$的值可能越大，而这便会导致$\text{Softmax}$函数的梯度变得非常小不利于网络训练，因此可以通过缩放来消除这部分影响。
-Proof:
-较大的输入值会导致梯度消失或爆炸的问题。通过除以 $\sqrt{d_k}$，可以使点积的数值保持在一个适中的范围，从而稳定梯度，使得模型训练更加稳定。
-假设向量$q$和向量$k$的维度均为$d$，且它们的每个维度均是独立的随机变量，则此时有 $$ \text{E}[q_i]=\text{E}[k_i]=0;\;\text{var}[q_i]=\text{var}[k_i]=1; \text{where}\;\;i\in[0,d] $$ 则此时有 $$ \begin{aligned} \text{E}[q\cdot k]&amp;=\text{E}\left[\sum_{i=1}^dq_ik_i\right]=\sum_{i=1}^d\text{E}[q_ik_i]=\sum_{i=1}^d\text{E}[q_i]\text{E}[k_i]=0\\[2ex] \text{var}[q\cdot k]&amp;=\text{var}\left[\sum_{i=1}^dq_ik_i\right]=\sum_{i=1}^d\text{var}[q_ik_i]=\sum_{i=1}^d\text{var}[q_i]\text{var}[k_i]=\sum_{i=1}^d1=d \end{aligned} $$ 同时，对于图10-5中的Mask操作是用于在多个样本并行计算时忽略掉填充位置上的注意力权重，这与9.10.4节内容中介绍的一致。
+同时，对于图10-5中的Mask操作是用于在多个样本并行计算时忽略掉填充位置上的注意力权重，这与9.10.4节内容中介绍的一致。
 2. 自注意力计算过程
 在清楚自注意力机制的原理后我们再通过一个实际的计算图示来从直观上理解自注意机制到底是怎么回事。现在，假设输入序列为“我 是 谁”，且已经通过某种方式得到了1个形状为$3\times4$的矩阵来进行表示，即图中的$X$。在通过图10-6所示的过程便能够计算得到$Q$、$K$和$V$这3个矩阵。
 图10-6 $Q$、$K$和$V$计算示意图 从图10-6的计算过程可以看出，$Q$、$K$和$V$ 其实就是输入$X$分别进行3次线性变换而得到，不过这一计算过程仅仅只局限于Encoder和Decoder在各自输入部分利用自注意力机制进行编码时的过程， Encoder和Decoder交互部分的$Q$、$K$和$V$另有指代。此时，对于计算得到的$Q$、$K$和$V$可以理解为这是对于同一个输入不同的3种状态。在计算得到$Q$、$K$和$V$之后便可以根据式(10-7)计算得到注意力权重矩阵，如图10-7所示。
-图 10-7 注意力权重矩阵计算过程图（已经$\text{Softmax}$处理） 如图10-7所示，在经过上述计算过程后我们便得到了注意力权重矩阵。此时，对于权重矩阵的第1行来说，表示在编码“我”这个位置上的信息时应该将0.7的注意力放在“我”上，0.2的注意力放在“是”上，0.1的注意力放在“谁”上。同理，对于权重矩阵第 3 行来说，表示在编码“谁”这个位置上的信息时应该将 0.2 的注意力放在“我”上，将 0.1 的注意力放在“是”上，将 0.7的注意力放在“谁”上。从这一过程可以看出，通过这个权重矩阵模型在编码对应位置上的信息时，就能够知道应该以何种方式将注意力分配到不同的位置上。">
+图 10-7 注意力权重矩阵计算过程图（已经$\text{Softmax}$处理） 如图10-7所示，在经过上述计算过程后我们便得到了注意力权重矩阵。此时，对于权重矩阵的第1行来说，表示在编码“我”这个位置上的信息时应该将0.7的注意力放在“我”上，0.2的注意力放在“是”上，0.1的注意力放在“谁”上。同理，对于权重矩阵第 3 行来说，表示在编码“谁”这个位置上的信息时应该将 0.2 的注意力放在“我”上，将 0.1 的注意力放在“是”上，将 0.7的注意力放在“谁”上。从这一过程可以看出，通过这个权重矩阵模型在编码对应位置上的信息时，就能够知道应该以何种方式将注意力分配到不同的位置上。
+在通过图10-7所示的过程计算得到权重矩阵后，便可以将其作用于$V$ ，进而得到自注意力机制的最终编码输出结果，计算过程如图10-8所示。
+图 10-8 自注意力输出结果 从图10-8可以看出，对于最终输出“是”的编码向量来说，它其实就是原始 “我 是 谁”3 个向量的加权和，而这也就体现了在对“是”进行编码时注意力 权重分配的全过程。可以看出通过这种自注意力机制的方式的确解决了作者所提出 的“传统序列模型在编码过程中都需顺序进行的弊端”的问题。
+10.2.3 多头注意力机制# 从上述计算过程可以发现，自注意力机制在对当前位置的信息进行编码时会将注意力过度集中于自身所在的位置，因为在计算注意力权重时自己与自己所在位置的相似性是最高的，而这可能导致模型忽略了其它位置上的信息。">
 	<meta property="og:locale" content="zh_CN">
 	<meta property="og:type" content="article">
 		<meta property="article:section" content="dl">
@@ -58,23 +60,24 @@ Proof:
 如图10-5所示便是自注意力机制的结构示意图，其核心过程就是通过Q（Query）和K（Value）计算得到注意力权重；然后再作用于V（Value）得到整个权重和输出，即序列中每个位置的向量表示。整个过程依旧如同9.10.3节内容中介绍的一致，查询Q先在键K中依次与其中的每一个键进行匹配计算便得到了一个权重向量，然后再将该向量作用于V便得到了最后的输出。不同点在于此处还引入了权重缩放和注意力掩码。
 图 10-5 自注意力机制结构图 具体地，自注意力机制的计算过程为 $$ \text{Attention}(Q,K,V)=\text{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V\in\mathbb{R}^{n\times d_v} \tag{10-7} $$ 其中$Q\in\mathbb{R}^{n\times d_{q}}$，$K\in\mathbb{R}^{n\times d_{k}}$，$V\in\mathbb{R}^{n\times d_{v}}$，三者的每一行均可以看做是一个字符的向量表示。
 根据式(10-7)可知$d_q=d_k$，而除以$\sqrt{d_k}$的过程就是图10-5中所指的缩放（Scale）过程。之所以要进行缩放一方面是因为，如果两个向量的维度为$d$，且每个维度均是独立的随机变量并都满足均值为0方差为1，那么这两个向量点积的均值则为0方差则为$d$，而除以$\sqrt{d_k}$则可以保证方差仍旧为1；另一方面，$d$越大则$QK^T$的值可能越大，而这便会导致$\text{Softmax}$函数的梯度变得非常小不利于网络训练，因此可以通过缩放来消除这部分影响。
-Proof:
-较大的输入值会导致梯度消失或爆炸的问题。通过除以 $\sqrt{d_k}$，可以使点积的数值保持在一个适中的范围，从而稳定梯度，使得模型训练更加稳定。
-假设向量$q$和向量$k$的维度均为$d$，且它们的每个维度均是独立的随机变量，则此时有 $$ \text{E}[q_i]=\text{E}[k_i]=0;\;\text{var}[q_i]=\text{var}[k_i]=1; \text{where}\;\;i\in[0,d] $$ 则此时有 $$ \begin{aligned} \text{E}[q\cdot k]&amp;=\text{E}\left[\sum_{i=1}^dq_ik_i\right]=\sum_{i=1}^d\text{E}[q_ik_i]=\sum_{i=1}^d\text{E}[q_i]\text{E}[k_i]=0\\[2ex] \text{var}[q\cdot k]&amp;=\text{var}\left[\sum_{i=1}^dq_ik_i\right]=\sum_{i=1}^d\text{var}[q_ik_i]=\sum_{i=1}^d\text{var}[q_i]\text{var}[k_i]=\sum_{i=1}^d1=d \end{aligned} $$ 同时，对于图10-5中的Mask操作是用于在多个样本并行计算时忽略掉填充位置上的注意力权重，这与9.10.4节内容中介绍的一致。
+同时，对于图10-5中的Mask操作是用于在多个样本并行计算时忽略掉填充位置上的注意力权重，这与9.10.4节内容中介绍的一致。
 2. 自注意力计算过程
 在清楚自注意力机制的原理后我们再通过一个实际的计算图示来从直观上理解自注意机制到底是怎么回事。现在，假设输入序列为“我 是 谁”，且已经通过某种方式得到了1个形状为$3\times4$的矩阵来进行表示，即图中的$X$。在通过图10-6所示的过程便能够计算得到$Q$、$K$和$V$这3个矩阵。
 图10-6 $Q$、$K$和$V$计算示意图 从图10-6的计算过程可以看出，$Q$、$K$和$V$ 其实就是输入$X$分别进行3次线性变换而得到，不过这一计算过程仅仅只局限于Encoder和Decoder在各自输入部分利用自注意力机制进行编码时的过程， Encoder和Decoder交互部分的$Q$、$K$和$V$另有指代。此时，对于计算得到的$Q$、$K$和$V$可以理解为这是对于同一个输入不同的3种状态。在计算得到$Q$、$K$和$V$之后便可以根据式(10-7)计算得到注意力权重矩阵，如图10-7所示。
-图 10-7 注意力权重矩阵计算过程图（已经$\text{Softmax}$处理） 如图10-7所示，在经过上述计算过程后我们便得到了注意力权重矩阵。此时，对于权重矩阵的第1行来说，表示在编码“我”这个位置上的信息时应该将0.7的注意力放在“我”上，0.2的注意力放在“是”上，0.1的注意力放在“谁”上。同理，对于权重矩阵第 3 行来说，表示在编码“谁”这个位置上的信息时应该将 0.2 的注意力放在“我”上，将 0.1 的注意力放在“是”上，将 0.7的注意力放在“谁”上。从这一过程可以看出，通过这个权重矩阵模型在编码对应位置上的信息时，就能够知道应该以何种方式将注意力分配到不同的位置上。">
-	<meta itemprop="wordCount" content="216">
+图 10-7 注意力权重矩阵计算过程图（已经$\text{Softmax}$处理） 如图10-7所示，在经过上述计算过程后我们便得到了注意力权重矩阵。此时，对于权重矩阵的第1行来说，表示在编码“我”这个位置上的信息时应该将0.7的注意力放在“我”上，0.2的注意力放在“是”上，0.1的注意力放在“谁”上。同理，对于权重矩阵第 3 行来说，表示在编码“谁”这个位置上的信息时应该将 0.2 的注意力放在“我”上，将 0.1 的注意力放在“是”上，将 0.7的注意力放在“谁”上。从这一过程可以看出，通过这个权重矩阵模型在编码对应位置上的信息时，就能够知道应该以何种方式将注意力分配到不同的位置上。
+在通过图10-7所示的过程计算得到权重矩阵后，便可以将其作用于$V$ ，进而得到自注意力机制的最终编码输出结果，计算过程如图10-8所示。
+图 10-8 自注意力输出结果 从图10-8可以看出，对于最终输出“是”的编码向量来说，它其实就是原始 “我 是 谁”3 个向量的加权和，而这也就体现了在对“是”进行编码时注意力 权重分配的全过程。可以看出通过这种自注意力机制的方式的确解决了作者所提出 的“传统序列模型在编码过程中都需顺序进行的弊端”的问题。
+10.2.3 多头注意力机制# 从上述计算过程可以发现，自注意力机制在对当前位置的信息进行编码时会将注意力过度集中于自身所在的位置，因为在计算注意力权重时自己与自己所在位置的相似性是最高的，而这可能导致模型忽略了其它位置上的信息。">
+	<meta itemprop="wordCount" content="199">
 
 <title>10.2 Transformer网络 • 《从零学AI指南手册》</title>
 <link rel="icon" href="/favicon.png" >
 <link rel="manifest" href="/manifest.json">
 <link rel="canonical" href="https://mlwithme.github.io/dl/chapter10/4987d1044939480d/">
-<link rel="stylesheet" href="/book.min.6097ccf1d338ddfaa037d2f96478059a71fa573d0f917d128bab595efea338ca.css" integrity="sha256-YJfM8dM43fqgN9L5ZHgFmnH6Vz0PkX0Si6tZXv6jOMo=" crossorigin="anonymous">
+<link rel="stylesheet" href="/book.min.42c24c4d3a9678b613e9cd06eeb162677bb05b99dfe5a650b15a9e11d21b72fd.css" integrity="sha256-QsJMTTqWeLYT6c0G7rFiZ3uwW5nf5aZQsVqeEdIbcv0=" crossorigin="anonymous">
 
 
-  <script defer type="module" src="/en.search.min.ffaad769e546b38d39820301bb9e5c193822f7bf0f46a855602e4e14707802e0.js" integrity="sha256-/6rXaeVGs405ggMBu55cGTgi978PRqhVYC5OFHB4AuA=" crossorigin="anonymous"></script>
+  <script defer type="module" src="/en.search.min.d6b14dbcd48978b2c41611d06e5387dc896ddf705e423dd9152973bfd6c6096a.js" integrity="sha256-1rFNvNSJeLLEFhHQblOH3Ilt33BeQj3ZFSlzv9bGCWo=" crossorigin="anonymous"></script>
 
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-23SZ6E8VY7"></script>
 <script>
@@ -144,8 +147,8 @@ Proof:
   
 
   
-    <input type="checkbox" id="section-253e26e732e57a78f635dcf47df3d0a3" class="toggle"  />
-    <label for="section-253e26e732e57a78f635dcf47df3d0a3" class="flex">
+    <input type="checkbox" id="section-279cf10e5100caa4f65ba3f7dd8888a4" class="toggle"  />
+    <label for="section-279cf10e5100caa4f65ba3f7dd8888a4" class="flex">
       <a role="button" class="">
         第 1 章 RAG 基础概念</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -195,8 +198,8 @@ Proof:
   
 
   
-    <input type="checkbox" id="section-810ee5a2a3a24c9b7c25ab5324ae7db7" class="toggle"  />
-    <label for="section-810ee5a2a3a24c9b7c25ab5324ae7db7" class="flex">
+    <input type="checkbox" id="section-83c662c2764f1c19f8005eab77fee110" class="toggle"  />
+    <label for="section-83c662c2764f1c19f8005eab77fee110" class="flex">
       <a role="button" class="">
         第 2 章 大模型接入与使用</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -274,8 +277,8 @@ Proof:
   
 
   
-    <input type="checkbox" id="section-ed1727f01d0e40dc9b7961b72e42160e" class="toggle"  />
-    <label for="section-ed1727f01d0e40dc9b7961b72e42160e" class="flex">
+    <input type="checkbox" id="section-1e583d7a26333453241d87c5c16592bd" class="toggle"  />
+    <label for="section-1e583d7a26333453241d87c5c16592bd" class="flex">
       <a role="button" class="">
         第 3 章 文档标准化与语义检索</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -381,8 +384,8 @@ Proof:
   
 
   
-    <input type="checkbox" id="section-caaf9d8eb5e5559f7ca8bb11c41da71a" class="toggle"  />
-    <label for="section-caaf9d8eb5e5559f7ca8bb11c41da71a" class="flex">
+    <input type="checkbox" id="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="toggle"  />
+    <label for="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="flex">
       <a role="button" class="">
         第 4 章 RAG 与 Agent</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -577,8 +580,8 @@ Proof:
   
 
   
-    <input type="checkbox" id="section-a9b664bcf9e1dab8add449268565f466" class="toggle"  />
-    <label for="section-a9b664bcf9e1dab8add449268565f466" class="flex">
+    <input type="checkbox" id="section-cf7621e8efb1f3153eaca44a113dcdb9" class="toggle"  />
+    <label for="section-cf7621e8efb1f3153eaca44a113dcdb9" class="flex">
       <a role="button" class="">
         第 1 章 深度学习简介</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -642,8 +645,8 @@ Proof:
   
 
   
-    <input type="checkbox" id="section-e6e0db5d4bc28bd97dfe8d5210249e63" class="toggle"  />
-    <label for="section-e6e0db5d4bc28bd97dfe8d5210249e63" class="flex">
+    <input type="checkbox" id="section-f9bf1a68c19405769f9c4a1495708a55" class="toggle"  />
+    <label for="section-f9bf1a68c19405769f9c4a1495708a55" class="flex">
       <a role="button" class="">
         第 2 章 环境配置</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -707,8 +710,8 @@ Proof:
   
 
   
-    <input type="checkbox" id="section-0a2ca47f15332c8b06ae83247328edb4" class="toggle"  />
-    <label for="section-0a2ca47f15332c8b06ae83247328edb4" class="flex">
+    <input type="checkbox" id="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="toggle"  />
+    <label for="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="flex">
       <a role="button" class="">
         第 3 章 深度学习基础</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -912,8 +915,8 @@ Proof:
   
 
   
-    <input type="checkbox" id="section-95b7e7417bf2b821a1b760975d3acc22" class="toggle"  />
-    <label for="section-95b7e7417bf2b821a1b760975d3acc22" class="flex">
+    <input type="checkbox" id="section-7a12cee83820a928df00362d70804a97" class="toggle"  />
+    <label for="section-7a12cee83820a928df00362d70804a97" class="flex">
       <a role="button" class="">
         第 4 章 卷积神经网络</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -1075,8 +1078,8 @@ Proof:
   
 
   
-    <input type="checkbox" id="section-17076fe90a2d84e207bbd0c829983325" class="toggle"  />
-    <label for="section-17076fe90a2d84e207bbd0c829983325" class="flex">
+    <input type="checkbox" id="section-be9addfd3a15c372d609d09cabb94159" class="toggle"  />
+    <label for="section-be9addfd3a15c372d609d09cabb94159" class="flex">
       <a role="button" class="">
         第 5 章 模型训练与复用</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -1196,8 +1199,8 @@ Proof:
   
 
   
-    <input type="checkbox" id="section-2d091d454d5c3f03f5e0a202c37cc226" class="toggle"  />
-    <label for="section-2d091d454d5c3f03f5e0a202c37cc226" class="flex">
+    <input type="checkbox" id="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="toggle"  />
+    <label for="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="flex">
       <a role="button" class="">
         第 6 章 模型优化方法</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -1359,8 +1362,8 @@ Proof:
   
 
   
-    <input type="checkbox" id="section-f2f78ba4851131558fc284d927542d28" class="toggle"  />
-    <label for="section-f2f78ba4851131558fc284d927542d28" class="flex">
+    <input type="checkbox" id="section-517b751d7c44a7ac77d25d295ed44271" class="toggle"  />
+    <label for="section-517b751d7c44a7ac77d25d295ed44271" class="flex">
       <a role="button" class="">
         第 7 章 循环神经网络</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -1466,8 +1469,8 @@ Proof:
   
 
   
-    <input type="checkbox" id="section-49992cff6143e64ae5d7f2209dcfb054" class="toggle"  />
-    <label for="section-49992cff6143e64ae5d7f2209dcfb054" class="flex">
+    <input type="checkbox" id="section-b9b861f64ba32bc68dfb977497de37d9" class="toggle"  />
+    <label for="section-b9b861f64ba32bc68dfb977497de37d9" class="flex">
       <a role="button" class="">
         第 8 章 时序与模型融合</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -1573,8 +1576,8 @@ Proof:
   
 
   
-    <input type="checkbox" id="section-ca07c572acb4d7fd40854f5b367c247b" class="toggle"  />
-    <label for="section-ca07c572acb4d7fd40854f5b367c247b" class="flex">
+    <input type="checkbox" id="section-e54a1e28b1438b8266637bcb8dac1a44" class="toggle"  />
+    <label for="section-e54a1e28b1438b8266637bcb8dac1a44" class="flex">
       <a role="button" class="">
         第 9 章 自然语言处理</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -1764,8 +1767,8 @@ Proof:
   
 
   
-    <input type="checkbox" id="section-8cdec04c2fd8683c5c7373c78d943528" class="toggle" checked />
-    <label for="section-8cdec04c2fd8683c5c7373c78d943528" class="flex">
+    <input type="checkbox" id="section-f6636b2f9dc1df93b9fa64dd201716d9" class="toggle" checked />
+    <label for="section-f6636b2f9dc1df93b9fa64dd201716d9" class="flex">
       <a role="button" class="">
         第10章 现代神经网络</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -2100,8 +2103,8 @@ Proof:
   
 
   
-    <input type="checkbox" id="section-0a3254d1ca9963fd6975aa5bc0b3edcc" class="toggle"  />
-    <label for="section-0a3254d1ca9963fd6975aa5bc0b3edcc" class="flex">
+    <input type="checkbox" id="section-48f56957e94e3cf66f3022103a7dd0ff" class="toggle"  />
+    <label for="section-48f56957e94e3cf66f3022103a7dd0ff" class="flex">
       <a role="button" class="">
         第 1 章 环境配置</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -2151,8 +2154,8 @@ Proof:
   
 
   
-    <input type="checkbox" id="section-4569258198323c16bc8a634ea44fd5db" class="toggle"  />
-    <label for="section-4569258198323c16bc8a634ea44fd5db" class="flex">
+    <input type="checkbox" id="section-56a896338a1c41249d22a3efa0e0063c" class="toggle"  />
+    <label for="section-56a896338a1c41249d22a3efa0e0063c" class="flex">
       <a role="button" class="">
         第 2 章 线性回归</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -2272,8 +2275,8 @@ Proof:
   
 
   
-    <input type="checkbox" id="section-a6ca5e2f846ebd900d1a868e6718dc82" class="toggle"  />
-    <label for="section-a6ca5e2f846ebd900d1a868e6718dc82" class="flex">
+    <input type="checkbox" id="section-ccd0dc9386ea80613d4cedf91b30058d" class="toggle"  />
+    <label for="section-ccd0dc9386ea80613d4cedf91b30058d" class="flex">
       <a role="button" class="">
         第 3 章 逻辑回归</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -2365,8 +2368,8 @@ Proof:
   
 
   
-    <input type="checkbox" id="section-9f462f716bd0e46ef79984b356eeb5a2" class="toggle"  />
-    <label for="section-9f462f716bd0e46ef79984b356eeb5a2" class="flex">
+    <input type="checkbox" id="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="toggle"  />
+    <label for="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="flex">
       <a role="button" class="">
         第 4 章 模型的改善与泛化</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -2486,8 +2489,8 @@ Proof:
   
 
   
-    <input type="checkbox" id="section-327db48e4f4df6236855078634147679" class="toggle"  />
-    <label for="section-327db48e4f4df6236855078634147679" class="flex">
+    <input type="checkbox" id="section-40f463d9d502d24b86ea6120b7030123" class="toggle"  />
+    <label for="section-40f463d9d502d24b86ea6120b7030123" class="flex">
       <a role="button" class="">
         第 5 章 K近邻</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -2593,8 +2596,8 @@ Proof:
   
 
   
-    <input type="checkbox" id="section-94d0a5f5555d92c51e0903b148e34993" class="toggle"  />
-    <label for="section-94d0a5f5555d92c51e0903b148e34993" class="flex">
+    <input type="checkbox" id="section-5a460dc18f1e79253296cf2cd0498446" class="toggle"  />
+    <label for="section-5a460dc18f1e79253296cf2cd0498446" class="flex">
       <a role="button" class="">
         第 6 章 文本特征与模型复用</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -2686,8 +2689,8 @@ Proof:
   
 
   
-    <input type="checkbox" id="section-544be5d1e48c4fd8b33ba2f91964c6dd" class="toggle"  />
-    <label for="section-544be5d1e48c4fd8b33ba2f91964c6dd" class="flex">
+    <input type="checkbox" id="section-96f45a8b8c8b75adc70c78026d93dbf6" class="toggle"  />
+    <label for="section-96f45a8b8c8b75adc70c78026d93dbf6" class="flex">
       <a role="button" class="">
         第 7 章 朴素贝叶斯</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -2793,8 +2796,8 @@ Proof:
   
 
   
-    <input type="checkbox" id="section-d1884c6b3e8f1260019220c57d615371" class="toggle"  />
-    <label for="section-d1884c6b3e8f1260019220c57d615371" class="flex">
+    <input type="checkbox" id="section-22476e49d5058c3e5e7e7366b7ab676f" class="toggle"  />
+    <label for="section-22476e49d5058c3e5e7e7366b7ab676f" class="flex">
       <a role="button" class="">
         第 8 章 决策树</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -2942,8 +2945,8 @@ Proof:
   
 
   
-    <input type="checkbox" id="section-1f0a2178f0a580ba251c7da2649aa52f" class="toggle"  />
-    <label for="section-1f0a2178f0a580ba251c7da2649aa52f" class="flex">
+    <input type="checkbox" id="section-2feb6a51cabb61dba860f45c1881386b" class="toggle"  />
+    <label for="section-2feb6a51cabb61dba860f45c1881386b" class="flex">
       <a role="button" class="">
         第 9 章 集成学习与提升算法</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -3063,8 +3066,8 @@ Proof:
   
 
   
-    <input type="checkbox" id="section-f63defd924ef7373144c8643a39fd7b2" class="toggle"  />
-    <label for="section-f63defd924ef7373144c8643a39fd7b2" class="flex">
+    <input type="checkbox" id="section-938ae119c3849b03ccb6f91cef4243dd" class="toggle"  />
+    <label for="section-938ae119c3849b03ccb6f91cef4243dd" class="flex">
       <a role="button" class="">
         第 10 章 支持向量机</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -3073,20 +3076,6 @@ Proof:
 
           
   <ul>
-    
-      
-        <li>
-          
-  
-  
-
-  
-    <a href="/ml/chapter10/dce7180d4eb047d7/" class="">
-      引用</a>
-  
-
-        </li>
-      
     
       
         <li>
@@ -3228,6 +3217,20 @@ Proof:
         </li>
       
     
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/dce7180d4eb047d7/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
   </ul>
 
         </li>
@@ -3240,8 +3243,8 @@ Proof:
   
 
   
-    <input type="checkbox" id="section-bdcc54d1c295c5cc69c9c851c02886ea" class="toggle"  />
-    <label for="section-bdcc54d1c295c5cc69c9c851c02886ea" class="flex">
+    <input type="checkbox" id="section-9f4d9786d4ab755fde42c64d09b0d026" class="toggle"  />
+    <label for="section-9f4d9786d4ab755fde42c64d09b0d026" class="flex">
       <a role="button" class="">
         第 11 章 聚类分析</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -3417,8 +3420,8 @@ Proof:
   
 
   
-    <input type="checkbox" id="section-bafa8c48214ccf62d333a6d0457c5f72" class="toggle"  />
-    <label for="section-bafa8c48214ccf62d333a6d0457c5f72" class="flex">
+    <input type="checkbox" id="section-d5e78c45312818bb3abd5c19c858f7e5" class="toggle"  />
+    <label for="section-d5e78c45312818bb3abd5c19c858f7e5" class="flex">
       <a role="button" class="">
         第 12 章 降维算法</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -3468,8 +3471,8 @@ Proof:
   
 
   
-    <input type="checkbox" id="section-d5f143889a719ce66d602e75b72bffb9" class="toggle"  />
-    <label for="section-d5f143889a719ce66d602e75b72bffb9" class="flex">
+    <input type="checkbox" id="section-a82b41bb7eb95af72bc11e8a3d668acd" class="toggle"  />
+    <label for="section-a82b41bb7eb95af72bc11e8a3d668acd" class="flex">
       <a role="button" class="">
         第 13 章 自训练与标签传播</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
@@ -3590,6 +3593,36 @@ Proof:
   </ul>
 </nav>
 
+  
+  <section class="book-page-qr" aria-label="页面二维码">
+    <p class="book-page-qr-title">手机扫码查看</p>
+    <a
+      class="book-page-qr-image-link"
+      href="https://mlwithme.github.io/dl/chapter10/4987d1044939480d/"
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label="打开当前页面链接"
+    >
+      <img
+        class="book-page-qr-image"
+        src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fdl%2Fchapter10%2F4987d1044939480d%2F"
+        alt="当前页面链接二维码"
+        loading="lazy"
+        decoding="async"
+        referrerpolicy="no-referrer"
+      >
+    </a>
+    <button
+      class="book-page-share-btn"
+      type="button"
+      data-share-url="https://mlwithme.github.io/dl/chapter10/4987d1044939480d/"
+      data-share-title="10.2 Transformer网络"
+    >
+      转发分享
+    </button>
+  </section>
+
+
 
 
   </aside>
@@ -3602,12 +3635,12 @@ Proof:
   <article class="markdown book-article"><h1 id="102-transformer网络">10.2 Transformer网络<a class="anchor" href="#102-transformer%e7%bd%91%e7%bb%9c">#</a></h1>
 <p>在前面几章内容中，我们陆续介绍了多个传统的经典模型，包括CNN、RNN和LSTM等来处理自然语言领域中的相关任务。但是从整体上来看，在2017年之前相关任务模型的发展仍旧主要集中在各个模块的拼接组合上，而这些基础模型并没有出现本质上的改变。正是在这个时间点，一项突破性的技术——Transformer架构——出现了。Transformer架构的出现是自然语言处理领域的一个重大转折点，它所提出的多头注意力机制为后续的研究和发展开辟了全新的方向。尽管Transformer最初是应用于在文本数据上的序列到序列学习，但现在已经推广到各种现代的深度学习中，例如语言、视觉、语音和强化学习等领域[1]。</p>
 <h2 id="1021-transformer动机">10.2.1 Transformer动机<a class="anchor" href="#1021-transformer%e5%8a%a8%e6%9c%ba">#</a></h2>
-<p>根据<a href="dl/Chapter07/88ba4e03337b4233">第7章</a>内容可知，由于传统的Encoder-Decoder架构在建模过程中，下一个时刻的计算过程会依赖于上一个时刻的输出，即整个过程需要按序进行，而这种固有的属性就限制了模型就不能以并行的方式进行计算[2]。尽管相关研究工作已经能够使得传统的循环神经网络在计算效率上有了很大的提升，但是本质的问题依旧没有得到解决。</p>
+<p>根据<a href="/dl/Chapter07/88ba4e03337b4233">第7章</a>内容可知，由于传统的Encoder-Decoder架构在建模过程中，下一个时刻的计算过程会依赖于上一个时刻的输出，即整个过程需要按序进行，而这种固有的属性就限制了模型就不能以并行的方式进行计算[2]。尽管相关研究工作已经能够使得传统的循环神经网络在计算效率上有了很大的提升，但是本质的问题依旧没有得到解决。</p>
 <p>基于这样的动机，阿希什（Vaswani）等人[2]于2017年提出了一种全新的Transformer架构来解决这一问题。Transformer架构的优点在于它完全摈弃了传统的循环结构，取而代之的是只通过注意力机制来计算模型输入与输出的隐含向量表示， 而这种注意力的名字就是大名鼎鼎的自注意力机制（Self-attention）。所谓自注意力机制是指通过某种运算来直接并行计算得到序列每个位置上的注意力权重，然后再以加权和的形式计算得到每个位置上隐含向量表示。最终，Transformer架构就是基于这种自注意力机制所构建形成。</p>
 <h2 id="1022-自注意力机制">10.2.2 自注意力机制<a class="anchor" href="#1022-%e8%87%aa%e6%b3%a8%e6%84%8f%e5%8a%9b%e6%9c%ba%e5%88%b6">#</a></h2>
-<p>自注意力机制在论文中也被称之为缩放点积注意力（Scaled Dot-Product Attention），它可以描述为将Query和一系列的Key-Value对映射到某个输出的过程，而这个输出的向量就是根据Query和Key计算得到的权重作用于Value上的加权和。此处Query、Key和Value含义同<a href="dl/Chapter09/5bcd8b0920414f34">9.10节</a>内容中介绍的一致。下面开始分别介绍自注意力机制和多头注意力机制的原理。</p>
+<p>自注意力机制在论文中也被称之为缩放点积注意力（Scaled Dot-Product Attention），它可以描述为将Query和一系列的Key-Value对映射到某个输出的过程，而这个输出的向量就是根据Query和Key计算得到的权重作用于Value上的加权和。此处Query、Key和Value含义同<a href="/dl/Chapter09/5bcd8b0920414f34">9.10节</a>内容中介绍的一致。下面开始分别介绍自注意力机制和多头注意力机制的原理。</p>
 <p><strong>1. 自注意力机制</strong></p>
-<p>如图10-5所示便是自注意力机制的结构示意图，其核心过程就是通过Q（Query）和K（Value）计算得到注意力权重；然后再作用于V（Value）得到整个权重和输出，即序列中每个位置的向量表示。整个过程依旧如同<a href="dl/Chapter09/5bcd8b0920414f34?id=_9103-%e6%b3%a8%e6%84%8f%e5%8a%9b%e8%ae%a1%e7%ae%97%e6%a1%86%e6%9e%b6">9.10.3节</a>内容中介绍的一致，查询Q先在键K中依次与其中的每一个键进行匹配计算便得到了一个权重向量，然后再将该向量作用于V便得到了最后的输出。不同点在于此处还引入了权重缩放和注意力掩码。</p>
+<p>如图10-5所示便是自注意力机制的结构示意图，其核心过程就是通过Q（Query）和K（Value）计算得到注意力权重；然后再作用于V（Value）得到整个权重和输出，即序列中每个位置的向量表示。整个过程依旧如同<a href="/dl/Chapter09/5bcd8b0920414f34?id=_9103-%e6%b3%a8%e6%84%8f%e5%8a%9b%e8%ae%a1%e7%ae%97%e6%a1%86%e6%9e%b6">9.10.3节</a>内容中介绍的一致，查询Q先在键K中依次与其中的每一个键进行匹配计算便得到了一个权重向量，然后再将该向量作用于V便得到了最后的输出。不同点在于此处还引入了权重缩放和注意力掩码。</p>
 <div align=center><img width="230" src="/images/dl/230904230810.jpg"/> </div><center>图 10-5 自注意力机制结构图</center>
 <p>具体地，自注意力机制的计算过程为
 </p>
@@ -3617,23 +3650,7 @@ $$
 $$<p>
 其中$Q\in\mathbb{R}^{n\times d_{q}}$，$K\in\mathbb{R}^{n\times d_{k}}$，$V\in\mathbb{R}^{n\times d_{v}}$，三者的每一行均可以看做是一个字符的向量表示。</p>
 <p>根据式(10-7)可知$d_q=d_k$，而除以$\sqrt{d_k}$的过程就是图10-5中所指的缩放（Scale）过程。之所以要进行缩放一方面是因为，如果两个向量的维度为$d$，且每个维度均是独立的随机变量并都满足均值为0方差为1，那么这两个向量点积的均值则为0方差则为$d$，而除以$\sqrt{d_k}$则可以保证方差仍旧为1；另一方面，$d$越大则$QK^T$的值可能越大，而这便会导致$\text{Softmax}$函数的梯度变得非常小不利于网络训练，因此可以通过缩放来消除这部分影响。</p>
-<hr>
-<p><font color = red>Proof:</font></p>
-<p>较大的输入值会导致梯度消失或爆炸的问题。通过除以 $\sqrt{d_k}$，可以使点积的数值保持在一个适中的范围，从而稳定梯度，使得模型训练更加稳定。</p>
-<p>假设向量$q$和向量$k$的维度均为$d$，且它们的每个维度均是独立的随机变量，则此时有
-</p>
-$$
-\text{E}[q_i]=\text{E}[k_i]=0;\;\text{var}[q_i]=\text{var}[k_i]=1; \text{where}\;\;i\in[0,d]
-$$<p>
-则此时有
-</p>
-$$
-\begin{aligned}
-\text{E}[q\cdot k]&=\text{E}\left[\sum_{i=1}^dq_ik_i\right]=\sum_{i=1}^d\text{E}[q_ik_i]=\sum_{i=1}^d\text{E}[q_i]\text{E}[k_i]=0\\[2ex]
-\text{var}[q\cdot k]&=\text{var}\left[\sum_{i=1}^dq_ik_i\right]=\sum_{i=1}^d\text{var}[q_ik_i]=\sum_{i=1}^d\text{var}[q_i]\text{var}[k_i]=\sum_{i=1}^d1=d
-\end{aligned}
-$$<hr>
-<p>同时，对于图10-5中的Mask操作是用于在多个样本并行计算时忽略掉填充位置上的注意力权重，这与<a href="dl/Chapter09/5bcd8b0920414f34?id=_9104-%e5%a1%ab%e5%85%85%e6%b3%a8%e6%84%8f%e5%8a%9b%e6%8e%a9%e7%a0%81">9.10.4节</a>内容中介绍的一致。</p>
+<p>同时，对于图10-5中的Mask操作是用于在多个样本并行计算时忽略掉填充位置上的注意力权重，这与<a href="/dl/Chapter09/5bcd8b0920414f34?id=_9104-%e5%a1%ab%e5%85%85%e6%b3%a8%e6%84%8f%e5%8a%9b%e6%8e%a9%e7%a0%81">9.10.4节</a>内容中介绍的一致。</p>
 <p><strong>2. 自注意力计算过程</strong></p>
 <p>在清楚自注意力机制的原理后我们再通过一个实际的计算图示来从直观上理解自注意机制到底是怎么回事。现在，假设输入序列为“我  是  谁”，且已经通过某种方式得到了1个形状为$3\times4$的矩阵来进行表示，即图中的$X$。在通过图10-6所示的过程便能够计算得到$Q$、$K$和$V$这3个矩阵。</p>
 <div align=center><img width="380" src="/images/dl/230905210111.jpg"/> </div><center>图10-6 $Q$、$K$和$V$计算示意图</center>
@@ -3667,7 +3684,7 @@ $$<p>
 <div align=center><img width="620" src="/images/dl/the-annotated-transformer_119_1.png"/> </div><center>图 10-11 多头注意力权重可视化结果[3]</center>
 <p>如图10-11所示是一张在真实场景下多头注意力中不同权重矩阵的可视化结果。可以发现，在不同的权重矩阵中注意力值的分配并不相同，并且可以明显地看出在第3张注意力权重可视化结果中，模型将过多的注意力集中到了每个字符自身所在的位置而忽略了其它位置上的信息。因此，在一定上相同维度中多头$h$的值越大，整个模型的表达能力就越强，越能使得模型对于注意力权重进行合理分配。</p>
 <h2 id="1024-输入编码">10.2.4 输入编码<a class="anchor" href="#1024-%e8%be%93%e5%85%a5%e7%bc%96%e7%a0%81">#</a></h2>
-<p>在介绍完多头注意力机制的相关原理之后我们再来看Transformer中是如何对输入进行嵌入表示的。根据<a href="dl/Chapter09/d4703d990f8d4fed">9.2节</a>内容可知，在文本序列进行建模时首先要做的便是如何对其进行向量换表示。但是在自注意力机制中，由于它并不能感知到序列中字符的顺序变换，因此还需要通过位置编码来解决这一问题。</p>
+<p>在介绍完多头注意力机制的相关原理之后我们再来看Transformer中是如何对输入进行嵌入表示的。根据<a href="/dl/Chapter09/d4703d990f8d4fed">9.2节</a>内容可知，在文本序列进行建模时首先要做的便是如何对其进行向量换表示。但是在自注意力机制中，由于它并不能感知到序列中字符的顺序变换，因此还需要通过位置编码来解决这一问题。</p>
 <p><strong>1. Token Embedding</strong></p>
 <p>在深度学习中，对文本进行向量化最常见的做法便是将各个字符通过一个嵌入层映射到低维稠密的向量空间。因此，在Transformer模型中，首先第一步要做的同样是将文本以这样的方式进行向量化表示，并且将其称之为字符嵌入（Token Embedding），如图10-12所示。</p>
 <div align=center><img width="340" src="/images/dl/230906203335.jpg"/> </div><center>图 10-12 Token Embedding示意图</center>
@@ -3690,7 +3707,7 @@ $$
 \text{PE}_{\text{pos},2i+1}&=\cos(\text{pos}/10000^{2i/d_{\text{model}}})
 \end{aligned}\tag{10-9}
 $$<p>
-其中$\text{PE}$就是这个位置编码矩阵， $\text{pos}\in [0,\text{max_len})$ 表示具体的某一个位置，$i\in[0,d_{\text{model}}/2]$表示具体的某一维度。</p>
+其中$\text{PE}$就是这个位置编码矩阵， $\text{pos}\in [0,\text{max\_len})$ 表示具体的某一个位置，$i\in[0,d_{\text{model}}/2]$表示具体的某一维度。</p>
 <p>最终，在加入这种非常数的位置编码信息后，便可以得到如图10-17所示的对比结果。</p>
 <div align=center><img width="340" src="/images/dl/230906205141.jpg"/> </div><center>图 10-17 非常数位置编码示意图</center>
 <p>从图10-17可以看出，在交换序列位置前后与同一个权重矩阵进行线性变换后得到的结果便截然不同。因此，这样表明通过位置编码可以弥补自注意力机制不能捕捉序列时序信息的缺陷。</p>
@@ -3758,6 +3775,34 @@ $$<p>
             Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
           );
         }
+
+        document.querySelectorAll(".book-page-share-btn").forEach(function (btn) {
+          btn.addEventListener("click", async function () {
+            var url = btn.dataset.shareUrl;
+            var title = btn.dataset.shareTitle || document.title;
+            var originalText = btn.textContent;
+
+            try {
+              if (navigator.share) {
+                await navigator.share({ title: title, url: url });
+                return;
+              }
+
+              if (navigator.clipboard && url) {
+                await navigator.clipboard.writeText(url);
+                btn.textContent = "链接已复制";
+                window.setTimeout(function () {
+                  btn.textContent = originalText;
+                }, 1500);
+              }
+            } catch (err) {
+              btn.textContent = "分享失败";
+              window.setTimeout(function () {
+                btn.textContent = originalText;
+              }, 1500);
+            }
+          });
+        });
       });
     </script>
   
@@ -3791,6 +3836,36 @@ $$<p>
     <li><a href="#1025-小结">10.2.5 小结</a></li>
   </ul>
 </nav>
+
+  
+  <section class="book-page-qr" aria-label="页面二维码">
+    <p class="book-page-qr-title">手机扫码查看</p>
+    <a
+      class="book-page-qr-image-link"
+      href="https://mlwithme.github.io/dl/chapter10/4987d1044939480d/"
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label="打开当前页面链接"
+    >
+      <img
+        class="book-page-qr-image"
+        src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fdl%2Fchapter10%2F4987d1044939480d%2F"
+        alt="当前页面链接二维码"
+        loading="lazy"
+        decoding="async"
+        referrerpolicy="no-referrer"
+      >
+    </a>
+    <button
+      class="book-page-share-btn"
+      type="button"
+      data-share-url="https://mlwithme.github.io/dl/chapter10/4987d1044939480d/"
+      data-share-title="10.2 Transformer网络"
+    >
+      转发分享
+    </button>
+  </section>
+
 
 
 
