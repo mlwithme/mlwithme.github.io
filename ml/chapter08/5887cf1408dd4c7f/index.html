@@ -1,0 +1,3935 @@
+<!DOCTYPE html>
+<html lang="zh_CN" dir="ltr">
+<head>
+  <!--
+Made with Book Theme
+https://github.com/alex-shpak/hugo-book
+-->
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="8.3 决策树生成之ID3与C4.5# 在正式介绍决策树的生成算法前，我们先将8.1.1节中介绍的几个概念重新梳理一下，同时再通过一个例子来理解整个计算过程，以便于后续更好地掌握决策树的生成算法。
+8.3.1 基本概念与定义# 1. 信息熵
+设$X$是一个取值有限的离散型随机变量（例如8.1.1节中可能夺冠的16支球队），其概率分布为$P(X=x_i)=p_i,i=1,2,...,n$（每支球队可能夺冠的概率），则随机变量$X$的信息熵定义为 $$ H(X)=-\sum\limits_{i=1}^{n}{{{p}_{i}}}\log {{p}_{i}}\tag{8-5} $$其中，若$p_i=0$，定义$0\log_20=0$，并且通常$\log$取$2$为底或$e$为底时，其熵的单位分别称为比特（Bit）或纳特（Nat）。如无特殊说明，默认以$2$为底。
+2. 条件熵
+设有随机变量$(X,Y)$，其联合概率分布$P(X={{x}_{i}},Y={{y}_{j}})={{p}_{ij}}$，其中$i=1,2,...,n，j=1,2,...,m$，条件熵$H(Y|X)$表示在已知随机变量$X$的条件下，随机变量$Y$的不确定性，其定义为 $$ H(Y|X)=\sum\limits_{i=1}^{n}{{{p}_{i}}}H(Y|X={{x}_{i}})\tag{8-6} $$其中，$p_i=P(X=x_i),i=1,2,...,n$。
+同时，当信息熵和条件熵中的概率由样本数据估计（特别是极大似然估计）得到时，所对应的信息熵与条件熵分别称为经验熵（Empirical Entropy）和经验条件熵（Empirical Conditional Entropy）。这里暂时看不懂也没关系，可结合后续计算示例来理解。
+3. 信息增益
+根据8.1.1节的内容可知，所谓信息增益指的就是事物$U$的信息熵$H(U)$，在引入外部信息$I$以后后的变化量为$H(U)-H(U|I)$，因此，可以将特征$A$对训练数据集$D$的信息增益$g(D,A)$定义为集合$D$的信息熵$H(D)$与在给定特征$A$下$D$的条件熵$H(D|A)$之差，即 $$ g(D,A)=H(D)-H(D|A)\tag{8-7} $$设训练集为$D$，$|D|$表示所有训练样本总数，同时$D$有$K$个类别$C_k,k=1,2,...,K$。$|C_k|$为属于类$C_k$的样本总数，即$\sum\nolimits_{k=1}^{K}{|{{C}_{k}}|}=|D|$ 。设特征$A$有$n$个不同的取值$a_1,a_2,...,a_n$，根据特征$A$的取值将$D$划分为$n$个子集$D_1,D_2,...,D_n$，$|D_i|$为子集$D_i$中的样本个数，即$\sum\nolimits_{i=1}^{n}{|{{D}_{i}}|=|D|}$。同时此子集$D_i$中，属于类$C_k$的样本集合为$D_{ik}$，即${{D}_{ik}}={{D}_{i}}\bigcap {{C}_{k}}$，$|D_{ik}|$为$D_{ik}$的样本个数。此时有如下定义[2]
+(1) 数据集$D$的经验熵$H(D)$为 $$ H(D)=-\sum\limits_{k=1}^{K}{\frac{|{{C}_{k}}|}{|D|}}{{\log }_{2}}\frac{|{{C}_{k}}|}{|D|}\tag{8-8} $$ 从式(8-8)可以看出，它计算的是“任意样本属于其中一个类别”这句话所包含的信息量。
+(2) 数据集$D$在特征值$A$下的经验条件熵$H(D|A)$为 $$ H(D|A)=\sum\limits_{i=1}^{n}{\frac{|{{D}_{i}}|}{|D|}}H({{D}_{i}})=-\sum\limits_{i=1}^{n}{\frac{|{{D}_{i}}|}{|D|}}\sum\limits_{k=1}^{K}{\frac{|{{D}_{ik}}|}{|{{D}_{i}}|}}{{\log }_{2}}\frac{|{{D}_{ik}}|}{|{D}_{i}|}\tag{8-9} $$ 从式(8-9)可以看出，它计算的是特征$A$在各个取值条件下“任意样本属于其中一个类别”这句话所包含的信息量。
+(3) 信息增益为 $$ g(D,A)=H(D)-H(D|A)\tag{8-10} $$8.3.2 计算示例# 如果仅看上面的公式肯定不那么容易理解，下面我们再进行举例说明。这里建议各位读者将上面的公式同下面的计算过程对比观看进行理解。表8-1同样是7.1.3节中用过的一个信用卡审批数据集，其一共包含15个样本和3个特征维度。其中特征$X^{(1)}\in A_1=\{1,0\}$表示有无工作，特征$X^{(2)}\in A_2=\{1,0\}$表示是否有房，特征${{X}^{(3)}}\in {{A}_{3}}=\{D,S,T\}$表示学历等级，$Y\in C=\{1,0\}$表示是否审批通过的类标记。
+表 8-1 计算数据示例 1. 计算信息熵$H(D)$
+根据式(8-8)可得 $$ H(D)=-\left( \frac{5}{15}{{\log }_{2}}\frac{5}{15}&#43;\frac{10}{15}{{\log }_{2}}\frac{10}{15} \right)\approx 0.918\tag{8-11} $$ 2. 计算条件熵
+">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
+<meta name="color-scheme" content="light dark"><meta property="og:url" content="https://mlwithme.github.io/ml/chapter08/5887cf1408dd4c7f/">
+	<meta property="og:site_name" content="《从零学AI指南手册》">
+	<meta property="og:title" content="8.3 决策树生成之ID3与C4.5">
+	<meta property="og:description" content="8.3 决策树生成之ID3与C4.5# 在正式介绍决策树的生成算法前，我们先将8.1.1节中介绍的几个概念重新梳理一下，同时再通过一个例子来理解整个计算过程，以便于后续更好地掌握决策树的生成算法。
+8.3.1 基本概念与定义# 1. 信息熵
+设$X$是一个取值有限的离散型随机变量（例如8.1.1节中可能夺冠的16支球队），其概率分布为$P(X=x_i)=p_i,i=1,2,...,n$（每支球队可能夺冠的概率），则随机变量$X$的信息熵定义为 $$ H(X)=-\sum\limits_{i=1}^{n}{{{p}_{i}}}\log {{p}_{i}}\tag{8-5} $$其中，若$p_i=0$，定义$0\log_20=0$，并且通常$\log$取$2$为底或$e$为底时，其熵的单位分别称为比特（Bit）或纳特（Nat）。如无特殊说明，默认以$2$为底。
+2. 条件熵
+设有随机变量$(X,Y)$，其联合概率分布$P(X={{x}_{i}},Y={{y}_{j}})={{p}_{ij}}$，其中$i=1,2,...,n，j=1,2,...,m$，条件熵$H(Y|X)$表示在已知随机变量$X$的条件下，随机变量$Y$的不确定性，其定义为 $$ H(Y|X)=\sum\limits_{i=1}^{n}{{{p}_{i}}}H(Y|X={{x}_{i}})\tag{8-6} $$其中，$p_i=P(X=x_i),i=1,2,...,n$。
+同时，当信息熵和条件熵中的概率由样本数据估计（特别是极大似然估计）得到时，所对应的信息熵与条件熵分别称为经验熵（Empirical Entropy）和经验条件熵（Empirical Conditional Entropy）。这里暂时看不懂也没关系，可结合后续计算示例来理解。
+3. 信息增益
+根据8.1.1节的内容可知，所谓信息增益指的就是事物$U$的信息熵$H(U)$，在引入外部信息$I$以后后的变化量为$H(U)-H(U|I)$，因此，可以将特征$A$对训练数据集$D$的信息增益$g(D,A)$定义为集合$D$的信息熵$H(D)$与在给定特征$A$下$D$的条件熵$H(D|A)$之差，即 $$ g(D,A)=H(D)-H(D|A)\tag{8-7} $$设训练集为$D$，$|D|$表示所有训练样本总数，同时$D$有$K$个类别$C_k,k=1,2,...,K$。$|C_k|$为属于类$C_k$的样本总数，即$\sum\nolimits_{k=1}^{K}{|{{C}_{k}}|}=|D|$ 。设特征$A$有$n$个不同的取值$a_1,a_2,...,a_n$，根据特征$A$的取值将$D$划分为$n$个子集$D_1,D_2,...,D_n$，$|D_i|$为子集$D_i$中的样本个数，即$\sum\nolimits_{i=1}^{n}{|{{D}_{i}}|=|D|}$。同时此子集$D_i$中，属于类$C_k$的样本集合为$D_{ik}$，即${{D}_{ik}}={{D}_{i}}\bigcap {{C}_{k}}$，$|D_{ik}|$为$D_{ik}$的样本个数。此时有如下定义[2]
+(1) 数据集$D$的经验熵$H(D)$为 $$ H(D)=-\sum\limits_{k=1}^{K}{\frac{|{{C}_{k}}|}{|D|}}{{\log }_{2}}\frac{|{{C}_{k}}|}{|D|}\tag{8-8} $$ 从式(8-8)可以看出，它计算的是“任意样本属于其中一个类别”这句话所包含的信息量。
+(2) 数据集$D$在特征值$A$下的经验条件熵$H(D|A)$为 $$ H(D|A)=\sum\limits_{i=1}^{n}{\frac{|{{D}_{i}}|}{|D|}}H({{D}_{i}})=-\sum\limits_{i=1}^{n}{\frac{|{{D}_{i}}|}{|D|}}\sum\limits_{k=1}^{K}{\frac{|{{D}_{ik}}|}{|{{D}_{i}}|}}{{\log }_{2}}\frac{|{{D}_{ik}}|}{|{D}_{i}|}\tag{8-9} $$ 从式(8-9)可以看出，它计算的是特征$A$在各个取值条件下“任意样本属于其中一个类别”这句话所包含的信息量。
+(3) 信息增益为 $$ g(D,A)=H(D)-H(D|A)\tag{8-10} $$8.3.2 计算示例# 如果仅看上面的公式肯定不那么容易理解，下面我们再进行举例说明。这里建议各位读者将上面的公式同下面的计算过程对比观看进行理解。表8-1同样是7.1.3节中用过的一个信用卡审批数据集，其一共包含15个样本和3个特征维度。其中特征$X^{(1)}\in A_1=\{1,0\}$表示有无工作，特征$X^{(2)}\in A_2=\{1,0\}$表示是否有房，特征${{X}^{(3)}}\in {{A}_{3}}=\{D,S,T\}$表示学历等级，$Y\in C=\{1,0\}$表示是否审批通过的类标记。
+表 8-1 计算数据示例 1. 计算信息熵$H(D)$
+根据式(8-8)可得 $$ H(D)=-\left( \frac{5}{15}{{\log }_{2}}\frac{5}{15}&#43;\frac{10}{15}{{\log }_{2}}\frac{10}{15} \right)\approx 0.918\tag{8-11} $$ 2. 计算条件熵">
+	<meta property="og:locale" content="zh_CN">
+	<meta property="og:type" content="article">
+		<meta property="article:section" content="ml">
+
+
+	<meta itemprop="name" content="8.3 决策树生成之ID3与C4.5">
+	<meta itemprop="description" content="8.3 决策树生成之ID3与C4.5# 在正式介绍决策树的生成算法前，我们先将8.1.1节中介绍的几个概念重新梳理一下，同时再通过一个例子来理解整个计算过程，以便于后续更好地掌握决策树的生成算法。
+8.3.1 基本概念与定义# 1. 信息熵
+设$X$是一个取值有限的离散型随机变量（例如8.1.1节中可能夺冠的16支球队），其概率分布为$P(X=x_i)=p_i,i=1,2,...,n$（每支球队可能夺冠的概率），则随机变量$X$的信息熵定义为 $$ H(X)=-\sum\limits_{i=1}^{n}{{{p}_{i}}}\log {{p}_{i}}\tag{8-5} $$其中，若$p_i=0$，定义$0\log_20=0$，并且通常$\log$取$2$为底或$e$为底时，其熵的单位分别称为比特（Bit）或纳特（Nat）。如无特殊说明，默认以$2$为底。
+2. 条件熵
+设有随机变量$(X,Y)$，其联合概率分布$P(X={{x}_{i}},Y={{y}_{j}})={{p}_{ij}}$，其中$i=1,2,...,n，j=1,2,...,m$，条件熵$H(Y|X)$表示在已知随机变量$X$的条件下，随机变量$Y$的不确定性，其定义为 $$ H(Y|X)=\sum\limits_{i=1}^{n}{{{p}_{i}}}H(Y|X={{x}_{i}})\tag{8-6} $$其中，$p_i=P(X=x_i),i=1,2,...,n$。
+同时，当信息熵和条件熵中的概率由样本数据估计（特别是极大似然估计）得到时，所对应的信息熵与条件熵分别称为经验熵（Empirical Entropy）和经验条件熵（Empirical Conditional Entropy）。这里暂时看不懂也没关系，可结合后续计算示例来理解。
+3. 信息增益
+根据8.1.1节的内容可知，所谓信息增益指的就是事物$U$的信息熵$H(U)$，在引入外部信息$I$以后后的变化量为$H(U)-H(U|I)$，因此，可以将特征$A$对训练数据集$D$的信息增益$g(D,A)$定义为集合$D$的信息熵$H(D)$与在给定特征$A$下$D$的条件熵$H(D|A)$之差，即 $$ g(D,A)=H(D)-H(D|A)\tag{8-7} $$设训练集为$D$，$|D|$表示所有训练样本总数，同时$D$有$K$个类别$C_k,k=1,2,...,K$。$|C_k|$为属于类$C_k$的样本总数，即$\sum\nolimits_{k=1}^{K}{|{{C}_{k}}|}=|D|$ 。设特征$A$有$n$个不同的取值$a_1,a_2,...,a_n$，根据特征$A$的取值将$D$划分为$n$个子集$D_1,D_2,...,D_n$，$|D_i|$为子集$D_i$中的样本个数，即$\sum\nolimits_{i=1}^{n}{|{{D}_{i}}|=|D|}$。同时此子集$D_i$中，属于类$C_k$的样本集合为$D_{ik}$，即${{D}_{ik}}={{D}_{i}}\bigcap {{C}_{k}}$，$|D_{ik}|$为$D_{ik}$的样本个数。此时有如下定义[2]
+(1) 数据集$D$的经验熵$H(D)$为 $$ H(D)=-\sum\limits_{k=1}^{K}{\frac{|{{C}_{k}}|}{|D|}}{{\log }_{2}}\frac{|{{C}_{k}}|}{|D|}\tag{8-8} $$ 从式(8-8)可以看出，它计算的是“任意样本属于其中一个类别”这句话所包含的信息量。
+(2) 数据集$D$在特征值$A$下的经验条件熵$H(D|A)$为 $$ H(D|A)=\sum\limits_{i=1}^{n}{\frac{|{{D}_{i}}|}{|D|}}H({{D}_{i}})=-\sum\limits_{i=1}^{n}{\frac{|{{D}_{i}}|}{|D|}}\sum\limits_{k=1}^{K}{\frac{|{{D}_{ik}}|}{|{{D}_{i}}|}}{{\log }_{2}}\frac{|{{D}_{ik}}|}{|{D}_{i}|}\tag{8-9} $$ 从式(8-9)可以看出，它计算的是特征$A$在各个取值条件下“任意样本属于其中一个类别”这句话所包含的信息量。
+(3) 信息增益为 $$ g(D,A)=H(D)-H(D|A)\tag{8-10} $$8.3.2 计算示例# 如果仅看上面的公式肯定不那么容易理解，下面我们再进行举例说明。这里建议各位读者将上面的公式同下面的计算过程对比观看进行理解。表8-1同样是7.1.3节中用过的一个信用卡审批数据集，其一共包含15个样本和3个特征维度。其中特征$X^{(1)}\in A_1=\{1,0\}$表示有无工作，特征$X^{(2)}\in A_2=\{1,0\}$表示是否有房，特征${{X}^{(3)}}\in {{A}_{3}}=\{D,S,T\}$表示学历等级，$Y\in C=\{1,0\}$表示是否审批通过的类标记。
+表 8-1 计算数据示例 1. 计算信息熵$H(D)$
+根据式(8-8)可得 $$ H(D)=-\left( \frac{5}{15}{{\log }_{2}}\frac{5}{15}&#43;\frac{10}{15}{{\log }_{2}}\frac{10}{15} \right)\approx 0.918\tag{8-11} $$ 2. 计算条件熵">
+	<meta itemprop="wordCount" content="392">
+
+<title>8.3 决策树生成之ID3与C4.5 • 《从零学AI指南手册》</title>
+<link rel="icon" href="/favicon.png" >
+<link rel="manifest" href="/manifest.json">
+<link rel="canonical" href="https://mlwithme.github.io/ml/chapter08/5887cf1408dd4c7f/">
+<link rel="stylesheet" href="/book.min.6097ccf1d338ddfaa037d2f96478059a71fa573d0f917d128bab595efea338ca.css" integrity="sha256-YJfM8dM43fqgN9L5ZHgFmnH6Vz0PkX0Si6tZXv6jOMo=" crossorigin="anonymous">
+
+
+  <script defer type="module" src="/en.search.min.ffaad769e546b38d39820301bb9e5c193822f7bf0f46a855602e4e14707802e0.js" integrity="sha256-/6rXaeVGs405ggMBu55cGTgi978PRqhVYC5OFHB4AuA=" crossorigin="anonymous"></script>
+
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-23SZ6E8VY7"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-23SZ6E8VY7');
+</script>
+<script async src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
+
+</head>
+<body dir="ltr" class="book-kind-page book-type-ml">
+  <input type="checkbox" class="hidden toggle" id="menu-control" />
+  <input type="checkbox" class="hidden toggle" id="toc-control" />
+  <main class="container flex">
+    
+<aside class="book-menu">
+  <div class="book-menu-content">
+    
+  <nav>
+<h2 class="book-brand">
+  <a class="flex align-center" href="/"><span>《从零学AI指南手册》</span>
+  </a>
+</h2>
+
+
+<div class="book-search hidden">
+  <input id="book-search-input" type="text" 
+    placeholder="Search"
+    aria-label="Search"
+    maxlength="64" />
+  <div class="book-search-spinner hidden"></div>
+  <ul id="book-search-results"></ul>
+</div>
+<script>document.querySelector(".book-search").classList.remove("hidden")</script>
+
+
+
+
+
+
+
+
+
+
+  
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a>
+      大模型Agent开发</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-253e26e732e57a78f635dcf47df3d0a3" class="toggle"  />
+    <label for="section-253e26e732e57a78f635dcf47df3d0a3" class="flex">
+      <a role="button" class="">
+        第 1 章 RAG 基础概念</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/454f0942222e471e/" class="">
+      1.1 RAG 提出背景</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/d7623d619f884b25/" class="">
+      1.2 RAG 流程概览</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-810ee5a2a3a24c9b7c25ab5324ae7db7" class="toggle"  />
+    <label for="section-810ee5a2a3a24c9b7c25ab5324ae7db7" class="flex">
+      <a role="button" class="">
+        第 2 章 大模型接入与使用</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/d43adfc00df54515/" class="">
+      2.1 SDK 介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/8b9059fde1d644a4/" class="">
+      2.2 现代大模型中的 SDK</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/95d3214ab80b4769/" class="">
+      2.3 DashScope 接口体系</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/b9843c089d654494/" class="">
+      2.4 千问大模型接入与使用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ed1727f01d0e40dc9b7961b72e42160e" class="toggle"  />
+    <label for="section-ed1727f01d0e40dc9b7961b72e42160e" class="flex">
+      <a role="button" class="">
+        第 3 章 文档标准化与语义检索</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/7f4af6d48c5b425c/" class="">
+      3.1 文档加载与标准化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/572ba4c9cb114677/" class="">
+      3.2 常见文本切分策略</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/06e588cd33fa4454/" class="">
+      3.3 向量数据库选择</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/ff27306c0d7b4387/" class="">
+      3.4 Qwen3 Embedding 模型介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/303035851c5e42f2/" class="">
+      3.5 语义搜索引擎构建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/e1328cb23e8c412b/" class="">
+      3.6  Milvus 模块解析</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-caaf9d8eb5e5559f7ca8bb11c41da71a" class="toggle"  />
+    <label for="section-caaf9d8eb5e5559f7ca8bb11c41da71a" class="flex">
+      <a role="button" class="">
+        第 4 章 RAG 与 Agent</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/4c646aa07f3b4b74/" class="">
+      4.1 两步式 RAG 搭建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/5c35e934bab24ac3/" class="">
+      4.2 Function Calling 概念介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/88ff352fc22e4cd6/" class="">
+      4.3 LangChain 中的 Tool 修饰器</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/83fe26536a5d4b6e/" class="">
+      4.4 RAG Agent 原理与搭建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/b7e49268357a4bca/" class="">
+      4.5 复杂问题拆解与ReAct框架</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/469b5963f2ca4799/" class="">
+      4.6 RAG 中的两阶段索引</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/10fb92a6c5484039/" class="">
+      4.7 Qwen3 Reranking 原理与使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/45d286aec1bc4d66/" class="">
+      4.8 基于两阶段索引的 RAG Agent 搭建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/43af483460574e48/" class="">
+      4.9 LangGraph 基本概念介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/0def4564f3aa455d/" class="">
+      4.10  基于 LangGraph 构建自定义 RAG Agent</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a>
+      深度学习</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/70e5f9cdbedc4b2c/" class="">
+      学习思维导图</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-a9b664bcf9e1dab8add449268565f466" class="toggle"  />
+    <label for="section-a9b664bcf9e1dab8add449268565f466" class="flex">
+      <a role="button" class="">
+        第 1 章 深度学习简介</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/647eb9c607874e3a/" class="">
+      1.1 深度学习的发展阶段</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/f31da36a6f444afe/" class="">
+      1.2 深度学习中的关键人物</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/da9fa13021e64f3c/" class="">
+      1.3 深度学习框架介绍</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-e6e0db5d4bc28bd97dfe8d5210249e63" class="toggle"  />
+    <label for="section-e6e0db5d4bc28bd97dfe8d5210249e63" class="flex">
+      <a role="button" class="">
+        第 2 章 环境配置</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/a0c5d1e0de0140cb/" class="">
+      2.1 体系结构介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/04f07b9246984577/" class="">
+      2.2 深度学习环境安装</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/5bf6454673194c67/" class="">
+      2.3 开发环境安装配置</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-0a2ca47f15332c8b06ae83247328edb4" class="toggle"  />
+    <label for="section-0a2ca47f15332c8b06ae83247328edb4" class="flex">
+      <a role="button" class="">
+        第 3 章 深度学习基础</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/75c5fa7839174c16/" class="">
+      3.1 线性回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/ca16f8cb6df444a6/" class="">
+      3.2 线性回归简洁实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/97e1da1143cd4554/" class="">
+      3.3 梯度下降与反向传播</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/7b865de988ea422c/" class="">
+      3.4 从零实现回归模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/18fdd1deff424a16/" class="">
+      3.5 从逻辑回归到Softmax回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/55967b0f642b4509/" class="">
+      3.6 Softmax回归简洁实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/381bbd56509e4a6f/" class="">
+      3.7 从零实现分类模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/2c061df4435d4928/" class="">
+      3.8 回归模型评估指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/e3442eff254e473c/" class="">
+      3.9 分类模型评估指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/307f927c8a1245c5/" class="">
+      3.10 过拟合与正则化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/bcb64de5aa404f18/" class="">
+      3.11 超参数与交叉验证</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/66dd7425cdd04565/" class="">
+      3.12 激活函数</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/0d3dacfff4c04794/" class="">
+      3.13 多标签分类</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-95b7e7417bf2b821a1b760975d3acc22" class="toggle"  />
+    <label for="section-95b7e7417bf2b821a1b760975d3acc22" class="flex">
+      <a role="button" class="">
+        第 4 章 卷积神经网络</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/102e183e8be94f46/" class="">
+      4.1 卷积的概念</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/5b3e3152e9e54f4f/" class="">
+      4.2 卷积的计算过程</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/762f60de801a4ccd/" class="">
+      4.3 填充和池化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/c8af5d84174b4420/" class="">
+      4.4 LeNet5网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/de007462967e4701/" class="">
+      4.5 AlexNet网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/f084f181c3554082/" class="">
+      4.6 VGG网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/911b961cc5d949b6/" class="">
+      4.7 NIN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/47da186baf3e4a0b/" class="">
+      4.8 GoogLeNet网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/da16c61397454b2c/" class="">
+      4.9 ResNet网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/1c24468824274650/" class="">
+      4.10 DenseNet网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-17076fe90a2d84e207bbd0c829983325" class="toggle"  />
+    <label for="section-17076fe90a2d84e207bbd0c829983325" class="flex">
+      <a role="button" class="">
+        第 5 章 模型训练与复用</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/4557a6f03dec4475/" class="">
+      5.1 参数及日志管理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/e7c4c6da085148d0/" class="">
+      5.2 Tensorboard可视化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/27387966672c45ed/" class="">
+      5.3 模型的保存与复用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/211b26bdd8f248ac/" class="">
+      5.4 模型的迁移学习</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/345c1b72253043cb/" class="">
+      5.5 开源模型复用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/c912dda030c946d9/" class="">
+      5.6 多GPU训练</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/f065af80f3844b0b/" class="">
+      5.7 数据预处理与缓存</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-2d091d454d5c3f03f5e0a202c37cc226" class="toggle"  />
+    <label for="section-2d091d454d5c3f03f5e0a202c37cc226" class="flex">
+      <a role="button" class="">
+        第 6 章 模型优化方法</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/cc35bb112783410e/" class="">
+      6.1 学习率调度器</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/fc024c283f164849/" class="">
+      6.2 梯度裁剪</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/27ed3ed136e24092/" class="">
+      6.3 批归一化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/fdd5ba4b41f74a0e/" class="">
+      6.4 层归一化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/9246afed14eb436c/" class="">
+      6.5 组归一化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/fcbc66ad051a4336/" class="">
+      6.6 动量法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/8b83d654898c40a2/" class="">
+      6.7 AdaGrad算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/078f2394980d41d2/" class="">
+      6.8 AdaDelta算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/28ad7fb39987447e/" class="">
+      6.9 Adam算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/4b81b8d39721434d/" class="">
+      6.10 初始化方法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f2f78ba4851131558fc284d927542d28" class="toggle"  />
+    <label for="section-f2f78ba4851131558fc284d927542d28" class="flex">
+      <a role="button" class="">
+        第 7 章 循环神经网络</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/88ba4e03337b4233/" class="">
+      7.1 RNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/ec8ff069aadc49b9/" class="">
+      7.2 时序数据</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/b4c5ddcc9e904238/" class="">
+      7.3 LSTM网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/4112672112224dc1/" class="">
+      7.4 GRU网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/b6e5ccb6cd064f74/" class="">
+      7.5 BiRNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/4bf3ecf7b21e45fb/" class="">
+      7.6 CharRNN网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-49992cff6143e64ae5d7f2209dcfb054" class="toggle"  />
+    <label for="section-49992cff6143e64ae5d7f2209dcfb054" class="flex">
+      <a role="button" class="">
+        第 8 章 时序与模型融合</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/2be88fbc08a5418f/" class="">
+      8.1 TextCNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/9023d1f822a54226/" class="">
+      8.2 TextRNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/9edd7db2d439402f/" class="">
+      8.3 CNN-RNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/19c2b86e85f2461e/" class="">
+      8.4 ConvLSTM网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/1e6da79bf7b44c20/" class="">
+      8.5 3DCNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/5f426a9190e7454b/" class="">
+      8.6 STResNet网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ca07c572acb4d7fd40854f5b367c247b" class="toggle"  />
+    <label for="section-ca07c572acb4d7fd40854f5b367c247b" class="flex">
+      <a role="button" class="">
+        第 9 章 自然语言处理</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/e0cb9a7aae814045/" class="">
+      9.1 自然语言处理介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/d4703d990f8d4fed/" class="">
+      9.2 Word2Vec词向量</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/1bb6351b01a2479b/" class="">
+      9.3 Word2Vec训练与使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/40a8a1146d934c55/" class="">
+      9.4 GloVe词向量</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/c6aa1405b8cf46d8/" class="">
+      9.5 词向量的微调使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/48c26d04b342452d/" class="">
+      9.6 fastText网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/03a0166e195f443f/" class="">
+      9.7 Seq2Seq网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/271bda16904544af/" class="">
+      9.8 序列模型评价指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/fefa60e0bc854a17/" class="">
+      9.9 NMT网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/5bcd8b0920414f34/" class="">
+      9.10 注意力机制</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/8a78e8213ee04aac/" class="">
+      9.11 含注意力的NMT网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/474ac7a1867d4b5e/" class="">
+      9.12 含注意力的RNN网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-8cdec04c2fd8683c5c7373c78d943528" class="toggle"  />
+    <label for="section-8cdec04c2fd8683c5c7373c78d943528" class="flex">
+      <a role="button" class="">
+        第10章 现代神经网络</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/7523731afc0241c0/" class="">
+      10.1 ELMo网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/4987d1044939480d/" class="">
+      10.2 Transformer网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/a469ed1a25e1498f/" class="">
+      10.3 Transformer结构</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/d50c490eef3b4565/" class="">
+      10.4 Transformer实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/f6c507b3d2d74f03/" class="">
+      10.5 Transformer对联模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/3aedea1d3f3e48dd/" class="">
+      10.6 BERT网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/82a1cd0def084620/" class="">
+      10.7 从零实现BERT</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/e736d3974ed0484c/" class="">
+      10.8 BERT文本分类模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/f5076cbadda84d4e/" class="">
+      10.9 BERT问题选择模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/25d9ef3d9b34472a/" class="">
+      10.10 BERT问题回答模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/64d3ec5593ec4b94/" class="">
+      10.11 BERT命名体识别模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/90ea8d3e090d48b4/" class="">
+      10.12 BERT从零训练</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/e36878dad7a647d8/" class="">
+      10.13 GPT-1模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/94dda9bbbc994913/" class="">
+      10.14 GPT-2与GPT-3模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/4af57a29308840de/" class="">
+      10.15 基于GPT-2的中文预训练模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/9f5c00cadde14d31/" class="">
+      10.16 InstructGPT与ChatGPT</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/050b54fd34ca480a/" class="">
+      10.17 ChatGPT与提示词工程</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/a90b0d71389b4d69/" class="">
+      10.18 百川大模型使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/40c1c9ade70c4ce7/" class="">
+      10.19 百川大模型实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/ea1b4cf8b40c4b05/" class="">
+      10.20 GPT-4与GPTs使用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a>
+      机器学习</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/43fc00b3809d4be6/" class="">
+      学习思维导图</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-0a3254d1ca9963fd6975aa5bc0b3edcc" class="toggle"  />
+    <label for="section-0a3254d1ca9963fd6975aa5bc0b3edcc" class="flex">
+      <a role="button" class="">
+        第 1 章 环境配置</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/baafb91f0af14a84/" class="">
+      1.1 安装使用Conda</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/7a01c403acd6488a/" class="">
+      1.2 开发环境安装配置</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-4569258198323c16bc8a634ea44fd5db" class="toggle"  />
+    <label for="section-4569258198323c16bc8a634ea44fd5db" class="flex">
+      <a role="button" class="">
+        第 2 章 线性回归</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/2414d4b6648d405a/" class="">
+      2.1 模型的建立与求解</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/3e9ba14da71f4fd3/" class="">
+      2.2 多变量线性回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/4a16c0dc82a84e78/" class="">
+      2.3 多项式回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/f8dea699983c48c6/" class="">
+      2.4 回归模型评估</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/df41c2e97f554e68/" class="">
+      2.5 梯度下降</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/71ef816e0005492d/" class="">
+      2.6 正态分布</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/803bee4f70be4dca/" class="">
+      2.7 目标函数推导</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-a6ca5e2f846ebd900d1a868e6718dc82" class="toggle"  />
+    <label for="section-a6ca5e2f846ebd900d1a868e6718dc82" class="flex">
+      <a role="button" class="">
+        第 3 章 逻辑回归</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/96d46b53aee14c3b/" class="">
+      3.1 模型的建立与求解</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/fac70083dd764141/" class="">
+      3.2 多分类任务</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/6d7cfd79ef304cbd/" class="">
+      3.3 常见的分类评估指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/2fdc655d00c74548/" class="">
+      3.4 目标函数推导</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/a4b61c5bbadd43a6/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-9f462f716bd0e46ef79984b356eeb5a2" class="toggle"  />
+    <label for="section-9f462f716bd0e46ef79984b356eeb5a2" class="flex">
+      <a role="button" class="">
+        第 4 章 模型的改善与泛化</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/2089400b28f54dd9/" class="">
+      4.1 基本概念</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/56b788b624cd4971/" class="">
+      4.2 特征标准化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/ca091dc393a84518/" class="">
+      4.3过拟合</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/5097d3b8c1144427/" class="">
+      4.4 正则化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/3c7eee1621d4480b/" class="">
+      4.5 偏差、方差与交叉验证</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/c5957e0753d04746/" class="">
+      4.6 实例分析手写体识别</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/a915e49586eb4426/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-327db48e4f4df6236855078634147679" class="toggle"  />
+    <label for="section-327db48e4f4df6236855078634147679" class="flex">
+      <a role="button" class="">
+        第 5 章 K近邻</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/7c610e923e754259/" class="">
+      5.1 K近邻思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/1a97571e0a6447ef/" class="">
+      5.2 K近邻原理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/d245bda107034e65/" class="">
+      5.3 sklearn接口与示例代码</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/24378571ce404d9c/" class="">
+      5.4 kd树构建与搜索</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/40f253b916f24038/" class="">
+      5.5 从零实现K近邻</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/76818d9e48944f8c/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-94d0a5f5555d92c51e0903b148e34993" class="toggle"  />
+    <label for="section-94d0a5f5555d92c51e0903b148e34993" class="flex">
+      <a role="button" class="">
+        第 6 章 文本特征与模型复用</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/e05b5928c41d4841/" class="">
+      6.1 词袋模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/de59bf74d753457e/" class="">
+      6 .2 基于K近邻算法的垃圾邮件分类</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/c6fdc78b49d44453/" class="">
+      6.3 考虑权重的词袋模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/825fde8589654b16/" class="">
+      6.4 词云图</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/8451cffe49f5477c/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-544be5d1e48c4fd8b33ba2f91964c6dd" class="toggle"  />
+    <label for="section-544be5d1e48c4fd8b33ba2f91964c6dd" class="flex">
+      <a role="button" class="">
+        第 7 章 朴素贝叶斯</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/faf303eb93a241d1/" class="">
+      7.1 朴素贝叶斯算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/842c7b8684c747d2/" class="">
+      7.2 贝叶斯估计</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/724bf42b09bb440e/" class="">
+      7.3 朴素贝叶斯实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/1a9deee1d5f042b5/" class="">
+      7.4 多项式朴素贝叶斯原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/5c27cdd8b3264f50/" class="">
+      7.5 高斯朴素贝叶斯原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/715b8eaf245f45f1/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-d1884c6b3e8f1260019220c57d615371" class="toggle" checked />
+    <label for="section-d1884c6b3e8f1260019220c57d615371" class="flex">
+      <a role="button" class="">
+        第 8 章 决策树</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/690fe2be21834c2a/" class="">
+      8.1 决策树的基本思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/ee9ada9729124049/" class="">
+      8.2 决策树建模与可视化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/5887cf1408dd4c7f/" class="active">
+      8.3 决策树生成之ID3与C4.5</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/87ba589d6c17434d/" class="">
+      8.4 决策树剪枝过程</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/34bc962c974646f4/" class="">
+      8.5 从零实现ID3与C4.5算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/c44682dbb3364be4/" class="">
+      8.6 连续型特征变量下决策树实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/4eead717a84a4dbf/" class="">
+      8.7 CART生成与剪枝算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/1c72d67dffc64dc9/" class="">
+      8.8 从零实现CART算法及剪枝示例</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/ae452792b2604e84/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-1f0a2178f0a580ba251c7da2649aa52f" class="toggle"  />
+    <label for="section-1f0a2178f0a580ba251c7da2649aa52f" class="flex">
+      <a role="button" class="">
+        第 9 章 集成学习与提升算法</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/9eff4004fd6c437d/" class="">
+      9.1 集成学习算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/18980c9f757e42c8/" class="">
+      9.2 随机森林</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/8a91b358b2f74d56/" class="">
+      9.3 泰坦尼克号生还预测</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/73f6914844f549f1/" class="">
+      9.4 AdaBoost原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/71fd0e44294e4abb/" class="">
+      9.5 MultiAdaBoost原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/f3c2341ce7d64f70/" class="">
+      9.6 Gradient Boost 原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/4f9b26d5b65541f5/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f63defd924ef7373144c8643a39fd7b2" class="toggle"  />
+    <label for="section-f63defd924ef7373144c8643a39fd7b2" class="flex">
+      <a role="button" class="">
+        第 10 章 支持向量机</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/dce7180d4eb047d7/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/515b54e2307a4c8a/" class="">
+      10.1 SVM思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/9c3862bc843c4179/" class="">
+      10.2 SVM线性不可分</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/fbdb6f8adace457d/" class="">
+      10.3 SVM原理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/1a3ffa363b1d4f83/" class="">
+      10.4 SVM中的软间隔</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/8b7a06412a9f4267/" class="">
+      10.5 拉格朗日乘数法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/40e977f0a2f84ac0/" class="">
+      10.6 对偶性与KKT条件</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/b18d45a772574ddb/" class="">
+      10.7 SVM优化问题</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/c53ed12f7bc04405/" class="">
+      10.8 SVM核函数原理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/26d9b2b328a849c2/" class="">
+      10.9 SMO算法求解SVM</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/215a1e15c0f2470d/" class="">
+      10.10 从零实现SVM分类算法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bdcc54d1c295c5cc69c9c851c02886ea" class="toggle"  />
+    <label for="section-bdcc54d1c295c5cc69c9c851c02886ea" class="flex">
+      <a role="button" class="">
+        第 11 章 聚类分析</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/f9d9305a55a548a1/" class="">
+      11.1 聚类算法的思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/e635df24de32487a/" class="">
+      11.2 Kmeans聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/e75b8efa232249ab/" class="">
+      11.3 Kmeans算法求解</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/60e49a33d1aa4f50/" class="">
+      11.4 从零实现Kmeans聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/c8b45d8a3d8c4cf4/" class="">
+      11.5 Kmeans&#43;&#43;聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/1ede2f3557d0438f/" class="">
+      11.6 聚类外部评价指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/e6a75df19f85498c/" class="">
+      11.7 加权Kmeans聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/c52cf7920f1d4636/" class="">
+      11.8 聚类内部评价指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/f95259c359b146ba/" class="">
+      11.9 聚类K值选取与分析</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/b85c1a858f7c4686/" class="">
+      11.10 基于密度的聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/2f01ba751d914336/" class="">
+      11.11 基于层次的聚类算法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bafa8c48214ccf62d333a6d0457c5f72" class="toggle"  />
+    <label for="section-bafa8c48214ccf62d333a6d0457c5f72" class="flex">
+      <a role="button" class="">
+        第 12 章 降维算法</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/9478de824edd44c6/" class="">
+      12.1 主成分分析</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/909356aa90fe456a/" class="">
+      12.2 基于核函数的主成分分析</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-d5f143889a719ce66d602e75b72bffb9" class="toggle"  />
+    <label for="section-d5f143889a719ce66d602e75b72bffb9" class="flex">
+      <a role="button" class="">
+        第 13 章 自训练与标签传播</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/8d71301c2e414efe/" class="">
+      13.1 Self-Training 自训练算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/87fdcf0be1c34644/" class="">
+      13.2 Label Propagation算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/7fc8b0fc47d2427c/" class="">
+      13.3 Label Spreading 算法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+
+
+
+
+
+
+
+
+
+
+
+
+</nav>
+
+
+
+
+  <script>(function(){var e=document.querySelector("aside .book-menu-content");addEventListener("beforeunload",function(){localStorage.setItem("menu.scrollTop",e.scrollTop)}),e.scrollTop=localStorage.getItem("menu.scrollTop")})()</script>
+
+
+
+  </div>
+</aside>
+ 
+
+    <div class="book-page">
+      <header class="book-header hidden">
+        
+  <div class="flex align-center justify-between">
+  <label for="menu-control">
+    <img src="/icons/menu.svg" class="book-icon" alt="Menu" />
+  </label>
+
+  <h3>8.3 决策树生成之ID3与C4.5</h3>
+
+  <label for="toc-control">
+    
+    <img src="/icons/toc.svg" class="book-icon" alt="Table of Contents" />
+    
+  </label>
+</div>
+
+
+  
+  <aside class="hidden">
+    
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#831-基本概念与定义">8.3.1 基本概念与定义</a></li>
+    <li><a href="#832-计算示例">8.3.2 计算示例</a></li>
+    <li><a href="#833-id3生成算法">8.3.3 ID3生成算法</a></li>
+    <li><a href="#834-c45生成算法">8.3.4 C4.5生成算法</a></li>
+    <li><a href="#835-特征划分">8.3.5 特征划分</a></li>
+    <li><a href="#836-小结">8.3.6 小结</a></li>
+  </ul>
+</nav>
+
+
+
+  </aside>
+  
+ 
+      </header>
+
+      
+      
+  <article class="markdown book-article"><h1 id="83-决策树生成之id3与c45">8.3 决策树生成之ID3与C4.5<a class="anchor" href="#83-%e5%86%b3%e7%ad%96%e6%a0%91%e7%94%9f%e6%88%90%e4%b9%8bid3%e4%b8%8ec45">#</a></h1>
+<p>在正式介绍决策树的生成算法前，我们先将8.1.1节中介绍的几个概念重新梳理一下，同时再通过一个例子来理解整个计算过程，以便于后续更好地掌握决策树的生成算法。</p>
+<h2 id="831-基本概念与定义">8.3.1 基本概念与定义<a class="anchor" href="#831-%e5%9f%ba%e6%9c%ac%e6%a6%82%e5%bf%b5%e4%b8%8e%e5%ae%9a%e4%b9%89">#</a></h2>
+<p><strong>1. 信息熵</strong></p>
+<p>设$X$是一个取值有限的离散型随机变量（例如8.1.1节中可能夺冠的16支球队），其概率分布为$P(X=x_i)=p_i,i=1,2,...,n$（每支球队可能夺冠的概率），则随机变量$X$的信息熵定义为
+</p>
+$$
+H(X)=-\sum\limits_{i=1}^{n}{{{p}_{i}}}\log {{p}_{i}}\tag{8-5}
+$$<p>其中，若$p_i=0$，定义$0\log_20=0$，并且通常$\log$取$2$为底或$e$为底时，其熵的单位分别称为比特（Bit）或纳特（Nat）。如无特殊说明，默认以$2$为底。</p>
+<p><strong>2. 条件熵</strong></p>
+<p>设有随机变量$(X,Y)$，其联合概率分布$P(X={{x}_{i}},Y={{y}_{j}})={{p}_{ij}}$，其中$i=1,2,...,n，j=1,2,...,m$，条件熵$H(Y|X)$表示在已知随机变量$X$的条件下，随机变量$Y$的不确定性，其定义为
+</p>
+$$
+H(Y|X)=\sum\limits_{i=1}^{n}{{{p}_{i}}}H(Y|X={{x}_{i}})\tag{8-6}
+$$<p>其中，$p_i=P(X=x_i),i=1,2,...,n$。</p>
+<p>同时，当信息熵和条件熵中的概率由样本数据估计（特别是极大似然估计）得到时，所对应的信息熵与条件熵分别称为经验熵（Empirical Entropy）和经验条件熵（Empirical Conditional Entropy）。这里暂时看不懂也没关系，可结合后续计算示例来理解。</p>
+<p><strong>3. 信息增益</strong></p>
+<p>根据8.1.1节的内容可知，所谓信息增益指的就是事物$U$的信息熵$H(U)$，在引入外部信息$I$以后后的变化量为$H(U)-H(U|I)$，因此，可以将特征$A$对训练数据集$D$的信息增益$g(D,A)$定义为集合$D$的信息熵$H(D)$与在给定特征$A$下$D$的条件熵$H(D|A)$之差，即
+</p>
+$$
+g(D,A)=H(D)-H(D|A)\tag{8-7}
+$$<p>设训练集为$D$，$|D|$表示所有训练样本总数，同时$D$有$K$个类别$C_k,k=1,2,...,K$。$|C_k|$为属于类$C_k$的样本总数，即$\sum\nolimits_{k=1}^{K}{|{{C}_{k}}|}=|D|$ 。设特征$A$有$n$个不同的取值$a_1,a_2,...,a_n$，根据特征$A$的取值将$D$划分为$n$个子集$D_1,D_2,...,D_n$，$|D_i|$为子集$D_i$中的样本个数，即$\sum\nolimits_{i=1}^{n}{|{{D}_{i}}|=|D|}$。同时此子集$D_i$中，属于类$C_k$的样本集合为$D_{ik}$，即${{D}_{ik}}={{D}_{i}}\bigcap {{C}_{k}}$，$|D_{ik}|$为$D_{ik}$的样本个数。此时有如下定义[2]</p>
+<p>(1) 数据集$D$的经验熵$H(D)$为
+</p>
+$$
+H(D)=-\sum\limits_{k=1}^{K}{\frac{|{{C}_{k}}|}{|D|}}{{\log }_{2}}\frac{|{{C}_{k}}|}{|D|}\tag{8-8}
+$$<p>
+从式(8-8)可以看出，它计算的是“任意样本属于其中一个类别”这句话所包含的信息量。</p>
+<p>(2) 数据集$D$在特征值$A$下的经验条件熵$H(D|A)$为
+</p>
+$$
+H(D|A)=\sum\limits_{i=1}^{n}{\frac{|{{D}_{i}}|}{|D|}}H({{D}_{i}})=-\sum\limits_{i=1}^{n}{\frac{|{{D}_{i}}|}{|D|}}\sum\limits_{k=1}^{K}{\frac{|{{D}_{ik}}|}{|{{D}_{i}}|}}{{\log }_{2}}\frac{|{{D}_{ik}}|}{|{D}_{i}|}\tag{8-9}
+$$<p>
+从式(8-9)可以看出，它计算的是特征$A$在各个取值条件下“任意样本属于其中一个类别”这句话所包含的信息量。</p>
+<p>(3) 信息增益为
+</p>
+$$
+  g(D,A)=H(D)-H(D|A)\tag{8-10}
+$$<h2 id="832-计算示例">8.3.2 计算示例<a class="anchor" href="#832-%e8%ae%a1%e7%ae%97%e7%a4%ba%e4%be%8b">#</a></h2>
+<p>如果仅看上面的公式肯定不那么容易理解，下面我们再进行举例说明。这里建议各位读者将上面的公式同下面的计算过程对比观看进行理解。表8-1同样是7.1.3节中用过的一个信用卡审批数据集，其一共包含15个样本和3个特征维度。其中特征$X^{(1)}\in A_1=\{1,0\}$表示有无工作，特征$X^{(2)}\in A_2=\{1,0\}$表示是否有房，特征${{X}^{(3)}}\in {{A}_{3}}=\{D,S,T\}$表示学历等级，$Y\in C=\{1,0\}$表示是否审批通过的类标记。</p>
+<center>表 8-1 计算数据示例</center><div align=center><img width="670" src="/images/ml/t8-1.jpg"/> </div>
+<p><strong>1. 计算信息熵$H(D)$</strong></p>
+<p>根据式(8-8)可得
+</p>
+$$
+H(D)=-\left( \frac{5}{15}{{\log }_{2}}\frac{5}{15}+\frac{10}{15}{{\log }_{2}}\frac{10}{15} \right)\approx 0.918\tag{8-11}
+$$<p>
+<strong>2. 计算条件熵</strong></p>
+<p>由表8-1可知，数据集有3个特征（工作、房子、学历）$A_1$、$A_2$、$A_3$，接下来根据式(8-9)来计算$D$分别在3个特征取值条件下的条件熵$H(D|A_i)$。</p>
+<p>(1) 已知外部信息“工作”的情况下有
+</p>
+$$
+\begin{aligned}
+    & H(D|{{A}_{1}})=\left[ \frac{7}{15}H({{D}_{1}})+\frac{8}{15}H({{D}_{2}}) \right] \\[2ex] 
+   & =-\frac{7}{15}\left( \frac{3}{7}{{\log }_{2}}\frac{3}{7}+\frac{4}{7}{{\log }_{2}}\frac{4}{7} \right)-\frac{8}{15}\left( \frac{7}{8}{{\log }_{2}}\frac{7}{8}+\frac{1}{8}{{\log }_{2}}\frac{1}{8} \right)\approx 0.75  
+  \end{aligned}\tag{8-12}
+$$<p>
+式(8-12)中，$D_1$和$D_2$分别是$A_1$取值为“无工作”和“有工作”时，训练样本划分后对应的子集。</p>
+<p>(2) 已知外部信息“房子”的情况下有
+</p>
+$$
+\begin{aligned}
+    & H(D|{{A}_{2}})=\left[ \frac{8}{15}H({{D}_{1}})+\frac{7}{15}H({{D}_{2}}) \right] \\[2ex] 
+   & =-\frac{8}{15}\left( \frac{4}{8}{{\log }_{2}}\frac{4}{8}+\frac{4}{8}{{\log }_{2}}\frac{4}{8} \right)-\frac{7}{15}\left( \frac{1}{7}{{\log }_{2}}\frac{1}{7}+\frac{6}{7}{{\log }_{2}}\frac{6}{7} \right)\approx 0.81  
+  \end{aligned}\tag{8-13}
+$$<p>
+式(8-13)中，$D_1$和$D_2$分别是$A_2$取值为“无房”和“有房”时，训练样本划分后对应的子集。</p>
+<p>(3) 已知外部信息“学历”的情况下有
+</p>
+$$
+\begin{aligned}
+    & H(D|{{A}_{3}})=\left[ \frac{3}{15}H({{D}_{1}})+\frac{4}{15}H({{D}_{2}})+\frac{8}{15}H({{D}_{3}}) \right] \\[2ex] 
+   & =-\frac{3}{15}\left( \frac{1}{3}{{\log }_{2}}\frac{1}{3}+\frac{2}{3}{{\log }_{2}}\frac{2}{3} \right)-\frac{4}{15}\left( \frac{1}{4}{{\log }_{2}}\frac{1}{4}+\frac{3}{4}{{\log }_{2}}\frac{3}{4} \right) \\[2ex] 
+   & -\frac{8}{15}\left( \frac{3}{8}{{\log }_{2}}\frac{3}{8}+\frac{5}{8}{{\log }_{2}}\frac{5}{8} \right)\approx 0.91 \\ 
+  \end{aligned}\tag{8-14}
+$$<p>
+式(8-14)中，$D_1$、$D_2$、$D_3$分别是$A_3$取值为D、S和T时，训练样本划分后对应的子集。</p>
+<p><strong>3. 计算信息增益</strong></p>
+<p>根据上面的计算结果便可以得到各特征划分下的信息增益为
+</p>
+$$
+\begin{cases}
+   g(D,{{A}_{1}})=0.918-0.75=0.168 \\[1ex] 
+  g(D,{{A}_{2}})=0.918-0.81=0.108 \\[1ex] 
+  g(D,{{A}_{3}})=0.918-0.91=0.08 \\[1ex] 
+\end{cases}\tag{8-15}
+$$<p>
+到目前为止，我们已经知道了在生成决策树的过程中所需要计算的关键步骤信息增益，接下来，我们就开始正式介绍如何生成一棵决策树。</p>
+<h2 id="833-id3生成算法">8.3.3 ID3生成算法<a class="anchor" href="#833-id3%e7%94%9f%e6%88%90%e7%ae%97%e6%b3%95">#</a></h2>
+<p>在8.1节的末尾我们总结到，构建决策树的核心思想就是： 每次划分时，要选择使信息增益最大的划分方式，以此来递归构建决策树。如果利用一个特征进行分类的结果与随机分类的结果没有很大差别，则称这个特征没有分类能力，因此，对于决策树生成的一个关键步骤就是选取对训练数据具有分类能力的特征，这样可以提高决策树学习的效率，而通常对于特征选择的准则就是8.1节讲到的信息增益。</p>
+<p>ID3（Interactive Dichotomizer3）算法的核心思想是在选择决策树的各个节点时，采用信息增益来作为特征选择的标准，从而递归地构建决策树。其过程可以概括为，从根节点开始计算所有可能划分情况下的信息增益，然后选择信息增益最大的特征作为划分特征，由该特征的不同取值建立子节点，最后对子节点递归地调用以上方法，构建决策树，直到所有特征的信息增益均很小或没有可以选择为止。例如根据8.3.2节最后的计算结果可知，首先应该将数据样本以特征$A_1$（有无工作）作为划分方式对数据集进行第1次划分。下面开始介绍通过ID3来生成决策树的步骤及示例。</p>
+<p><strong>1. 生成步骤</strong></p>
+<p>输入： 训练数据集$D$，特征集$A$，阈值$\varepsilon$。</p>
+<p>输出： 决策树[2]。</p>
+<p>(1) 若$D$中所有样本属于同一类$C_k$（此时只有一个类别），则$T$为单节点树，将$C_k$作为该节点的类标记，返回$T$。</p>
+<p>(2) 若$A=\emptyset$，则$T$为单节点树，并将$D$中样本数最多的类$C_k$作为该节点的类标记，并返回$T$。</p>
+<p>(3) 否则，计算$A$中各特征对$D$的信息增益，选择信息增益最大的特征$A_g$。</p>
+<p>(4) 如果$A_g$的信息增益小于阈值$\varepsilon$，则将$T$置为单节点树，并将$D$中样本数最多的类$C_k$作为该节点的类标记，返回$T$。</p>
+<p>(5) 否则，对$A_g$的每个可能值$a_i$，以$A_g=a_i$将$D$分割为若干非空子集，并建立为子节点。</p>
+<p>(6) 对于第$i$个子节点，以$D_i$为训练集，以$A-\{A_g\}$为特征集，递归地调用步骤(1)~步骤(5)，得到子树$T_i$，返回$T_i$。</p>
+<p><strong>2. 生成示例</strong></p>
+<p>下面就用ID3算法来对表8-1中的数据样本进行决策树生成示例。易知该数据集不满足步骤(1)和步骤(2)中的条件，所以开始执行步骤(3)。同时，根据8.3.2节最后的计算结果可知，对于特征$A_1$、$A_2$、$A_3$来讲，在$A_1$条件下信息增益最大，所以应该选择特征$A_1$作为决策树的根节点。</p>
+<p>由于本例中未设置阈值，所以接着执行步骤(5)并按照$A_1$的取值将训练集$D$划分为两个子集$D_1$和$D_2$，如表8-2所示。</p>
+<center>表 8-2 第一次划分表</center><div align=center><img width="650" src="/images/ml/t8-2.jpg"/></div>
+<p>接着开始执行步骤(6)，由于$D_1$和$D_2$均不满足步骤(1)和步骤(2)中的条件，所以两部分需要分别继续执行后续步骤，此时生成的决策树如图8-5所示。</p>
+<div align=center><img width="300" src="/images/ml/p8-3.png"/></div><center>图 8-5 第一次划分</center>
+<p>此时，对于子集$D_1$ 来讲，需要从特征$A-\{A_g\}$中即$A_2$和$A_3$中选择新的特征，并计算信息增益。</p>
+<p><strong>1. 计算信息熵$H(D_1)$</strong>
+</p>
+$$
+H({{D}_{1}})=-\left( \frac{3}{7}{{\log }_{2}}\frac{3}{7}+\frac{4}{7}{{\log }_{2}}\frac{4}{7} \right)\approx 0.985\tag{8-16}
+$$<p>
+<strong>2. 计算条件熵</strong>
+</p>
+$$
+H({{D}_{1}}|{{A}_{2}})=-\frac{3}{7}\left( \frac{3}{3}{{\log }_{2}}\frac{3}{3}+0 \right)-\frac{4}{7}\left( \frac{1}{4}{{\log }_{2}}\frac{1}{4}+\frac{3}{4}{{\log }_{2}}\frac{3}{4} \right)\approx 0.464\tag{8-17}
+$$$$
+H({{D}_{1}}|{{A}_{3}})=-\frac{1}{7}\left( 0+0 \right)-\frac{2}{7}\left( 0+0 \right)-\frac{4}{7}\left( \frac{3}{4}{{\log }_{2}}\frac{3}{4}+\frac{1}{4}{{\log }_{2}}\frac{1}{4} \right)\approx 0.464\tag{8-18}
+$$<p>根据式(8-17)和式(8-18)的结果可知，对于子集$D_1$来讲，无论其采用$A_2$和$A_3$中的哪一个特征进行划分，最后计算得到的信息增益都是相等的，所以这里不妨就以特征$A_2$进行划分。</p>
+<p>同理，对于子集$D_2$来讲，也需要从特征$A-\{A_g\}$中（$A_2$和$A_3$中）选择新的特征，并计算信息增益。</p>
+<p><strong>1. 计算信息熵$H(D_2)$</strong>
+</p>
+$$
+H({{D}_{2}})=-\left( \frac{1}{8}{{\log }_{2}}\frac{1}{8}+\frac{7}{8}{{\log }_{2}}\frac{7}{8} \right)\approx 0.544\tag{8-19}
+$$<p>
+<strong>2. 计算条件熵</strong>
+</p>
+$$
+H({{D}_{2}}|{{A}_{2}})=-\frac{5}{8}\left( \frac{1}{5}{{\log }_{2}}\frac{1}{5}+\frac{4}{5}{{\log }_{2}}\frac{4}{5} \right)-\frac{3}{8}\left( 0+0 \right)\approx 0.451\tag{8-20}
+$$$$
+H({{D}_{2}}|{{A}_{3}})=-\frac{2}{8}\left( 0+0 \right)-\frac{2}{8}\left( \frac{1}{2}{{\log }_{2}}\frac{1}{2}+\frac{1}{2}{{\log }_{2}}\frac{1}{2} \right)-\frac{4}{8}\left( 0+0 \right)=0.25\tag{8-21}
+$$<p><strong>3. 信息增益</strong>
+</p>
+$$
+\begin{cases}
+   g({{D}_{2}}|{{A}_{2}})=0.544-0.451=0.093 \\[1ex] 
+ g({{D}_{2}}|{{A}_{3}})=0.544-0.25=0.294 \\[1ex] 
+\end{cases}\tag{8-22}
+$$<p>
+根据式(8-22)的计算结果可知，对于子集$D_2$来讲，采用特征$A_3$来对其进行划分时所产生的信息增益最大，因此应该选择特征$A_3$来作为子集$D_2$的根节点。</p>
+<p>至此，根据上述计算过程，便可以得到第二次划分后的结果，如表8-3所示。</p>
+<center>表 8-3 第二次划分表</center><div align=center><img width="650" src="/images/ml/t8-3.jpg"/></div>
+<p>从表8-3中的结果可知，$D_{11}$、$D_{21}$、$D_{23}$这3个子集中样本均只有一个类别，即满足生成步骤中的第(1)步，故此时可以得到第2次划分后的决策树，如图8-6所示。</p>
+<div align=center><img width="400" src="/images/ml/p8-4.png"/></div><center>图 8-6 第二次划分</center>
+<p>由于子集$D_{12}$和$D_{22}$均不满足终止条件(2)和(4)，并且此时两个子集中均只有一个特征可以选择，所以并不需要再进行比较，此时直接划分即可，如表8-4所示。</p>
+<center>表 8-4 第三次划分表</center><div align=center><img width="650" src="/images/ml/t8-4.jpg"/></div>
+<p>根据表8-4中的结果可知，子集$D_{121}$满足生成步骤中的第(1)步，故此时可以得到第3次划分后的决策树，如图8-7所示。</p>
+<div align=center><img width="400" src="/images/ml/p8-5.png"/></div><center>图 8-7 第三次划分</center>
+<p>此时，由于子集$D_{122}$和$D_{221}$满足生成步骤中第(2)步的终止条件，即再无特征可以进行划分，需要选择样本数最多的类别作为该节点的类别进行返回，但巧合的是子集$D_{122}$和$D_{221}$中不同类别均只有一个样本，因此随机选择一个类别即可。不过在实际过程中很少会出现这种情况，因为一般当节点的样本数小于某个阈值时也会停止继续划分。这样便可以得到最终生成的决策树，如图8-8所示。</p>
+<div align=center><img width="400" src="/images/ml/p8-6.png"/></div><center>图 8-8 完整决策树</center>
+<p>如上就是通过ID3算法生成整个决策树的详细过程。根据生成步骤可以发现，如果单纯以$g(D,A)$作为标准，会存在模型倾向于选择取值较多的特征进行划分（例如上面的$A_3$）。虽然在上面这个例子中不存在，但是我们仍可以从直观上理解为什么ID3会倾向于选取特征值取值较多的特征。由于$g(D,A)$的直观意义是$D$被$A$划分后不确定性的减少量，因此可想而知当$A$的取值情况越多，那么$D$会被划分得到的子集就越多，于是其不确定性自然会减少得越多，从而ID3算法会倾向于选择取值较多的特征进行划分。可以想象，在这样的情况下最终得到的决策树将会是一棵很胖很矮的决策树，进而导致最后生成的决策树容易出现过拟合现象。</p>
+<h2 id="834-c45生成算法">8.3.4 C4.5生成算法<a class="anchor" href="#834-c45%e7%94%9f%e6%88%90%e7%ae%97%e6%b3%95">#</a></h2>
+<p>为了解决ID3算法的弊端，进而产生了C4.5算法。C4.5算法与ID3算法相似，不同之处仅在于C4.5算法在选择特征的时候采用了信息增益比作为标准，即选择信息增益比最大的特征作为当前节点的划分方式。具体为，特征$A$对训练集D的信息增益比$g_R(D,A)$定义为其信息增益$g(D,A)$与其训练集$D$关于特征$A$的信息熵$H_A(D)$之比，即
+</p>
+$$
+{{g}_{R}}(D,A)=\frac{g(D,A)}{{{H}_{A}}(D)}\tag{8-23}
+$$<p>其中，$H_A(D)=-\displaystyle\sum_{i=1}^n\frac{|D_i|}{|D|}\log_2{\frac{|D_i|}{|D|}}$，$n$是特征$A$取值的个数。
+因此，在8.3.3节的例子中，对于选取根节点时其增益比计算如下：</p>
+<p><strong>1. 计算得到信息增益</strong>
+</p>
+$$
+\begin{cases}
+  g(D,{{A}_{1}})=0.918-0.75=0.168 \\[1ex] 
+ g(D,{{A}_{2}})=0.918-0.81=0.108 \\[1ex] 
+  g(D,{{A}_{3}})=0.918-0.91=0.008 \\[1ex] 
+\end{cases}\tag{8-24}
+$$<p>
+<strong>2. 计算各特征的信息熵</strong>
+</p>
+$$
+\begin{cases}
+  {{H}_{{{A}_{1}}}}(D)=-\sum_{i=1}^2\frac{|{{D}_{i}}|}{|D|}=-(\frac{7}{15}{{\log }_{2}}\frac{7}{15}+\frac{8}{15}{{\log }_{2}}\frac{8}{15})\approx 0.997 \\[1ex]  
+  {{H}_{{{A}_{2}}}}(D)=-(\frac{8}{15}{{\log }_{2}}\frac{8}{15}+\frac{7}{15}{{\log }_{2}}\frac{7}{15})\approx 0.997 \\[1ex] 
+  {{H}_{{{A}_{3}}}}(D)=-(\frac{3}{15}{{\log }_{2}}\frac{3}{15}+\frac{4}{15}{{\log }_{2}}\frac{4}{15}+\frac{8}{15}{{\log }_{2}}\frac{8}{15})\approx 1.456 \\ 
+\end{cases}\tag{8-25}
+$$<p>
+<strong>3. 计算信息增益比</strong>
+</p>
+$$
+\begin{cases}
+  {{g}_{R}}(D,{{A}_{1}})=\frac{0.168}{0.997}=0.169 \\[1ex] 
+  {{g}_{R}}(D,{{A}_{2}})=\frac{0.108}{0.997}=0.108 \\[1ex] 
+  {{g}_{R}}(D,{{A}_{3}})=\frac{0.008}{1.456}=0.005 \\[1ex] 
+\end{cases}\tag{8-26}
+$$<p>
+根据式(8-26)的计算结果，此时应该以特征$A_1$的各个取值对样本集合$D$进行划分。</p>
+<p>由此，可以将利用C4.5算法生成决策树的过程总结如下。</p>
+<p>输入： 训练数据集$D$，特征集$A$，阈值$\varepsilon$。</p>
+<p>输出： 决策树[2]。</p>
+<p>(1) 若$D$中所有样本属于同一类$C_k$，则$T$为单节点树，将$C_k$作为该节点的类标记，返回$T$。</p>
+<p>(2) 若$A=\emptyset$，则$T$为单节点树，并将$D$中样本数最多的类$C_k$作为该节点的类标记，并返回$T$。</p>
+<p>(3) 否则，计算$A$中各特征对$D$的信息增益比，选择信息增益比最大的特征$A_g$。</p>
+<p>(4) 如果$A_g$的信息增益比小于阈值$\varepsilon$，则将$T$置为单节点树，并将$D$中样本数最多的类$C_k$作为该节点的类标记，返回$T$。</p>
+<p>(5) 否则，对$A_g$的每个可能值$a_i$，以$A_g=a_i$将$D$分割为若干非空子集，并建立为子节点。</p>
+<p>(6) 对于第$i$个子节点，以$D_i$为训练集，以$A-\{A_g\}$为特征集，递归地调用步骤(1)~步骤(5)，得到子树$T_i$，返回$T_i$。</p>
+<p>从以上生成步骤可以看出，C4.5算法与ID3算法的唯一区别就是选择的标准不同，而其他的步骤均一样。到此为止，我们就学习完了决策树中的ID3与C4.5生成算法。</p>
+<h2 id="835-特征划分">8.3.5 特征划分<a class="anchor" href="#835-%e7%89%b9%e5%be%81%e5%88%92%e5%88%86">#</a></h2>
+<p>在经过上述两节的介绍之后，相信读者对于如何通过ID3和C4.5算法构造一棵简单的决策树已经有了基本的了解。不过细心的读者可能会有这样一个疑问，那就是如何来处理连续型的特征变量。</p>
+<p>从上面的示例数据集可以看出，工作、房子、学历这3个属性都属于离散型的特征变量（Discrete Variable），即每个特征的取值都属于某一个类别，而通常在实际建模过程中，更多的会是连续型的特征变量（Continuous Variable），例如年龄、身高等。因此，对于这种连续型的特征变量，其具体做法便是先对其进行排序处理，然后取所有连续两个值的均值来离散化整个连续型特征变量[3]。</p>
+<p>假设现在某数据集中的一个特征维度为
+</p>
+$$
+[0.5,0.2,0.8,0.9,1.2,2.1,3.2,4.5]
+$$<p>
+则首先需要对其进行排序处理，排序后的结果为</p>
+$$
+[0.2,0.5,0.8,0.9,1.2,2.1,3.2,4.5]
+$$<p>
+接着计算所有连续两个值之间的平均值</p>
+$$
+[0.35,0.65,0.85,1.05,1.65,2.65,3.85]
+$$<p>
+这样，便得到了该特征离散化后的结果。最后在构造决策树时，只需使用平均值中离散化后的特征进行划分指标的计算。同时，值得一提的地方是目前sklearn在实际处理时，是把所有的特征均看作连续型变量在进行处理。</p>
+<h2 id="836-小结">8.3.6 小结<a class="anchor" href="#836-%e5%b0%8f%e7%bb%93">#</a></h2>
+<p>在本节中，我们首先回顾了决策树中几个重要的基本概念，并同时进行了相关示例计算，接着介绍了如何通过信息增益这一划分标准（ID3算法）来构造生成决策树，并以一个真实的例子进行了计算示例，然后介绍了通过引入信息增益比（C4.5算法）这一划分标准来解决ID3算法在生成决策树时所存在的弊端，最后介绍了在决策树生成时，如何处理连续型特征变量的一种常用方法。</p>
+</article>
+ 
+      
+
+      <footer class="book-footer">
+        
+  <div class="flex flex-wrap justify-between">
+
+<div>
+
+</div>
+
+<div>
+
+</div>
+
+</div>
+
+<div class="flex flex-wrap justify-between">
+    <span>
+    
+      <a href="/ml/chapter08/ee9ada9729124049/" class="flex align-center">
+        <img src="/icons/backward.svg" class="book-icon" alt="Backward" />
+        <span>8.2 决策树建模与可视化</span>
+      </a>
+    
+    </span>
+    <span>
+    
+      <a href="/ml/chapter08/87ba589d6c17434d/" class="flex align-center">
+        <span>8.4 决策树剪枝过程</span>
+        <img src="/icons/forward.svg" class="book-icon" alt="Forward" />
+      </a>
+    
+    </span>
+  </div>
+
+ 
+        
+  
+  <div class="book-comments">
+
+</div>
+  
+ 
+        
+  <link rel="stylesheet" href="/katex/katex.min.css" />
+  <script defer src="/katex/katex.min.js"></script>
+  <script defer src="/katex/auto-render.min.js"></script>
+  
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        if (window.renderMathInElement) {
+          renderMathInElement(
+            document.querySelector(".book-page"),
+            Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
+          );
+        }
+      });
+    </script>
+  
+
+
+        
+  
+ 
+        
+  
+    <script>(function(){document.querySelectorAll("pre:has(code)").forEach(e=>{e.addEventListener("click",e.focus),e.addEventListener("copy",function(t){if(t.preventDefault(),navigator.clipboard){const t=window.getSelection().toString()||e.textContent;navigator.clipboard.writeText(t)}})})})()</script>
+  
+
+      </footer>
+
+      <label for="menu-control" class="hidden book-menu-overlay"></label>
+    </div>
+
+    
+  
+  <aside class="book-toc">
+    <div class="book-toc-content">
+      
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#831-基本概念与定义">8.3.1 基本概念与定义</a></li>
+    <li><a href="#832-计算示例">8.3.2 计算示例</a></li>
+    <li><a href="#833-id3生成算法">8.3.3 ID3生成算法</a></li>
+    <li><a href="#834-c45生成算法">8.3.4 C4.5生成算法</a></li>
+    <li><a href="#835-特征划分">8.3.5 特征划分</a></li>
+    <li><a href="#836-小结">8.3.6 小结</a></li>
+  </ul>
+</nav>
+
+
+
+    </div>
+  </aside>
+  
+ 
+  </main>
+
+  
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

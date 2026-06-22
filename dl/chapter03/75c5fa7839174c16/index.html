@@ -1,0 +1,3873 @@
+<!DOCTYPE html>
+<html lang="zh_CN" dir="ltr">
+<head>
+  <!--
+Made with Book Theme
+https://github.com/alex-shpak/hugo-book
+-->
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="第 3 章 深度学习基础# 在前面两个章节我们详细介绍了深度学习的发展历史以及深度学习环境的安装与配置。在本章内容中我们将正式开始深度学习基础内容的学习。在本章内容中，我们将详尽介绍深度学习入门的基础知识，涵盖了从线性回归和逻辑回归的的由来与建模、什么是深度学习以及为什么需要深度学习等相关理念，到梯度下降和反向传播的原理及实现方法。我们将全面介绍如何从零开始构建回归和分类模型，包括逻辑回归到Softmax回归的转换，以及常用的评估指标和应对过拟合的方法。此外，本章内容还将深入探讨了超参数选择的重要性、交叉验证的实践意义、激活函数的作用，以及在多标签分类场景下的损失函数与模型评估方法。
+3.1 线性回归# 经过前面预备知识的介绍，现在终于正式进入到了深度学习的内容介绍中。那什么又是深度学习呢？以及我们为什么需要深度学习呢？要想弄清楚这两个问题，我们还得先从机器学习中的线性回归说起。
+3.1.1 理解线性回归模型# 通常来讲，我们所学的每个算法都是为了解决某一类问题而诞生的。换句话说，也就是在实际情况中的确存在一些问题能够通过线性回归来解决，例如对房价的预测，但是有人可能会问，为什么对于房价的预测就应该用线性回归，而不是其他算法模型呢？其原因就在于常识告诉我们房价是随着面积的增长而增长的，且总体上呈线性增长的趋势。那有没有当面积大到一定程度后价格反而降低，因此不符合线性增长的呢？这当然也可能存在，但在实际处理中肯定会优先选择线性回归模型，当效果不佳时我们才会尝试其他算法，因此，当学习过多个算法模型后，在得到某个具体的问题时，可能就需要考虑哪种模型更适合来解决这个问题了。
+例如某市的房价走势如图3-1所示，其中横坐标为面积，纵坐标为价格，并且房价整体上呈线性增长的趋势。假如现在随意告诉你一个房屋的面积，要怎样才能预测（或者叫计算）出其对应的价格呢？
+图 3-1 某市的房价走势图 3.1.2 建立线性回归模型# 一般来讲，当我们得到一个实际问题时，首先会根据问题的背景结合常识选择一个合适的模型。同时，现在常识告诉我们房价的增长更优先符合线性回归这类模型，因此可以考虑建立一个如下所示的线性回归模型（Linear Regression）。
+$$ \hat{y}=h(x)=wx&#43;b\tag{3-1} $$ 其中$w$叫权重（Weight），$b$叫偏置（Bias）或者截距（Intercept），两者都称为模型参数（Parameter）。当通过某种方法求解得到未知参数$w$和$b$之后，也就意味着我们得到了这个预测模型，即给定一个房屋面积$x$，就能够预测出其对应的房价$\hat{y}$。
+注意： 在机器学习中所谓的模型，可以简单理解为一个复合函数。
+当然，尽管影响房价的主要因素是面积，但是其它因素同样也可能影响房屋的价格。例如房屋到学校的距离、到医院的距离和到大型商场的距离等，只是各个维度对应的权重大小不同而已。虽然现实生活中一般不这么量化，但是开发商也总是会拿学区房做卖点，所以这时便有了影响房价的4个因素，而在机器学习中我们将其称为特征（Feature）或者属性（Attribute），因此，包含多个特征的线性回归就叫作多变量线性回归（Multiple Linear Regression）。
+此时，便可以得到如下所示的线性回归模型。 $$ \hat{y}=h(x)={{w}_{1}}{{x}_{1}}&#43;\cdots &#43;{{w}_{4}}{{x}_{4}}&#43;b=w^Tx&#43;b\tag{3-2} $$ 其中$x_1,x_2,x_3,x_4$表示输入的4项房屋信息特征，$w_1,w_2,w_3,w_4$表示每个特征对应的权重参数，$b$ 为偏置。
+并且我们还可以通过如下示意图来对式(3-2)中的模型进行表示：
+图 3-2. 房价预测线性回归结构图（偏置未画出） 3.1.3 求解线性回归模型# 当建立好一个模型后，自然而然想到的就是如何通过给定的数据，也叫训练集（Training Data），来对模型 $h(x)$进行求解。在中学时期我们学过如何通过两个坐标点来求解过这两点的直线，可在上述的场景中这种做法显然是行不通的（因为求解线性回归模型所有的点并不在一条直线上），那有没有什么好的解决的办法呢？
+此时就需要我们转换一下思路了，既然不能直接进行求解，那就换一种间接的方式。现在来想象一下，当 $h(x)$ 满足一个什么样的条件时，它才能称得上是一个好的$h(x)$？ 回想一下求解$h(x)$的目的是什么，不就是希望输入面积$x$后能够输出“准确”的房价$\hat{y}$吗？既然直接求解$h(x)$不好入手，那么我们就从“准确”来入手。
+可又怎样来定义准确呢？在这里，我们可以通过计算每个样本的真实房价与预测房价之间的均方误差来对“准确”进行刻画。 $$ \begin{cases} J(w,b)=\frac{1}{2m}\sum\limits_{i=1}^{m}{{{({{y}^{(i)}}-{{{\hat{y}}}^{(i)}})}^{2}}}\\ {{{\hat{y}}}^{(i)}}=h({{x}^{(i)}})=w^T{{x}^{(i)}}&#43;b \end{cases} \tag{3-3} $$ 其中，$m$表示样本数量； $x^{(i)}$表示第$i$个样本为一个列向量；$w$表示模型对应的参数也为一个列向量； $y^{(i)}$表示第$i$个房屋的真实价格； $\hat{y}^{(i)}$表示第$i$ 个房屋的预测价格。
+由式(3-3)可知，当函数$J(w,b)$取最小值时的参数$\hat{w}$和$\hat{b}$，就是要求的目标参数。为什么？因为当$J(w,b)$取最小值时就意味着此时所有样本的预测值与真实值之间的误差（Error）最小。如果极端一点，就是所有预测值都等同于真实值，那么此时的$J(w,b)$就是0了。因此，对于如何求解模型 $h(x)$ 的问题就转换成了如何最小化函数$J(w,b)$的问题，而$J(w,b)$也有一个专门的术语叫作目标函数（Objective Function）或者代价函数（Cost Function）抑或损失函数（Loss Function）。关于目标函数的求解问题将在3.2节内容中进行介绍。
+3.1.4 多项式回归建模# 在3.1.2节的内容中，我们分别介绍了单变量线性回归和多变量线性回归，接下来我们开始介绍多项式回归。那什么是多项式回归呢？现在假定已知矩形的面积公式，而不知道求解梯形的面积公式，并且同时手上有若干个类似图3-3所示的梯形。已知梯形的上底和下底，并且上底均等于高。现在需要建立一个模型，当任意给定一个类似图3-3中的梯形时能近似地算出其面积。面对这样的问题该如何进行建模呢？
+">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
+<meta name="color-scheme" content="light dark"><meta property="og:url" content="https://mlwithme.github.io/dl/chapter03/75c5fa7839174c16/">
+	<meta property="og:site_name" content="《从零学AI指南手册》">
+	<meta property="og:title" content="3.1 线性回归">
+	<meta property="og:description" content="第 3 章 深度学习基础# 在前面两个章节我们详细介绍了深度学习的发展历史以及深度学习环境的安装与配置。在本章内容中我们将正式开始深度学习基础内容的学习。在本章内容中，我们将详尽介绍深度学习入门的基础知识，涵盖了从线性回归和逻辑回归的的由来与建模、什么是深度学习以及为什么需要深度学习等相关理念，到梯度下降和反向传播的原理及实现方法。我们将全面介绍如何从零开始构建回归和分类模型，包括逻辑回归到Softmax回归的转换，以及常用的评估指标和应对过拟合的方法。此外，本章内容还将深入探讨了超参数选择的重要性、交叉验证的实践意义、激活函数的作用，以及在多标签分类场景下的损失函数与模型评估方法。
+3.1 线性回归# 经过前面预备知识的介绍，现在终于正式进入到了深度学习的内容介绍中。那什么又是深度学习呢？以及我们为什么需要深度学习呢？要想弄清楚这两个问题，我们还得先从机器学习中的线性回归说起。
+3.1.1 理解线性回归模型# 通常来讲，我们所学的每个算法都是为了解决某一类问题而诞生的。换句话说，也就是在实际情况中的确存在一些问题能够通过线性回归来解决，例如对房价的预测，但是有人可能会问，为什么对于房价的预测就应该用线性回归，而不是其他算法模型呢？其原因就在于常识告诉我们房价是随着面积的增长而增长的，且总体上呈线性增长的趋势。那有没有当面积大到一定程度后价格反而降低，因此不符合线性增长的呢？这当然也可能存在，但在实际处理中肯定会优先选择线性回归模型，当效果不佳时我们才会尝试其他算法，因此，当学习过多个算法模型后，在得到某个具体的问题时，可能就需要考虑哪种模型更适合来解决这个问题了。
+例如某市的房价走势如图3-1所示，其中横坐标为面积，纵坐标为价格，并且房价整体上呈线性增长的趋势。假如现在随意告诉你一个房屋的面积，要怎样才能预测（或者叫计算）出其对应的价格呢？
+图 3-1 某市的房价走势图 3.1.2 建立线性回归模型# 一般来讲，当我们得到一个实际问题时，首先会根据问题的背景结合常识选择一个合适的模型。同时，现在常识告诉我们房价的增长更优先符合线性回归这类模型，因此可以考虑建立一个如下所示的线性回归模型（Linear Regression）。
+$$ \hat{y}=h(x)=wx&#43;b\tag{3-1} $$ 其中$w$叫权重（Weight），$b$叫偏置（Bias）或者截距（Intercept），两者都称为模型参数（Parameter）。当通过某种方法求解得到未知参数$w$和$b$之后，也就意味着我们得到了这个预测模型，即给定一个房屋面积$x$，就能够预测出其对应的房价$\hat{y}$。
+注意： 在机器学习中所谓的模型，可以简单理解为一个复合函数。
+当然，尽管影响房价的主要因素是面积，但是其它因素同样也可能影响房屋的价格。例如房屋到学校的距离、到医院的距离和到大型商场的距离等，只是各个维度对应的权重大小不同而已。虽然现实生活中一般不这么量化，但是开发商也总是会拿学区房做卖点，所以这时便有了影响房价的4个因素，而在机器学习中我们将其称为特征（Feature）或者属性（Attribute），因此，包含多个特征的线性回归就叫作多变量线性回归（Multiple Linear Regression）。
+此时，便可以得到如下所示的线性回归模型。 $$ \hat{y}=h(x)={{w}_{1}}{{x}_{1}}&#43;\cdots &#43;{{w}_{4}}{{x}_{4}}&#43;b=w^Tx&#43;b\tag{3-2} $$ 其中$x_1,x_2,x_3,x_4$表示输入的4项房屋信息特征，$w_1,w_2,w_3,w_4$表示每个特征对应的权重参数，$b$ 为偏置。
+并且我们还可以通过如下示意图来对式(3-2)中的模型进行表示：
+图 3-2. 房价预测线性回归结构图（偏置未画出） 3.1.3 求解线性回归模型# 当建立好一个模型后，自然而然想到的就是如何通过给定的数据，也叫训练集（Training Data），来对模型 $h(x)$进行求解。在中学时期我们学过如何通过两个坐标点来求解过这两点的直线，可在上述的场景中这种做法显然是行不通的（因为求解线性回归模型所有的点并不在一条直线上），那有没有什么好的解决的办法呢？
+此时就需要我们转换一下思路了，既然不能直接进行求解，那就换一种间接的方式。现在来想象一下，当 $h(x)$ 满足一个什么样的条件时，它才能称得上是一个好的$h(x)$？ 回想一下求解$h(x)$的目的是什么，不就是希望输入面积$x$后能够输出“准确”的房价$\hat{y}$吗？既然直接求解$h(x)$不好入手，那么我们就从“准确”来入手。
+可又怎样来定义准确呢？在这里，我们可以通过计算每个样本的真实房价与预测房价之间的均方误差来对“准确”进行刻画。 $$ \begin{cases} J(w,b)=\frac{1}{2m}\sum\limits_{i=1}^{m}{{{({{y}^{(i)}}-{{{\hat{y}}}^{(i)}})}^{2}}}\\ {{{\hat{y}}}^{(i)}}=h({{x}^{(i)}})=w^T{{x}^{(i)}}&#43;b \end{cases} \tag{3-3} $$ 其中，$m$表示样本数量； $x^{(i)}$表示第$i$个样本为一个列向量；$w$表示模型对应的参数也为一个列向量； $y^{(i)}$表示第$i$个房屋的真实价格； $\hat{y}^{(i)}$表示第$i$ 个房屋的预测价格。
+由式(3-3)可知，当函数$J(w,b)$取最小值时的参数$\hat{w}$和$\hat{b}$，就是要求的目标参数。为什么？因为当$J(w,b)$取最小值时就意味着此时所有样本的预测值与真实值之间的误差（Error）最小。如果极端一点，就是所有预测值都等同于真实值，那么此时的$J(w,b)$就是0了。因此，对于如何求解模型 $h(x)$ 的问题就转换成了如何最小化函数$J(w,b)$的问题，而$J(w,b)$也有一个专门的术语叫作目标函数（Objective Function）或者代价函数（Cost Function）抑或损失函数（Loss Function）。关于目标函数的求解问题将在3.2节内容中进行介绍。
+3.1.4 多项式回归建模# 在3.1.2节的内容中，我们分别介绍了单变量线性回归和多变量线性回归，接下来我们开始介绍多项式回归。那什么是多项式回归呢？现在假定已知矩形的面积公式，而不知道求解梯形的面积公式，并且同时手上有若干个类似图3-3所示的梯形。已知梯形的上底和下底，并且上底均等于高。现在需要建立一个模型，当任意给定一个类似图3-3中的梯形时能近似地算出其面积。面对这样的问题该如何进行建模呢？">
+	<meta property="og:locale" content="zh_CN">
+	<meta property="og:type" content="article">
+		<meta property="article:section" content="dl">
+
+
+	<meta itemprop="name" content="3.1 线性回归">
+	<meta itemprop="description" content="第 3 章 深度学习基础# 在前面两个章节我们详细介绍了深度学习的发展历史以及深度学习环境的安装与配置。在本章内容中我们将正式开始深度学习基础内容的学习。在本章内容中，我们将详尽介绍深度学习入门的基础知识，涵盖了从线性回归和逻辑回归的的由来与建模、什么是深度学习以及为什么需要深度学习等相关理念，到梯度下降和反向传播的原理及实现方法。我们将全面介绍如何从零开始构建回归和分类模型，包括逻辑回归到Softmax回归的转换，以及常用的评估指标和应对过拟合的方法。此外，本章内容还将深入探讨了超参数选择的重要性、交叉验证的实践意义、激活函数的作用，以及在多标签分类场景下的损失函数与模型评估方法。
+3.1 线性回归# 经过前面预备知识的介绍，现在终于正式进入到了深度学习的内容介绍中。那什么又是深度学习呢？以及我们为什么需要深度学习呢？要想弄清楚这两个问题，我们还得先从机器学习中的线性回归说起。
+3.1.1 理解线性回归模型# 通常来讲，我们所学的每个算法都是为了解决某一类问题而诞生的。换句话说，也就是在实际情况中的确存在一些问题能够通过线性回归来解决，例如对房价的预测，但是有人可能会问，为什么对于房价的预测就应该用线性回归，而不是其他算法模型呢？其原因就在于常识告诉我们房价是随着面积的增长而增长的，且总体上呈线性增长的趋势。那有没有当面积大到一定程度后价格反而降低，因此不符合线性增长的呢？这当然也可能存在，但在实际处理中肯定会优先选择线性回归模型，当效果不佳时我们才会尝试其他算法，因此，当学习过多个算法模型后，在得到某个具体的问题时，可能就需要考虑哪种模型更适合来解决这个问题了。
+例如某市的房价走势如图3-1所示，其中横坐标为面积，纵坐标为价格，并且房价整体上呈线性增长的趋势。假如现在随意告诉你一个房屋的面积，要怎样才能预测（或者叫计算）出其对应的价格呢？
+图 3-1 某市的房价走势图 3.1.2 建立线性回归模型# 一般来讲，当我们得到一个实际问题时，首先会根据问题的背景结合常识选择一个合适的模型。同时，现在常识告诉我们房价的增长更优先符合线性回归这类模型，因此可以考虑建立一个如下所示的线性回归模型（Linear Regression）。
+$$ \hat{y}=h(x)=wx&#43;b\tag{3-1} $$ 其中$w$叫权重（Weight），$b$叫偏置（Bias）或者截距（Intercept），两者都称为模型参数（Parameter）。当通过某种方法求解得到未知参数$w$和$b$之后，也就意味着我们得到了这个预测模型，即给定一个房屋面积$x$，就能够预测出其对应的房价$\hat{y}$。
+注意： 在机器学习中所谓的模型，可以简单理解为一个复合函数。
+当然，尽管影响房价的主要因素是面积，但是其它因素同样也可能影响房屋的价格。例如房屋到学校的距离、到医院的距离和到大型商场的距离等，只是各个维度对应的权重大小不同而已。虽然现实生活中一般不这么量化，但是开发商也总是会拿学区房做卖点，所以这时便有了影响房价的4个因素，而在机器学习中我们将其称为特征（Feature）或者属性（Attribute），因此，包含多个特征的线性回归就叫作多变量线性回归（Multiple Linear Regression）。
+此时，便可以得到如下所示的线性回归模型。 $$ \hat{y}=h(x)={{w}_{1}}{{x}_{1}}&#43;\cdots &#43;{{w}_{4}}{{x}_{4}}&#43;b=w^Tx&#43;b\tag{3-2} $$ 其中$x_1,x_2,x_3,x_4$表示输入的4项房屋信息特征，$w_1,w_2,w_3,w_4$表示每个特征对应的权重参数，$b$ 为偏置。
+并且我们还可以通过如下示意图来对式(3-2)中的模型进行表示：
+图 3-2. 房价预测线性回归结构图（偏置未画出） 3.1.3 求解线性回归模型# 当建立好一个模型后，自然而然想到的就是如何通过给定的数据，也叫训练集（Training Data），来对模型 $h(x)$进行求解。在中学时期我们学过如何通过两个坐标点来求解过这两点的直线，可在上述的场景中这种做法显然是行不通的（因为求解线性回归模型所有的点并不在一条直线上），那有没有什么好的解决的办法呢？
+此时就需要我们转换一下思路了，既然不能直接进行求解，那就换一种间接的方式。现在来想象一下，当 $h(x)$ 满足一个什么样的条件时，它才能称得上是一个好的$h(x)$？ 回想一下求解$h(x)$的目的是什么，不就是希望输入面积$x$后能够输出“准确”的房价$\hat{y}$吗？既然直接求解$h(x)$不好入手，那么我们就从“准确”来入手。
+可又怎样来定义准确呢？在这里，我们可以通过计算每个样本的真实房价与预测房价之间的均方误差来对“准确”进行刻画。 $$ \begin{cases} J(w,b)=\frac{1}{2m}\sum\limits_{i=1}^{m}{{{({{y}^{(i)}}-{{{\hat{y}}}^{(i)}})}^{2}}}\\ {{{\hat{y}}}^{(i)}}=h({{x}^{(i)}})=w^T{{x}^{(i)}}&#43;b \end{cases} \tag{3-3} $$ 其中，$m$表示样本数量； $x^{(i)}$表示第$i$个样本为一个列向量；$w$表示模型对应的参数也为一个列向量； $y^{(i)}$表示第$i$个房屋的真实价格； $\hat{y}^{(i)}$表示第$i$ 个房屋的预测价格。
+由式(3-3)可知，当函数$J(w,b)$取最小值时的参数$\hat{w}$和$\hat{b}$，就是要求的目标参数。为什么？因为当$J(w,b)$取最小值时就意味着此时所有样本的预测值与真实值之间的误差（Error）最小。如果极端一点，就是所有预测值都等同于真实值，那么此时的$J(w,b)$就是0了。因此，对于如何求解模型 $h(x)$ 的问题就转换成了如何最小化函数$J(w,b)$的问题，而$J(w,b)$也有一个专门的术语叫作目标函数（Objective Function）或者代价函数（Cost Function）抑或损失函数（Loss Function）。关于目标函数的求解问题将在3.2节内容中进行介绍。
+3.1.4 多项式回归建模# 在3.1.2节的内容中，我们分别介绍了单变量线性回归和多变量线性回归，接下来我们开始介绍多项式回归。那什么是多项式回归呢？现在假定已知矩形的面积公式，而不知道求解梯形的面积公式，并且同时手上有若干个类似图3-3所示的梯形。已知梯形的上底和下底，并且上底均等于高。现在需要建立一个模型，当任意给定一个类似图3-3中的梯形时能近似地算出其面积。面对这样的问题该如何进行建模呢？">
+	<meta itemprop="wordCount" content="165">
+
+<title>3.1 线性回归 • 《从零学AI指南手册》</title>
+<link rel="icon" href="/favicon.png" >
+<link rel="manifest" href="/manifest.json">
+<link rel="canonical" href="https://mlwithme.github.io/dl/chapter03/75c5fa7839174c16/">
+<link rel="stylesheet" href="/book.min.6097ccf1d338ddfaa037d2f96478059a71fa573d0f917d128bab595efea338ca.css" integrity="sha256-YJfM8dM43fqgN9L5ZHgFmnH6Vz0PkX0Si6tZXv6jOMo=" crossorigin="anonymous">
+
+
+  <script defer type="module" src="/en.search.min.ffaad769e546b38d39820301bb9e5c193822f7bf0f46a855602e4e14707802e0.js" integrity="sha256-/6rXaeVGs405ggMBu55cGTgi978PRqhVYC5OFHB4AuA=" crossorigin="anonymous"></script>
+
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-23SZ6E8VY7"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-23SZ6E8VY7');
+</script>
+<script async src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
+
+</head>
+<body dir="ltr" class="book-kind-page book-type-dl">
+  <input type="checkbox" class="hidden toggle" id="menu-control" />
+  <input type="checkbox" class="hidden toggle" id="toc-control" />
+  <main class="container flex">
+    
+<aside class="book-menu">
+  <div class="book-menu-content">
+    
+  <nav>
+<h2 class="book-brand">
+  <a class="flex align-center" href="/"><span>《从零学AI指南手册》</span>
+  </a>
+</h2>
+
+
+<div class="book-search hidden">
+  <input id="book-search-input" type="text" 
+    placeholder="Search"
+    aria-label="Search"
+    maxlength="64" />
+  <div class="book-search-spinner hidden"></div>
+  <ul id="book-search-results"></ul>
+</div>
+<script>document.querySelector(".book-search").classList.remove("hidden")</script>
+
+
+
+
+
+
+
+
+
+
+  
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a>
+      大模型Agent开发</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-253e26e732e57a78f635dcf47df3d0a3" class="toggle"  />
+    <label for="section-253e26e732e57a78f635dcf47df3d0a3" class="flex">
+      <a role="button" class="">
+        第 1 章 RAG 基础概念</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/454f0942222e471e/" class="">
+      1.1 RAG 提出背景</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/d7623d619f884b25/" class="">
+      1.2 RAG 流程概览</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-810ee5a2a3a24c9b7c25ab5324ae7db7" class="toggle"  />
+    <label for="section-810ee5a2a3a24c9b7c25ab5324ae7db7" class="flex">
+      <a role="button" class="">
+        第 2 章 大模型接入与使用</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/d43adfc00df54515/" class="">
+      2.1 SDK 介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/8b9059fde1d644a4/" class="">
+      2.2 现代大模型中的 SDK</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/95d3214ab80b4769/" class="">
+      2.3 DashScope 接口体系</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/b9843c089d654494/" class="">
+      2.4 千问大模型接入与使用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ed1727f01d0e40dc9b7961b72e42160e" class="toggle"  />
+    <label for="section-ed1727f01d0e40dc9b7961b72e42160e" class="flex">
+      <a role="button" class="">
+        第 3 章 文档标准化与语义检索</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/7f4af6d48c5b425c/" class="">
+      3.1 文档加载与标准化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/572ba4c9cb114677/" class="">
+      3.2 常见文本切分策略</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/06e588cd33fa4454/" class="">
+      3.3 向量数据库选择</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/ff27306c0d7b4387/" class="">
+      3.4 Qwen3 Embedding 模型介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/303035851c5e42f2/" class="">
+      3.5 语义搜索引擎构建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/e1328cb23e8c412b/" class="">
+      3.6  Milvus 模块解析</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-caaf9d8eb5e5559f7ca8bb11c41da71a" class="toggle"  />
+    <label for="section-caaf9d8eb5e5559f7ca8bb11c41da71a" class="flex">
+      <a role="button" class="">
+        第 4 章 RAG 与 Agent</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/4c646aa07f3b4b74/" class="">
+      4.1 两步式 RAG 搭建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/5c35e934bab24ac3/" class="">
+      4.2 Function Calling 概念介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/88ff352fc22e4cd6/" class="">
+      4.3 LangChain 中的 Tool 修饰器</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/83fe26536a5d4b6e/" class="">
+      4.4 RAG Agent 原理与搭建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/b7e49268357a4bca/" class="">
+      4.5 复杂问题拆解与ReAct框架</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/469b5963f2ca4799/" class="">
+      4.6 RAG 中的两阶段索引</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/10fb92a6c5484039/" class="">
+      4.7 Qwen3 Reranking 原理与使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/45d286aec1bc4d66/" class="">
+      4.8 基于两阶段索引的 RAG Agent 搭建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/43af483460574e48/" class="">
+      4.9 LangGraph 基本概念介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/0def4564f3aa455d/" class="">
+      4.10  基于 LangGraph 构建自定义 RAG Agent</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a>
+      深度学习</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/70e5f9cdbedc4b2c/" class="">
+      学习思维导图</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-a9b664bcf9e1dab8add449268565f466" class="toggle"  />
+    <label for="section-a9b664bcf9e1dab8add449268565f466" class="flex">
+      <a role="button" class="">
+        第 1 章 深度学习简介</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/647eb9c607874e3a/" class="">
+      1.1 深度学习的发展阶段</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/f31da36a6f444afe/" class="">
+      1.2 深度学习中的关键人物</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/da9fa13021e64f3c/" class="">
+      1.3 深度学习框架介绍</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-e6e0db5d4bc28bd97dfe8d5210249e63" class="toggle"  />
+    <label for="section-e6e0db5d4bc28bd97dfe8d5210249e63" class="flex">
+      <a role="button" class="">
+        第 2 章 环境配置</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/a0c5d1e0de0140cb/" class="">
+      2.1 体系结构介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/04f07b9246984577/" class="">
+      2.2 深度学习环境安装</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/5bf6454673194c67/" class="">
+      2.3 开发环境安装配置</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-0a2ca47f15332c8b06ae83247328edb4" class="toggle" checked />
+    <label for="section-0a2ca47f15332c8b06ae83247328edb4" class="flex">
+      <a role="button" class="">
+        第 3 章 深度学习基础</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/75c5fa7839174c16/" class="active">
+      3.1 线性回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/ca16f8cb6df444a6/" class="">
+      3.2 线性回归简洁实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/97e1da1143cd4554/" class="">
+      3.3 梯度下降与反向传播</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/7b865de988ea422c/" class="">
+      3.4 从零实现回归模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/18fdd1deff424a16/" class="">
+      3.5 从逻辑回归到Softmax回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/55967b0f642b4509/" class="">
+      3.6 Softmax回归简洁实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/381bbd56509e4a6f/" class="">
+      3.7 从零实现分类模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/2c061df4435d4928/" class="">
+      3.8 回归模型评估指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/e3442eff254e473c/" class="">
+      3.9 分类模型评估指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/307f927c8a1245c5/" class="">
+      3.10 过拟合与正则化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/bcb64de5aa404f18/" class="">
+      3.11 超参数与交叉验证</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/66dd7425cdd04565/" class="">
+      3.12 激活函数</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/0d3dacfff4c04794/" class="">
+      3.13 多标签分类</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-95b7e7417bf2b821a1b760975d3acc22" class="toggle"  />
+    <label for="section-95b7e7417bf2b821a1b760975d3acc22" class="flex">
+      <a role="button" class="">
+        第 4 章 卷积神经网络</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/102e183e8be94f46/" class="">
+      4.1 卷积的概念</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/5b3e3152e9e54f4f/" class="">
+      4.2 卷积的计算过程</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/762f60de801a4ccd/" class="">
+      4.3 填充和池化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/c8af5d84174b4420/" class="">
+      4.4 LeNet5网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/de007462967e4701/" class="">
+      4.5 AlexNet网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/f084f181c3554082/" class="">
+      4.6 VGG网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/911b961cc5d949b6/" class="">
+      4.7 NIN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/47da186baf3e4a0b/" class="">
+      4.8 GoogLeNet网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/da16c61397454b2c/" class="">
+      4.9 ResNet网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/1c24468824274650/" class="">
+      4.10 DenseNet网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-17076fe90a2d84e207bbd0c829983325" class="toggle"  />
+    <label for="section-17076fe90a2d84e207bbd0c829983325" class="flex">
+      <a role="button" class="">
+        第 5 章 模型训练与复用</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/4557a6f03dec4475/" class="">
+      5.1 参数及日志管理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/e7c4c6da085148d0/" class="">
+      5.2 Tensorboard可视化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/27387966672c45ed/" class="">
+      5.3 模型的保存与复用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/211b26bdd8f248ac/" class="">
+      5.4 模型的迁移学习</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/345c1b72253043cb/" class="">
+      5.5 开源模型复用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/c912dda030c946d9/" class="">
+      5.6 多GPU训练</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/f065af80f3844b0b/" class="">
+      5.7 数据预处理与缓存</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-2d091d454d5c3f03f5e0a202c37cc226" class="toggle"  />
+    <label for="section-2d091d454d5c3f03f5e0a202c37cc226" class="flex">
+      <a role="button" class="">
+        第 6 章 模型优化方法</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/cc35bb112783410e/" class="">
+      6.1 学习率调度器</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/fc024c283f164849/" class="">
+      6.2 梯度裁剪</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/27ed3ed136e24092/" class="">
+      6.3 批归一化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/fdd5ba4b41f74a0e/" class="">
+      6.4 层归一化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/9246afed14eb436c/" class="">
+      6.5 组归一化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/fcbc66ad051a4336/" class="">
+      6.6 动量法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/8b83d654898c40a2/" class="">
+      6.7 AdaGrad算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/078f2394980d41d2/" class="">
+      6.8 AdaDelta算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/28ad7fb39987447e/" class="">
+      6.9 Adam算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/4b81b8d39721434d/" class="">
+      6.10 初始化方法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f2f78ba4851131558fc284d927542d28" class="toggle"  />
+    <label for="section-f2f78ba4851131558fc284d927542d28" class="flex">
+      <a role="button" class="">
+        第 7 章 循环神经网络</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/88ba4e03337b4233/" class="">
+      7.1 RNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/ec8ff069aadc49b9/" class="">
+      7.2 时序数据</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/b4c5ddcc9e904238/" class="">
+      7.3 LSTM网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/4112672112224dc1/" class="">
+      7.4 GRU网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/b6e5ccb6cd064f74/" class="">
+      7.5 BiRNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/4bf3ecf7b21e45fb/" class="">
+      7.6 CharRNN网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-49992cff6143e64ae5d7f2209dcfb054" class="toggle"  />
+    <label for="section-49992cff6143e64ae5d7f2209dcfb054" class="flex">
+      <a role="button" class="">
+        第 8 章 时序与模型融合</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/2be88fbc08a5418f/" class="">
+      8.1 TextCNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/9023d1f822a54226/" class="">
+      8.2 TextRNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/9edd7db2d439402f/" class="">
+      8.3 CNN-RNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/19c2b86e85f2461e/" class="">
+      8.4 ConvLSTM网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/1e6da79bf7b44c20/" class="">
+      8.5 3DCNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/5f426a9190e7454b/" class="">
+      8.6 STResNet网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ca07c572acb4d7fd40854f5b367c247b" class="toggle"  />
+    <label for="section-ca07c572acb4d7fd40854f5b367c247b" class="flex">
+      <a role="button" class="">
+        第 9 章 自然语言处理</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/e0cb9a7aae814045/" class="">
+      9.1 自然语言处理介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/d4703d990f8d4fed/" class="">
+      9.2 Word2Vec词向量</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/1bb6351b01a2479b/" class="">
+      9.3 Word2Vec训练与使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/40a8a1146d934c55/" class="">
+      9.4 GloVe词向量</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/c6aa1405b8cf46d8/" class="">
+      9.5 词向量的微调使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/48c26d04b342452d/" class="">
+      9.6 fastText网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/03a0166e195f443f/" class="">
+      9.7 Seq2Seq网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/271bda16904544af/" class="">
+      9.8 序列模型评价指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/fefa60e0bc854a17/" class="">
+      9.9 NMT网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/5bcd8b0920414f34/" class="">
+      9.10 注意力机制</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/8a78e8213ee04aac/" class="">
+      9.11 含注意力的NMT网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/474ac7a1867d4b5e/" class="">
+      9.12 含注意力的RNN网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-8cdec04c2fd8683c5c7373c78d943528" class="toggle"  />
+    <label for="section-8cdec04c2fd8683c5c7373c78d943528" class="flex">
+      <a role="button" class="">
+        第10章 现代神经网络</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/7523731afc0241c0/" class="">
+      10.1 ELMo网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/4987d1044939480d/" class="">
+      10.2 Transformer网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/a469ed1a25e1498f/" class="">
+      10.3 Transformer结构</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/d50c490eef3b4565/" class="">
+      10.4 Transformer实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/f6c507b3d2d74f03/" class="">
+      10.5 Transformer对联模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/3aedea1d3f3e48dd/" class="">
+      10.6 BERT网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/82a1cd0def084620/" class="">
+      10.7 从零实现BERT</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/e736d3974ed0484c/" class="">
+      10.8 BERT文本分类模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/f5076cbadda84d4e/" class="">
+      10.9 BERT问题选择模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/25d9ef3d9b34472a/" class="">
+      10.10 BERT问题回答模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/64d3ec5593ec4b94/" class="">
+      10.11 BERT命名体识别模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/90ea8d3e090d48b4/" class="">
+      10.12 BERT从零训练</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/e36878dad7a647d8/" class="">
+      10.13 GPT-1模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/94dda9bbbc994913/" class="">
+      10.14 GPT-2与GPT-3模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/4af57a29308840de/" class="">
+      10.15 基于GPT-2的中文预训练模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/9f5c00cadde14d31/" class="">
+      10.16 InstructGPT与ChatGPT</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/050b54fd34ca480a/" class="">
+      10.17 ChatGPT与提示词工程</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/a90b0d71389b4d69/" class="">
+      10.18 百川大模型使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/40c1c9ade70c4ce7/" class="">
+      10.19 百川大模型实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/ea1b4cf8b40c4b05/" class="">
+      10.20 GPT-4与GPTs使用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a>
+      机器学习</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/43fc00b3809d4be6/" class="">
+      学习思维导图</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-0a3254d1ca9963fd6975aa5bc0b3edcc" class="toggle"  />
+    <label for="section-0a3254d1ca9963fd6975aa5bc0b3edcc" class="flex">
+      <a role="button" class="">
+        第 1 章 环境配置</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/baafb91f0af14a84/" class="">
+      1.1 安装使用Conda</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/7a01c403acd6488a/" class="">
+      1.2 开发环境安装配置</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-4569258198323c16bc8a634ea44fd5db" class="toggle"  />
+    <label for="section-4569258198323c16bc8a634ea44fd5db" class="flex">
+      <a role="button" class="">
+        第 2 章 线性回归</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/2414d4b6648d405a/" class="">
+      2.1 模型的建立与求解</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/3e9ba14da71f4fd3/" class="">
+      2.2 多变量线性回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/4a16c0dc82a84e78/" class="">
+      2.3 多项式回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/f8dea699983c48c6/" class="">
+      2.4 回归模型评估</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/df41c2e97f554e68/" class="">
+      2.5 梯度下降</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/71ef816e0005492d/" class="">
+      2.6 正态分布</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/803bee4f70be4dca/" class="">
+      2.7 目标函数推导</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-a6ca5e2f846ebd900d1a868e6718dc82" class="toggle"  />
+    <label for="section-a6ca5e2f846ebd900d1a868e6718dc82" class="flex">
+      <a role="button" class="">
+        第 3 章 逻辑回归</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/96d46b53aee14c3b/" class="">
+      3.1 模型的建立与求解</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/fac70083dd764141/" class="">
+      3.2 多分类任务</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/6d7cfd79ef304cbd/" class="">
+      3.3 常见的分类评估指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/2fdc655d00c74548/" class="">
+      3.4 目标函数推导</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/a4b61c5bbadd43a6/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-9f462f716bd0e46ef79984b356eeb5a2" class="toggle"  />
+    <label for="section-9f462f716bd0e46ef79984b356eeb5a2" class="flex">
+      <a role="button" class="">
+        第 4 章 模型的改善与泛化</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/2089400b28f54dd9/" class="">
+      4.1 基本概念</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/56b788b624cd4971/" class="">
+      4.2 特征标准化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/ca091dc393a84518/" class="">
+      4.3过拟合</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/5097d3b8c1144427/" class="">
+      4.4 正则化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/3c7eee1621d4480b/" class="">
+      4.5 偏差、方差与交叉验证</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/c5957e0753d04746/" class="">
+      4.6 实例分析手写体识别</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/a915e49586eb4426/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-327db48e4f4df6236855078634147679" class="toggle"  />
+    <label for="section-327db48e4f4df6236855078634147679" class="flex">
+      <a role="button" class="">
+        第 5 章 K近邻</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/7c610e923e754259/" class="">
+      5.1 K近邻思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/1a97571e0a6447ef/" class="">
+      5.2 K近邻原理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/d245bda107034e65/" class="">
+      5.3 sklearn接口与示例代码</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/24378571ce404d9c/" class="">
+      5.4 kd树构建与搜索</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/40f253b916f24038/" class="">
+      5.5 从零实现K近邻</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/76818d9e48944f8c/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-94d0a5f5555d92c51e0903b148e34993" class="toggle"  />
+    <label for="section-94d0a5f5555d92c51e0903b148e34993" class="flex">
+      <a role="button" class="">
+        第 6 章 文本特征与模型复用</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/e05b5928c41d4841/" class="">
+      6.1 词袋模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/de59bf74d753457e/" class="">
+      6 .2 基于K近邻算法的垃圾邮件分类</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/c6fdc78b49d44453/" class="">
+      6.3 考虑权重的词袋模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/825fde8589654b16/" class="">
+      6.4 词云图</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/8451cffe49f5477c/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-544be5d1e48c4fd8b33ba2f91964c6dd" class="toggle"  />
+    <label for="section-544be5d1e48c4fd8b33ba2f91964c6dd" class="flex">
+      <a role="button" class="">
+        第 7 章 朴素贝叶斯</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/faf303eb93a241d1/" class="">
+      7.1 朴素贝叶斯算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/842c7b8684c747d2/" class="">
+      7.2 贝叶斯估计</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/724bf42b09bb440e/" class="">
+      7.3 朴素贝叶斯实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/1a9deee1d5f042b5/" class="">
+      7.4 多项式朴素贝叶斯原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/5c27cdd8b3264f50/" class="">
+      7.5 高斯朴素贝叶斯原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/715b8eaf245f45f1/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-d1884c6b3e8f1260019220c57d615371" class="toggle"  />
+    <label for="section-d1884c6b3e8f1260019220c57d615371" class="flex">
+      <a role="button" class="">
+        第 8 章 决策树</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/690fe2be21834c2a/" class="">
+      8.1 决策树的基本思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/ee9ada9729124049/" class="">
+      8.2 决策树建模与可视化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/5887cf1408dd4c7f/" class="">
+      8.3 决策树生成之ID3与C4.5</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/87ba589d6c17434d/" class="">
+      8.4 决策树剪枝过程</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/34bc962c974646f4/" class="">
+      8.5 从零实现ID3与C4.5算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/c44682dbb3364be4/" class="">
+      8.6 连续型特征变量下决策树实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/4eead717a84a4dbf/" class="">
+      8.7 CART生成与剪枝算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/1c72d67dffc64dc9/" class="">
+      8.8 从零实现CART算法及剪枝示例</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/ae452792b2604e84/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-1f0a2178f0a580ba251c7da2649aa52f" class="toggle"  />
+    <label for="section-1f0a2178f0a580ba251c7da2649aa52f" class="flex">
+      <a role="button" class="">
+        第 9 章 集成学习与提升算法</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/9eff4004fd6c437d/" class="">
+      9.1 集成学习算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/18980c9f757e42c8/" class="">
+      9.2 随机森林</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/8a91b358b2f74d56/" class="">
+      9.3 泰坦尼克号生还预测</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/73f6914844f549f1/" class="">
+      9.4 AdaBoost原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/71fd0e44294e4abb/" class="">
+      9.5 MultiAdaBoost原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/f3c2341ce7d64f70/" class="">
+      9.6 Gradient Boost 原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/4f9b26d5b65541f5/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f63defd924ef7373144c8643a39fd7b2" class="toggle"  />
+    <label for="section-f63defd924ef7373144c8643a39fd7b2" class="flex">
+      <a role="button" class="">
+        第 10 章 支持向量机</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/dce7180d4eb047d7/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/515b54e2307a4c8a/" class="">
+      10.1 SVM思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/9c3862bc843c4179/" class="">
+      10.2 SVM线性不可分</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/fbdb6f8adace457d/" class="">
+      10.3 SVM原理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/1a3ffa363b1d4f83/" class="">
+      10.4 SVM中的软间隔</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/8b7a06412a9f4267/" class="">
+      10.5 拉格朗日乘数法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/40e977f0a2f84ac0/" class="">
+      10.6 对偶性与KKT条件</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/b18d45a772574ddb/" class="">
+      10.7 SVM优化问题</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/c53ed12f7bc04405/" class="">
+      10.8 SVM核函数原理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/26d9b2b328a849c2/" class="">
+      10.9 SMO算法求解SVM</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/215a1e15c0f2470d/" class="">
+      10.10 从零实现SVM分类算法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bdcc54d1c295c5cc69c9c851c02886ea" class="toggle"  />
+    <label for="section-bdcc54d1c295c5cc69c9c851c02886ea" class="flex">
+      <a role="button" class="">
+        第 11 章 聚类分析</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/f9d9305a55a548a1/" class="">
+      11.1 聚类算法的思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/e635df24de32487a/" class="">
+      11.2 Kmeans聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/e75b8efa232249ab/" class="">
+      11.3 Kmeans算法求解</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/60e49a33d1aa4f50/" class="">
+      11.4 从零实现Kmeans聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/c8b45d8a3d8c4cf4/" class="">
+      11.5 Kmeans&#43;&#43;聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/1ede2f3557d0438f/" class="">
+      11.6 聚类外部评价指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/e6a75df19f85498c/" class="">
+      11.7 加权Kmeans聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/c52cf7920f1d4636/" class="">
+      11.8 聚类内部评价指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/f95259c359b146ba/" class="">
+      11.9 聚类K值选取与分析</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/b85c1a858f7c4686/" class="">
+      11.10 基于密度的聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/2f01ba751d914336/" class="">
+      11.11 基于层次的聚类算法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bafa8c48214ccf62d333a6d0457c5f72" class="toggle"  />
+    <label for="section-bafa8c48214ccf62d333a6d0457c5f72" class="flex">
+      <a role="button" class="">
+        第 12 章 降维算法</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/9478de824edd44c6/" class="">
+      12.1 主成分分析</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/909356aa90fe456a/" class="">
+      12.2 基于核函数的主成分分析</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-d5f143889a719ce66d602e75b72bffb9" class="toggle"  />
+    <label for="section-d5f143889a719ce66d602e75b72bffb9" class="flex">
+      <a role="button" class="">
+        第 13 章 自训练与标签传播</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/8d71301c2e414efe/" class="">
+      13.1 Self-Training 自训练算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/87fdcf0be1c34644/" class="">
+      13.2 Label Propagation算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/7fc8b0fc47d2427c/" class="">
+      13.3 Label Spreading 算法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+
+
+
+
+
+
+
+
+
+
+
+
+</nav>
+
+
+
+
+  <script>(function(){var e=document.querySelector("aside .book-menu-content");addEventListener("beforeunload",function(){localStorage.setItem("menu.scrollTop",e.scrollTop)}),e.scrollTop=localStorage.getItem("menu.scrollTop")})()</script>
+
+
+
+  </div>
+</aside>
+ 
+
+    <div class="book-page">
+      <header class="book-header hidden">
+        
+  <div class="flex align-center justify-between">
+  <label for="menu-control">
+    <img src="/icons/menu.svg" class="book-icon" alt="Menu" />
+  </label>
+
+  <h3>3.1 线性回归</h3>
+
+  <label for="toc-control">
+    
+    <img src="/icons/toc.svg" class="book-icon" alt="Table of Contents" />
+    
+  </label>
+</div>
+
+
+  
+  <aside class="hidden">
+    
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#311-理解线性回归模型">3.1.1 理解线性回归模型</a></li>
+    <li><a href="#312-建立线性回归模型">3.1.2 建立线性回归模型</a></li>
+    <li><a href="#313-求解线性回归模型">3.1.3 求解线性回归模型</a></li>
+    <li><a href="#314-多项式回归建模">3.1.4 多项式回归建模</a></li>
+    <li><a href="#315-从特征输入到特征提取">3.1.5 从特征输入到特征提取</a></li>
+    <li><a href="#316-从线性输入到非线性变换">3.1.6 从线性输入到非线性变换</a></li>
+    <li><a href="#317-单层神经网络">3.1.7 单层神经网络</a></li>
+    <li><a href="#318-深度神经网络">3.1.8 深度神经网络</a></li>
+    <li><a href="#319-小结">3.1.9 小结</a></li>
+  </ul>
+</nav>
+
+
+
+  </aside>
+  
+ 
+      </header>
+
+      
+      
+  <article class="markdown book-article"><h1 id="第-3-章-深度学习基础">第 3 章 深度学习基础<a class="anchor" href="#%e7%ac%ac-3-%e7%ab%a0-%e6%b7%b1%e5%ba%a6%e5%ad%a6%e4%b9%a0%e5%9f%ba%e7%a1%80">#</a></h1>
+<p>在前面两个章节我们详细介绍了深度学习的发展历史以及深度学习环境的安装与配置。在本章内容中我们将正式开始深度学习基础内容的学习。在本章内容中，我们将详尽介绍深度学习入门的基础知识，涵盖了从线性回归和逻辑回归的的由来与建模、什么是深度学习以及为什么需要深度学习等相关理念，到梯度下降和反向传播的原理及实现方法。我们将全面介绍如何从零开始构建回归和分类模型，包括逻辑回归到Softmax回归的转换，以及常用的评估指标和应对过拟合的方法。此外，本章内容还将深入探讨了超参数选择的重要性、交叉验证的实践意义、激活函数的作用，以及在多标签分类场景下的损失函数与模型评估方法。</p>
+<h1 id="31-线性回归">3.1 线性回归<a class="anchor" href="#31-%e7%ba%bf%e6%80%a7%e5%9b%9e%e5%bd%92">#</a></h1>
+<p>经过前面预备知识的介绍，现在终于正式进入到了深度学习的内容介绍中。那什么又是深度学习呢？以及我们为什么需要深度学习呢？要想弄清楚这两个问题，我们还得先从机器学习中的线性回归说起。</p>
+<h2 id="311-理解线性回归模型">3.1.1 理解线性回归模型<a class="anchor" href="#311-%e7%90%86%e8%a7%a3%e7%ba%bf%e6%80%a7%e5%9b%9e%e5%bd%92%e6%a8%a1%e5%9e%8b">#</a></h2>
+<p>通常来讲，我们所学的每个算法都是为了解决某一类问题而诞生的。换句话说，也就是在实际情况中的确存在一些问题能够通过线性回归来解决，例如对房价的预测，但是有人可能会问，为什么对于房价的预测就应该用线性回归，而不是其他算法模型呢？其原因就在于常识告诉我们房价是随着面积的增长而增长的，且总体上呈线性增长的趋势。那有没有当面积大到一定程度后价格反而降低，因此不符合线性增长的呢？这当然也可能存在，但在实际处理中肯定会优先选择线性回归模型，当效果不佳时我们才会尝试其他算法，因此，当学习过多个算法模型后，在得到某个具体的问题时，可能就需要考虑哪种模型更适合来解决这个问题了。</p>
+<p>例如某市的房价走势如图3-1所示，其中横坐标为面积，纵坐标为价格，并且房价整体上呈线性增长的趋势。假如现在随意告诉你一个房屋的面积，要怎样才能预测（或者叫计算）出其对应的价格呢？</p>
+<div align=center><img width="350" src="/images/dl/p3-1.jpg"/></div>
+<center>
+  图 3-1 某市的房价走势图
+</center>
+<h2 id="312-建立线性回归模型">3.1.2 建立线性回归模型<a class="anchor" href="#312-%e5%bb%ba%e7%ab%8b%e7%ba%bf%e6%80%a7%e5%9b%9e%e5%bd%92%e6%a8%a1%e5%9e%8b">#</a></h2>
+<p>一般来讲，当我们得到一个实际问题时，首先会根据问题的背景结合常识选择一个合适的模型。同时，现在常识告诉我们房价的增长更优先符合线性回归这类模型，因此可以考虑建立一个如下所示的线性回归模型（Linear Regression）。</p>
+$$
+\hat{y}=h(x)=wx+b\tag{3-1}
+$$<p>
+其中$w$叫权重（Weight），$b$叫偏置（Bias）或者截距（Intercept），两者都称为模型参数（Parameter）。当通过某种方法求解得到未知参数$w$和$b$之后，也就意味着我们得到了这个预测模型，即给定一个房屋面积$x$，就能够预测出其对应的房价$\hat{y}$。</p>
+<p>注意： 在机器学习中所谓的模型，可以简单理解为一个复合函数。</p>
+<p>当然，尽管影响房价的主要因素是面积，但是其它因素同样也可能影响房屋的价格。例如房屋到学校的距离、到医院的距离和到大型商场的距离等，只是各个维度对应的权重大小不同而已。虽然现实生活中一般不这么量化，但是开发商也总是会拿学区房做卖点，所以这时便有了影响房价的4个因素，而在机器学习中我们将其称为特征（Feature）或者属性（Attribute），因此，包含多个特征的线性回归就叫作多变量线性回归（Multiple Linear Regression）。</p>
+<p>此时，便可以得到如下所示的线性回归模型。
+</p>
+$$
+\hat{y}=h(x)={{w}_{1}}{{x}_{1}}+\cdots +{{w}_{4}}{{x}_{4}}+b=w^Tx+b\tag{3-2}
+$$<p>
+其中$x_1,x_2,x_3,x_4$表示输入的4项房屋信息特征，$w_1,w_2,w_3,w_4$表示每个特征对应的权重参数，$b$ 为偏置。</p>
+<p>并且我们还可以通过如下示意图来对式(3-2)中的模型进行表示：</p>
+<div align=center>
+<img width="350" src="/images/dl/000102.png"/>
+</div>
+<center>
+    图 3-2. 房价预测线性回归结构图（偏置未画出）
+</center>
+<h2 id="313-求解线性回归模型">3.1.3 求解线性回归模型<a class="anchor" href="#313-%e6%b1%82%e8%a7%a3%e7%ba%bf%e6%80%a7%e5%9b%9e%e5%bd%92%e6%a8%a1%e5%9e%8b">#</a></h2>
+<p>当建立好一个模型后，自然而然想到的就是如何通过给定的数据，也叫训练集（Training Data），来对模型 $h(x)$进行求解。在中学时期我们学过如何通过两个坐标点来求解过这两点的直线，可在上述的场景中这种做法显然是行不通的（因为求解线性回归模型所有的点并不在一条直线上），那有没有什么好的解决的办法呢？</p>
+<p>此时就需要我们转换一下思路了，既然不能直接进行求解，那就换一种间接的方式。现在来想象一下，当 $h(x)$ 满足一个什么样的条件时，它才能称得上是一个好的$h(x)$？ 回想一下求解$h(x)$的目的是什么，不就是希望输入面积$x$后能够输出“准确”的房价$\hat{y}$吗？既然直接求解$h(x)$不好入手，那么我们就从“准确”来入手。</p>
+<p>可又怎样来定义准确呢？在这里，我们可以通过计算每个样本的真实房价与预测房价之间的均方误差来对“准确”进行刻画。
+</p>
+$$
+\begin{cases}
+ J(w,b)=\frac{1}{2m}\sum\limits_{i=1}^{m}{{{({{y}^{(i)}}-{{{\hat{y}}}^{(i)}})}^{2}}}\\ 
+  {{{\hat{y}}}^{(i)}}=h({{x}^{(i)}})=w^T{{x}^{(i)}}+b  
+\end{cases}
+\tag{3-3}
+$$<p>
+其中，$m$表示样本数量； $x^{(i)}$表示第$i$个样本为一个列向量；$w$表示模型对应的参数也为一个列向量； $y^{(i)}$表示第$i$个房屋的真实价格； $\hat{y}^{(i)}$表示第$i$ 个房屋的预测价格。</p>
+<p>由式(3-3)可知，当函数$J(w,b)$取最小值时的参数$\hat{w}$和$\hat{b}$，就是要求的目标参数。为什么？因为当$J(w,b)$取最小值时就意味着此时所有样本的预测值与真实值之间的误差（Error）最小。如果极端一点，就是所有预测值都等同于真实值，那么此时的$J(w,b)$就是0了。因此，对于如何求解模型 $h(x)$ 的问题就转换成了如何最小化函数$J(w,b)$的问题，而$J(w,b)$也有一个专门的术语叫作目标函数（Objective Function）或者代价函数（Cost Function）抑或损失函数（Loss Function）。关于目标函数的求解问题将在<a href="dl/Chapter03/ca16f8cb6df444a6">3.2节</a>内容中进行介绍。</p>
+<h2 id="314-多项式回归建模">3.1.4 多项式回归建模<a class="anchor" href="#314-%e5%a4%9a%e9%a1%b9%e5%bc%8f%e5%9b%9e%e5%bd%92%e5%bb%ba%e6%a8%a1">#</a></h2>
+<p>在3.1.2节的内容中，我们分别介绍了单变量线性回归和多变量线性回归，接下来我们开始介绍多项式回归。那什么是多项式回归呢？现在假定已知矩形的面积公式，而不知道求解梯形的面积公式，并且同时手上有若干个类似图3-3所示的梯形。已知梯形的上底和下底，并且上底均等于高。现在需要建立一个模型，当任意给定一个类似图3-3中的梯形时能近似地算出其面积。面对这样的问题该如何进行建模呢？</p>
+<div align=center>
+<img width="250" src="/images/dl/000103.png"/>
+</div>
+<center>
+    图 3-3. 梯形块儿
+</center>
+<p>首先需要明确的是，即使直接建模成类似于3.1.2节中的多变量线性回归模型$h(x)=w_1x_1+w_2x_2+b$也是可以的，只是效果可能不会太好。现在我们来分析一下，对于这个梯形，左边可以看成正方形，所以可以人为地构造第3个特征$(x_1)^2$，而整体也可以看成长方形的一部分，则又可以人为地构造出$x_1x_2$这个特征，最后，整体还可以看成大正方形的一部分，因此还可以构造出$(x_2)^2$这个特征。</p>
+<p>根据上述内容可知，我们建模时除了以$x_1,x_2$作为特征外，还人为构造了$x_1x_2,x^2_1,x^2_2$这3个特征，并且后3个特征也存在着一定意义上的可解释性。因此，对于这么一个模型，我们也可以通过类似图3-4的方式进行表示：</p>
+<div align=center>
+<img width="300" src="/images/dl/000104.png"/>
+</div>
+<center>
+    图 3-4. 梯形面积预测线性回归结构图（偏置未画出）
+</center>
+此时，我们便可以建立一个如式(3-4)所示的模型
+$$
+h(x)=x_1w_1+x_2w_2+(x_1)^2w_3+x_1x_2w_4+(x_2)^2w_5+b\tag{3-4}
+$$
+此时有读者可能会问，式(3-4)中有的部分重复累加了，计算出来的面积岂不大于实际面积吗？这当然不会，因为每一项前面都有一个权重参数$w_i$做系数，只要这些权重有正有负，就不会出现大于实际面积的情况。同时，可以发现$h(x)$中包含了$x_1x_2$、$(x_1)^2$、$(x_2)^2$这些项，因此将其称为多项式回归（Polynomial Regression）。
+<p>但是，只要进行如下替换，便可回到普通的线性回归：
+</p>
+$$
+h(x)={{x}_{1}}{{w}_{1}}+{{x}_{2}}{{w}_{2}}+{{x}_{3}}{{w}_{3}}+{{x}_{4}}{{w}_{4}}+{{x}_{5}}{{w}_{5}}+b\tag{3-5}
+$$<p>
+其中，$x_3=(x_1)^2$、$x_4=x_1x_2$、$x_5=(x_2)^2$，只是在实际建模时先要将原始两个特征的数据转化为5个特征的数据，同时在正式进行预测时，向模型$h(x)$输入的也将是包含5个特征的数据。</p>
+<h2 id="315-从特征输入到特征提取">3.1.5 从特征输入到特征提取<a class="anchor" href="#315-%e4%bb%8e%e7%89%b9%e5%be%81%e8%be%93%e5%85%a5%e5%88%b0%e7%89%b9%e5%be%81%e6%8f%90%e5%8f%96">#</a></h2>
+<p>从图3-4可以看出，尽管我们使用了5个特征作为线性回归的特征输入进行建模，但是其原始特征依旧只有$x_1,x_2$这两个。而其余的3个只是我们人为构造的，其本质就相当于我们首先以人为的方式对原始输入进行了一次特征提取，然后再以提取后的特征来进行建模。那既然如此，我们可不可以通过图3-5所示的结构图来进行建模呢？</p>
+<div align=center>
+<img width="450" src="/images/dl/000105.png"/>
+</div>
+<center>
+    图 3-5. 梯形面积预测结构图（偏置并未画出）
+</center>
+<p>其中左边的圆圈表示原始的输入特征，中间的圆圈表示对原始特征提取后的特征，右边圆圈表示最终的预测输出。</p>
+<p>通过图3-5我们可以知道，该结构首先以$x_1,x_2$为基础进行特征提取得到3个不同的特征，然后再以这3个特征来建立了一个线性回归模型进行预测输出。因此，$\hat{y}$可以表示为：
+</p>
+$$
+\begin{aligned}
+a&=w_1x_1+w_2x_2+b_1\\[1ex]
+b&=w_3x_1+w_4x_2+b_2\\[1ex]
+c&=w_5x_1+w_6x_2+b_3\\[1ex]
+\hat{y}&=w_7a+w_8b+w_9c+b_4
+\end{aligned}\tag{3-6}
+$$<p>那以图3-5所示的方式进行建模和图3-4所示的方式差别在哪儿呢？差别倒是有很多，但最大的差别在于构造特征的可解释性。也就是说，人为构造的特征一般都具有一定的可解释性，知道每个特征的含义（例如上面的$x_1x_2,x^2_1,x^2_2$）。而以图3-5中的方式得到的特征在我们直观看来并不具有可解释性（例如上面$a,b,c$这3个特征）。因此，在传统的机器学习中还专门有一个分支叫特征工程，即人为地根据原始特征来构造一系列可解释性的新特征。</p>
+<p>那说一千道一万，到底能不能用式(3-6)的描述来进行建模呢？很遗憾，并不能。为什么呢？</p>
+<p>根据式(3-6)可得
+</p>
+$$
+\begin{aligned}
+\hat{y} 
+=& w_7(w_1x_1+w_2x_2+b_1)+w_8(w_3x_1+w_4x_2+b_2)\\[1ex]
+&+w_9(w_5x_1+w_6x_2+b_3)+b_4\\[1ex]
+=&(w_1w_7+w_3w_8+w_5w_9)x_1+(w_2w_7+w_4w_8+w_6w_9)x_2\\[1ex]
+&+w_7b_1+w_8b_2+w_9b_3+b_4\\[1ex]
+=&\alpha x_1+\beta x_2+\gamma
+\end{aligned}\tag{3-7}
+$$<p>
+由此可知，根据式(3-7)的描述，建模得到的仍旧只是一个以原始特征$x_1,x_2$为输入的线性回归模型。那图3-5这么好的结构设想难道就这么放弃？当然不会，图3-5的结构并没错，错的是式子(3-6)中的描述。</p>
+<h2 id="316-从线性输入到非线性变换">3.1.6 从线性输入到非线性变换<a class="anchor" href="#316-%e4%bb%8e%e7%ba%bf%e6%80%a7%e8%be%93%e5%85%a5%e5%88%b0%e9%9d%9e%e7%ba%bf%e6%80%a7%e5%8f%98%e6%8d%a2">#</a></h2>
+<p>在上面我们说到，如果以式(3-6)中的描述进行建模，那么我们最终得到的仍旧只是一个简单的线性回归模型，其原因在于，通过式子(3-6)我们得到的3个特征$a,b,c$仅仅只是$x_1,x_2$之间在不同权重下的线性组合。也就是说$a,b,c$都是3个线性的特征，如果再将其进行线性组合作为输出，那么整个模型仍旧只是原始特征的线性组合，并没有增加模型的复杂度。那该怎么办呢？既然一切都是“线性”的错，那么唯有抛弃“线性”引入非线性才是解决问题的正道，而所谓非线性即是指通过一个非线性函数对原始输出进行一次变换。</p>
+<p>如式(3-8)所示，我们只需要对$a,b,c$这3个特征再进行一次非线性变换，那么整个模型也就不可能再被化简为线性了，因此所有问题也将迎刃而解。
+</p>
+$$
+\begin{aligned}
+a&=g(w_1x_1+w_2x_2+b_1)\\[1ex]
+b&=g(w_3x_1+w_4x_2+b_2)\\[1ex]
+c&=g(w_5x_1+w_6x_2+b_3)\\[1ex]
+\hat{y} &=w_7a+w_8b+w_9c+b_4
+\end{aligned}\tag{3-8}
+$$<p>
+其中$g(\cdot)$为非线性的变换操作，称之为激活函数，例如常见的Sigmoid函数，这部分内容将在<a href="dl/Chapter03/66dd7425cdd04565">3.12节</a>中进行介绍。</p>
+<h2 id="317-单层神经网络">3.1.7 单层神经网络<a class="anchor" href="#317-%e5%8d%95%e5%b1%82%e7%a5%9e%e7%bb%8f%e7%bd%91%e7%bb%9c">#</a></h2>
+<p>经过以上内容的介绍其实已经在不知不觉中将大家代入到了深度学习（Deep Learning）的领域中。所谓深度学习即是指构建一个多层神经网络（Neural Network），然后进行参数学习的过程，而“深度”只是多层神经网络的一个别称而已。因此，你还可以将深度学习称作是多层神经网络学习。</p>
+<p>如图3-6所示的线性回归模型就是一个简单的神经网络结构图，其中每个圆圈表示一个神经元（Neuron），输入层神经元的个数表示数据集的特征维度，输出层神经元的个数表示输出维度。并且尽管这里有输入层和输出层两层，但是在一般情况下我们只将含有权重参数的层称为一个网络层，所以要视情况而定，因此线性回归模型是一个单层的神经网络。</p>
+<div align=center>
+<img width="300" src="/images/dl/p3-6.jpg"/>
+</div>
+<center>
+    图 3-6. 单层神经网络结构图（偏置未画出）
+</center>
+<p>同时，需要注意的是在图3-6所示的网络结构中，输出层的所神经元和输入层的所有神经元都是完全连接。在深度学习中，如果某一层每个神经元的输入都完全依赖于上一层所有神经元的输出，那么我们就将该层称作是一个全连接层（Fully-connected Layer）或者是稠密层（Dense Layer）。例如图3-6中的输出层就是一个全连接层。</p>
+<h2 id="318-深度神经网络">3.1.8 深度神经网络<a class="anchor" href="#318-%e6%b7%b1%e5%ba%a6%e7%a5%9e%e7%bb%8f%e7%bd%91%e7%bb%9c">#</a></h2>
+<p>所谓深度神经网络（Deep Neural Network, DNN）也叫做深度前馈神经网络（Deep Forward Neural Network）一般是指网络网络层数大于2的神经网络，如图3-7所示便是一个简单的深度神经网络，其包含有3个全连接层。同时，我们将输入层与输出层之间的所有层都称为隐藏层或隐含层（Hidden Layer）。</p>
+<div align=center>
+<img width="450" src="/images/dl/p3-7.jpg"/>
+</div>
+<center>
+    图 3-7. 深度神经网络结构图（偏置未画出）
+</center>
+<p>这里值得注意的是，通过上面房价预测和梯形面积预测这两个例子的介绍我们可以知道，对于输出层之前的所有层，我们都可以将其看成是一个特征提取的过程，而且越靠近输出层的隐含层也就意味着提取得到的特征越抽象。当原始输入经过多层网络的特征提取后，我们就可以将提取得到的特征输入到最后一层进行相应的操作（分类或者回归等）。</p>
+<p>到此，对于什么是深度学习以及深度学习的理念就介绍完了，这一点在<a href="dl/Chapter03/18fdd1deff424a16">3.5节</a>后半部分内容中还会再次提及。</p>
+<h2 id="319-小结">3.1.9 小结<a class="anchor" href="#319-%e5%b0%8f%e7%bb%93">#</a></h2>
+<p>在本节内容中，我们首先以房价预测为例引入了单变量线性回归以及如何转换模型的求解思路；然后通过梯形面积预测的实例引入了什么是多项式回归，并进一步引出了抽象特征提取的概念；最后顺理成章地引出了深度学习的概念，即所谓深度学习就是指将原始特征通过多层神经网络进行抽象特征提取，然后再将提取得到的特征输入到最后一层进行回归或者分类的处理过程。</p>
+</article>
+ 
+      
+
+      <footer class="book-footer">
+        
+  <div class="flex flex-wrap justify-between">
+
+<div>
+
+</div>
+
+<div>
+
+</div>
+
+</div>
+
+<div class="flex flex-wrap justify-between">
+    <span>
+    
+      <a href="/dl/chapter02/5bf6454673194c67/" class="flex align-center">
+        <img src="/icons/backward.svg" class="book-icon" alt="Backward" />
+        <span>2.3 开发环境安装配置</span>
+      </a>
+    
+    </span>
+    <span>
+    
+      <a href="/dl/chapter03/ca16f8cb6df444a6/" class="flex align-center">
+        <span>3.2 线性回归简洁实现</span>
+        <img src="/icons/forward.svg" class="book-icon" alt="Forward" />
+      </a>
+    
+    </span>
+  </div>
+
+ 
+        
+  
+  <div class="book-comments">
+
+</div>
+  
+ 
+        
+  <link rel="stylesheet" href="/katex/katex.min.css" />
+  <script defer src="/katex/katex.min.js"></script>
+  <script defer src="/katex/auto-render.min.js"></script>
+  
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        if (window.renderMathInElement) {
+          renderMathInElement(
+            document.querySelector(".book-page"),
+            Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
+          );
+        }
+      });
+    </script>
+  
+
+
+        
+  
+ 
+        
+  
+    <script>(function(){document.querySelectorAll("pre:has(code)").forEach(e=>{e.addEventListener("click",e.focus),e.addEventListener("copy",function(t){if(t.preventDefault(),navigator.clipboard){const t=window.getSelection().toString()||e.textContent;navigator.clipboard.writeText(t)}})})})()</script>
+  
+
+      </footer>
+
+      <label for="menu-control" class="hidden book-menu-overlay"></label>
+    </div>
+
+    
+  
+  <aside class="book-toc">
+    <div class="book-toc-content">
+      
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#311-理解线性回归模型">3.1.1 理解线性回归模型</a></li>
+    <li><a href="#312-建立线性回归模型">3.1.2 建立线性回归模型</a></li>
+    <li><a href="#313-求解线性回归模型">3.1.3 求解线性回归模型</a></li>
+    <li><a href="#314-多项式回归建模">3.1.4 多项式回归建模</a></li>
+    <li><a href="#315-从特征输入到特征提取">3.1.5 从特征输入到特征提取</a></li>
+    <li><a href="#316-从线性输入到非线性变换">3.1.6 从线性输入到非线性变换</a></li>
+    <li><a href="#317-单层神经网络">3.1.7 单层神经网络</a></li>
+    <li><a href="#318-深度神经网络">3.1.8 深度神经网络</a></li>
+    <li><a href="#319-小结">3.1.9 小结</a></li>
+  </ul>
+</nav>
+
+
+
+    </div>
+  </aside>
+  
+ 
+  </main>
+
+  
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

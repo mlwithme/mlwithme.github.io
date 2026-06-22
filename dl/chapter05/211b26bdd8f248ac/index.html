@@ -1,0 +1,3813 @@
+<!DOCTYPE html>
+<html lang="zh_CN" dir="ltr">
+<head>
+  <!--
+Made with Book Theme
+https://github.com/alex-shpak/hugo-book
+-->
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="5.4 模型的迁移学习# 在前面几节内容中，我们详细介绍了PyTorch中模型的保存及载入推理和复用等过程。在有了前期这些基础知识后，接下来我们再来介绍关于模型迁移学习（Transfer Learning）部分的内容。
+5.4.1 迁移学习# 在深度神经网络中由于模型通常都含有大量的可学习参数，所以在训练数据不充分的情况下模型极易出现过拟合或者泛化能力差的情况。而另一方面，数据样本的标注又是一项既耗费时间又耗费财力的工作[6]，尤其是在一些需要业务专家介入的复杂任务标注中。因此，如何利用有限的数据来训练模型便成为了热门的研究方向。受到人类学习的启发——人类在学习并解决一个新问题的时候，总是可以依赖于先前所拥有的经验并迅速迁移到当前的场景中——研究人员开始提出一种两段式的学习框架，即先在一个通用的大规模数据集上训练得到一个预训练模型（Pre-trained Model），然后针对于特定的任务场景再根据少量的标注数据对整个模型进行微调（Fine-tuning），而这也被称为迁移学习。
+在深度学习中迁移学习主要起源于图像处理领域，其背后的理念是如果一个模型是基于足够大且通用的数据集所训练得到，那么该模型将可以有效地充当视觉领域的通用模型，随后便可以直接将这些学习到的模型参数迁移到下游任务中而不必再从头开始训练整个模型[1]。
+在图像处理领域中ImageNet是一个非常著名的大型通用数据集，它是由李飞飞团队于2007年所发起构建的一个项目，包含有超过1400万张手动标注的图片，旨在为世界各地的研究人员提供用于训练大规模物体识别模型的图像数据。[2]。自2010年以来，ImageNet项目每年都举办了一次大规模视觉识别挑战赛（ILSVRC），挑战赛使用了1000个类别的图片用于正确分类和检测目标及场景[3]。如图5-20所示便是ImageNet数据集中的部分图像。
+图 5-20. ImageNet数据集示例图 根据4.2.3节内容可知，越是靠近输出层特征越抽象，越是靠近输入层的特征越具体。因此假如现在有一个开源的图片分类模型A是基于ImageNet数据集训练而来，如果在某任务场景中需要训练另外一个10分类模型B用于汽车型号的分类，那么便可以直接取模型A中的前若干层（靠近输入层）网络作为特征提取器，然后在此基础上再加入一个新的全连接分类层来构造得到模型B完成整个10分类任务，此时称模型A为预训练（Pre-trained）模型。同时，通常来说还可以根据是否让预训练模型中的参数参与整个模型的训练这两种方式来完成模型的迁移学习任务[4]。
+在接下来的内容中，我们将会通过一个实际的示例来对模型的迁移学习过程进行介绍。以下完整示例代码可参见Code/Chapter05/C05_ModelTrans/文件夹。
+5.4.2 模型定义与比较# 在4.4节内容中，我们详细介绍了LeNet5网络模型的原理及现实过程，并且同时根据5.3节的介绍我们也清楚了模型的保存与复用。现在假设有一个LeNet6网络模型，它是在LeNet5的基础上多增加了一个全连接层，此时便可以通过迁移学习将LeNet5模型中的部分参数用于LeNet6模型中。具体地，LeNet6模型结构的实现代码如下所示：
+1 class LeNet6(nn.Module): 2 def __init__(self, ): 3 super(LeNet6, self).__init__() 4 self.conv = nn.Sequential( 5 nn.Conv2d(in_channels=1, out_channels=6, 6 kernel_size=5, padding=2), 7 nn.ReLU(), nn.MaxPool2d(2, 2), nn.Conv2d(6, 16, 5), 8 nn.ReLU(),nn.MaxPool2d(2, 2)) 9 self.fc = nn.Sequential( 10 nn.Flatten(),nn.Linear(16 * 5 * 5, 120), 11 nn.ReLU(),nn.Linear(120, 84),nn.ReLU(), 12 nn.Linear(84, 64),nn.ReLU(),nn.Linear(64, 10))在上述代码中，第1~11行是LeNet5模型的前4层。第12行便是LeNet6模型中新加入的一个网络层。
+在模型定义结束后，便可以输出模型中对应的参数信息。同时，为了完成后续模型的迁移过程这里也将LeNet5保存在本地权重参数载入输出以便两者进行对比，示例代码如下所示：
+1 if __name__ == &#39;__main__&#39;: 2 print(&#34;\n=====Model paras in LeNet6:&#34;) 3 model = LeNet6() 4 for (name, param) in model.state_dict().items(): 5 print(name, param.size()) 6 7 model_save_path = os.path.join(&#39;../C04_ModelSaving&#39;, &#39;lenet5.pt&#39;) 8 print(&#34;\n=====Model paras in LeNet5:&#34;) 9 loaded_paras = torch.load(model_save_path) 10 for (name, param) in loaded_paras.items(): 11 print(name, param.size())在上述代码中，第2~5行是输出LeNet6模型中各个权重参数的名称和形状信息。第7~11行则是载入上一节中持久化保存到本地的LeNet5权重参数，并同时也输出每个参数的名称和形状。
+">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
+<meta name="color-scheme" content="light dark"><meta property="og:url" content="https://mlwithme.github.io/dl/chapter05/211b26bdd8f248ac/">
+	<meta property="og:site_name" content="《从零学AI指南手册》">
+	<meta property="og:title" content="5.4 模型的迁移学习">
+	<meta property="og:description" content="5.4 模型的迁移学习# 在前面几节内容中，我们详细介绍了PyTorch中模型的保存及载入推理和复用等过程。在有了前期这些基础知识后，接下来我们再来介绍关于模型迁移学习（Transfer Learning）部分的内容。
+5.4.1 迁移学习# 在深度神经网络中由于模型通常都含有大量的可学习参数，所以在训练数据不充分的情况下模型极易出现过拟合或者泛化能力差的情况。而另一方面，数据样本的标注又是一项既耗费时间又耗费财力的工作[6]，尤其是在一些需要业务专家介入的复杂任务标注中。因此，如何利用有限的数据来训练模型便成为了热门的研究方向。受到人类学习的启发——人类在学习并解决一个新问题的时候，总是可以依赖于先前所拥有的经验并迅速迁移到当前的场景中——研究人员开始提出一种两段式的学习框架，即先在一个通用的大规模数据集上训练得到一个预训练模型（Pre-trained Model），然后针对于特定的任务场景再根据少量的标注数据对整个模型进行微调（Fine-tuning），而这也被称为迁移学习。
+在深度学习中迁移学习主要起源于图像处理领域，其背后的理念是如果一个模型是基于足够大且通用的数据集所训练得到，那么该模型将可以有效地充当视觉领域的通用模型，随后便可以直接将这些学习到的模型参数迁移到下游任务中而不必再从头开始训练整个模型[1]。
+在图像处理领域中ImageNet是一个非常著名的大型通用数据集，它是由李飞飞团队于2007年所发起构建的一个项目，包含有超过1400万张手动标注的图片，旨在为世界各地的研究人员提供用于训练大规模物体识别模型的图像数据。[2]。自2010年以来，ImageNet项目每年都举办了一次大规模视觉识别挑战赛（ILSVRC），挑战赛使用了1000个类别的图片用于正确分类和检测目标及场景[3]。如图5-20所示便是ImageNet数据集中的部分图像。
+图 5-20. ImageNet数据集示例图 根据4.2.3节内容可知，越是靠近输出层特征越抽象，越是靠近输入层的特征越具体。因此假如现在有一个开源的图片分类模型A是基于ImageNet数据集训练而来，如果在某任务场景中需要训练另外一个10分类模型B用于汽车型号的分类，那么便可以直接取模型A中的前若干层（靠近输入层）网络作为特征提取器，然后在此基础上再加入一个新的全连接分类层来构造得到模型B完成整个10分类任务，此时称模型A为预训练（Pre-trained）模型。同时，通常来说还可以根据是否让预训练模型中的参数参与整个模型的训练这两种方式来完成模型的迁移学习任务[4]。
+在接下来的内容中，我们将会通过一个实际的示例来对模型的迁移学习过程进行介绍。以下完整示例代码可参见Code/Chapter05/C05_ModelTrans/文件夹。
+5.4.2 模型定义与比较# 在4.4节内容中，我们详细介绍了LeNet5网络模型的原理及现实过程，并且同时根据5.3节的介绍我们也清楚了模型的保存与复用。现在假设有一个LeNet6网络模型，它是在LeNet5的基础上多增加了一个全连接层，此时便可以通过迁移学习将LeNet5模型中的部分参数用于LeNet6模型中。具体地，LeNet6模型结构的实现代码如下所示：
+1 class LeNet6(nn.Module): 2 def __init__(self, ): 3 super(LeNet6, self).__init__() 4 self.conv = nn.Sequential( 5 nn.Conv2d(in_channels=1, out_channels=6, 6 kernel_size=5, padding=2), 7 nn.ReLU(), nn.MaxPool2d(2, 2), nn.Conv2d(6, 16, 5), 8 nn.ReLU(),nn.MaxPool2d(2, 2)) 9 self.fc = nn.Sequential( 10 nn.Flatten(),nn.Linear(16 * 5 * 5, 120), 11 nn.ReLU(),nn.Linear(120, 84),nn.ReLU(), 12 nn.Linear(84, 64),nn.ReLU(),nn.Linear(64, 10))在上述代码中，第1~11行是LeNet5模型的前4层。第12行便是LeNet6模型中新加入的一个网络层。
+在模型定义结束后，便可以输出模型中对应的参数信息。同时，为了完成后续模型的迁移过程这里也将LeNet5保存在本地权重参数载入输出以便两者进行对比，示例代码如下所示：
+1 if __name__ == &#39;__main__&#39;: 2 print(&#34;\n=====Model paras in LeNet6:&#34;) 3 model = LeNet6() 4 for (name, param) in model.state_dict().items(): 5 print(name, param.size()) 6 7 model_save_path = os.path.join(&#39;../C04_ModelSaving&#39;, &#39;lenet5.pt&#39;) 8 print(&#34;\n=====Model paras in LeNet5:&#34;) 9 loaded_paras = torch.load(model_save_path) 10 for (name, param) in loaded_paras.items(): 11 print(name, param.size())在上述代码中，第2~5行是输出LeNet6模型中各个权重参数的名称和形状信息。第7~11行则是载入上一节中持久化保存到本地的LeNet5权重参数，并同时也输出每个参数的名称和形状。">
+	<meta property="og:locale" content="zh_CN">
+	<meta property="og:type" content="article">
+		<meta property="article:section" content="dl">
+
+
+	<meta itemprop="name" content="5.4 模型的迁移学习">
+	<meta itemprop="description" content="5.4 模型的迁移学习# 在前面几节内容中，我们详细介绍了PyTorch中模型的保存及载入推理和复用等过程。在有了前期这些基础知识后，接下来我们再来介绍关于模型迁移学习（Transfer Learning）部分的内容。
+5.4.1 迁移学习# 在深度神经网络中由于模型通常都含有大量的可学习参数，所以在训练数据不充分的情况下模型极易出现过拟合或者泛化能力差的情况。而另一方面，数据样本的标注又是一项既耗费时间又耗费财力的工作[6]，尤其是在一些需要业务专家介入的复杂任务标注中。因此，如何利用有限的数据来训练模型便成为了热门的研究方向。受到人类学习的启发——人类在学习并解决一个新问题的时候，总是可以依赖于先前所拥有的经验并迅速迁移到当前的场景中——研究人员开始提出一种两段式的学习框架，即先在一个通用的大规模数据集上训练得到一个预训练模型（Pre-trained Model），然后针对于特定的任务场景再根据少量的标注数据对整个模型进行微调（Fine-tuning），而这也被称为迁移学习。
+在深度学习中迁移学习主要起源于图像处理领域，其背后的理念是如果一个模型是基于足够大且通用的数据集所训练得到，那么该模型将可以有效地充当视觉领域的通用模型，随后便可以直接将这些学习到的模型参数迁移到下游任务中而不必再从头开始训练整个模型[1]。
+在图像处理领域中ImageNet是一个非常著名的大型通用数据集，它是由李飞飞团队于2007年所发起构建的一个项目，包含有超过1400万张手动标注的图片，旨在为世界各地的研究人员提供用于训练大规模物体识别模型的图像数据。[2]。自2010年以来，ImageNet项目每年都举办了一次大规模视觉识别挑战赛（ILSVRC），挑战赛使用了1000个类别的图片用于正确分类和检测目标及场景[3]。如图5-20所示便是ImageNet数据集中的部分图像。
+图 5-20. ImageNet数据集示例图 根据4.2.3节内容可知，越是靠近输出层特征越抽象，越是靠近输入层的特征越具体。因此假如现在有一个开源的图片分类模型A是基于ImageNet数据集训练而来，如果在某任务场景中需要训练另外一个10分类模型B用于汽车型号的分类，那么便可以直接取模型A中的前若干层（靠近输入层）网络作为特征提取器，然后在此基础上再加入一个新的全连接分类层来构造得到模型B完成整个10分类任务，此时称模型A为预训练（Pre-trained）模型。同时，通常来说还可以根据是否让预训练模型中的参数参与整个模型的训练这两种方式来完成模型的迁移学习任务[4]。
+在接下来的内容中，我们将会通过一个实际的示例来对模型的迁移学习过程进行介绍。以下完整示例代码可参见Code/Chapter05/C05_ModelTrans/文件夹。
+5.4.2 模型定义与比较# 在4.4节内容中，我们详细介绍了LeNet5网络模型的原理及现实过程，并且同时根据5.3节的介绍我们也清楚了模型的保存与复用。现在假设有一个LeNet6网络模型，它是在LeNet5的基础上多增加了一个全连接层，此时便可以通过迁移学习将LeNet5模型中的部分参数用于LeNet6模型中。具体地，LeNet6模型结构的实现代码如下所示：
+1 class LeNet6(nn.Module): 2 def __init__(self, ): 3 super(LeNet6, self).__init__() 4 self.conv = nn.Sequential( 5 nn.Conv2d(in_channels=1, out_channels=6, 6 kernel_size=5, padding=2), 7 nn.ReLU(), nn.MaxPool2d(2, 2), nn.Conv2d(6, 16, 5), 8 nn.ReLU(),nn.MaxPool2d(2, 2)) 9 self.fc = nn.Sequential( 10 nn.Flatten(),nn.Linear(16 * 5 * 5, 120), 11 nn.ReLU(),nn.Linear(120, 84),nn.ReLU(), 12 nn.Linear(84, 64),nn.ReLU(),nn.Linear(64, 10))在上述代码中，第1~11行是LeNet5模型的前4层。第12行便是LeNet6模型中新加入的一个网络层。
+在模型定义结束后，便可以输出模型中对应的参数信息。同时，为了完成后续模型的迁移过程这里也将LeNet5保存在本地权重参数载入输出以便两者进行对比，示例代码如下所示：
+1 if __name__ == &#39;__main__&#39;: 2 print(&#34;\n=====Model paras in LeNet6:&#34;) 3 model = LeNet6() 4 for (name, param) in model.state_dict().items(): 5 print(name, param.size()) 6 7 model_save_path = os.path.join(&#39;../C04_ModelSaving&#39;, &#39;lenet5.pt&#39;) 8 print(&#34;\n=====Model paras in LeNet5:&#34;) 9 loaded_paras = torch.load(model_save_path) 10 for (name, param) in loaded_paras.items(): 11 print(name, param.size())在上述代码中，第2~5行是输出LeNet6模型中各个权重参数的名称和形状信息。第7~11行则是载入上一节中持久化保存到本地的LeNet5权重参数，并同时也输出每个参数的名称和形状。">
+	<meta itemprop="wordCount" content="386">
+
+<title>5.4 模型的迁移学习 • 《从零学AI指南手册》</title>
+<link rel="icon" href="/favicon.png" >
+<link rel="manifest" href="/manifest.json">
+<link rel="canonical" href="https://mlwithme.github.io/dl/chapter05/211b26bdd8f248ac/">
+<link rel="stylesheet" href="/book.min.6097ccf1d338ddfaa037d2f96478059a71fa573d0f917d128bab595efea338ca.css" integrity="sha256-YJfM8dM43fqgN9L5ZHgFmnH6Vz0PkX0Si6tZXv6jOMo=" crossorigin="anonymous">
+
+
+  <script defer type="module" src="/en.search.min.ffaad769e546b38d39820301bb9e5c193822f7bf0f46a855602e4e14707802e0.js" integrity="sha256-/6rXaeVGs405ggMBu55cGTgi978PRqhVYC5OFHB4AuA=" crossorigin="anonymous"></script>
+
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-23SZ6E8VY7"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-23SZ6E8VY7');
+</script>
+<script async src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
+
+</head>
+<body dir="ltr" class="book-kind-page book-type-dl">
+  <input type="checkbox" class="hidden toggle" id="menu-control" />
+  <input type="checkbox" class="hidden toggle" id="toc-control" />
+  <main class="container flex">
+    
+<aside class="book-menu">
+  <div class="book-menu-content">
+    
+  <nav>
+<h2 class="book-brand">
+  <a class="flex align-center" href="/"><span>《从零学AI指南手册》</span>
+  </a>
+</h2>
+
+
+<div class="book-search hidden">
+  <input id="book-search-input" type="text" 
+    placeholder="Search"
+    aria-label="Search"
+    maxlength="64" />
+  <div class="book-search-spinner hidden"></div>
+  <ul id="book-search-results"></ul>
+</div>
+<script>document.querySelector(".book-search").classList.remove("hidden")</script>
+
+
+
+
+
+
+
+
+
+
+  
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a>
+      大模型Agent开发</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-253e26e732e57a78f635dcf47df3d0a3" class="toggle"  />
+    <label for="section-253e26e732e57a78f635dcf47df3d0a3" class="flex">
+      <a role="button" class="">
+        第 1 章 RAG 基础概念</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/454f0942222e471e/" class="">
+      1.1 RAG 提出背景</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/d7623d619f884b25/" class="">
+      1.2 RAG 流程概览</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-810ee5a2a3a24c9b7c25ab5324ae7db7" class="toggle"  />
+    <label for="section-810ee5a2a3a24c9b7c25ab5324ae7db7" class="flex">
+      <a role="button" class="">
+        第 2 章 大模型接入与使用</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/d43adfc00df54515/" class="">
+      2.1 SDK 介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/8b9059fde1d644a4/" class="">
+      2.2 现代大模型中的 SDK</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/95d3214ab80b4769/" class="">
+      2.3 DashScope 接口体系</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/b9843c089d654494/" class="">
+      2.4 千问大模型接入与使用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ed1727f01d0e40dc9b7961b72e42160e" class="toggle"  />
+    <label for="section-ed1727f01d0e40dc9b7961b72e42160e" class="flex">
+      <a role="button" class="">
+        第 3 章 文档标准化与语义检索</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/7f4af6d48c5b425c/" class="">
+      3.1 文档加载与标准化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/572ba4c9cb114677/" class="">
+      3.2 常见文本切分策略</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/06e588cd33fa4454/" class="">
+      3.3 向量数据库选择</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/ff27306c0d7b4387/" class="">
+      3.4 Qwen3 Embedding 模型介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/303035851c5e42f2/" class="">
+      3.5 语义搜索引擎构建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/e1328cb23e8c412b/" class="">
+      3.6  Milvus 模块解析</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-caaf9d8eb5e5559f7ca8bb11c41da71a" class="toggle"  />
+    <label for="section-caaf9d8eb5e5559f7ca8bb11c41da71a" class="flex">
+      <a role="button" class="">
+        第 4 章 RAG 与 Agent</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/4c646aa07f3b4b74/" class="">
+      4.1 两步式 RAG 搭建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/5c35e934bab24ac3/" class="">
+      4.2 Function Calling 概念介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/88ff352fc22e4cd6/" class="">
+      4.3 LangChain 中的 Tool 修饰器</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/83fe26536a5d4b6e/" class="">
+      4.4 RAG Agent 原理与搭建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/b7e49268357a4bca/" class="">
+      4.5 复杂问题拆解与ReAct框架</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/469b5963f2ca4799/" class="">
+      4.6 RAG 中的两阶段索引</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/10fb92a6c5484039/" class="">
+      4.7 Qwen3 Reranking 原理与使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/45d286aec1bc4d66/" class="">
+      4.8 基于两阶段索引的 RAG Agent 搭建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/43af483460574e48/" class="">
+      4.9 LangGraph 基本概念介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/0def4564f3aa455d/" class="">
+      4.10  基于 LangGraph 构建自定义 RAG Agent</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a>
+      深度学习</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/70e5f9cdbedc4b2c/" class="">
+      学习思维导图</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-a9b664bcf9e1dab8add449268565f466" class="toggle"  />
+    <label for="section-a9b664bcf9e1dab8add449268565f466" class="flex">
+      <a role="button" class="">
+        第 1 章 深度学习简介</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/647eb9c607874e3a/" class="">
+      1.1 深度学习的发展阶段</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/f31da36a6f444afe/" class="">
+      1.2 深度学习中的关键人物</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/da9fa13021e64f3c/" class="">
+      1.3 深度学习框架介绍</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-e6e0db5d4bc28bd97dfe8d5210249e63" class="toggle"  />
+    <label for="section-e6e0db5d4bc28bd97dfe8d5210249e63" class="flex">
+      <a role="button" class="">
+        第 2 章 环境配置</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/a0c5d1e0de0140cb/" class="">
+      2.1 体系结构介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/04f07b9246984577/" class="">
+      2.2 深度学习环境安装</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/5bf6454673194c67/" class="">
+      2.3 开发环境安装配置</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-0a2ca47f15332c8b06ae83247328edb4" class="toggle"  />
+    <label for="section-0a2ca47f15332c8b06ae83247328edb4" class="flex">
+      <a role="button" class="">
+        第 3 章 深度学习基础</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/75c5fa7839174c16/" class="">
+      3.1 线性回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/ca16f8cb6df444a6/" class="">
+      3.2 线性回归简洁实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/97e1da1143cd4554/" class="">
+      3.3 梯度下降与反向传播</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/7b865de988ea422c/" class="">
+      3.4 从零实现回归模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/18fdd1deff424a16/" class="">
+      3.5 从逻辑回归到Softmax回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/55967b0f642b4509/" class="">
+      3.6 Softmax回归简洁实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/381bbd56509e4a6f/" class="">
+      3.7 从零实现分类模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/2c061df4435d4928/" class="">
+      3.8 回归模型评估指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/e3442eff254e473c/" class="">
+      3.9 分类模型评估指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/307f927c8a1245c5/" class="">
+      3.10 过拟合与正则化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/bcb64de5aa404f18/" class="">
+      3.11 超参数与交叉验证</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/66dd7425cdd04565/" class="">
+      3.12 激活函数</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/0d3dacfff4c04794/" class="">
+      3.13 多标签分类</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-95b7e7417bf2b821a1b760975d3acc22" class="toggle"  />
+    <label for="section-95b7e7417bf2b821a1b760975d3acc22" class="flex">
+      <a role="button" class="">
+        第 4 章 卷积神经网络</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/102e183e8be94f46/" class="">
+      4.1 卷积的概念</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/5b3e3152e9e54f4f/" class="">
+      4.2 卷积的计算过程</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/762f60de801a4ccd/" class="">
+      4.3 填充和池化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/c8af5d84174b4420/" class="">
+      4.4 LeNet5网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/de007462967e4701/" class="">
+      4.5 AlexNet网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/f084f181c3554082/" class="">
+      4.6 VGG网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/911b961cc5d949b6/" class="">
+      4.7 NIN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/47da186baf3e4a0b/" class="">
+      4.8 GoogLeNet网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/da16c61397454b2c/" class="">
+      4.9 ResNet网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/1c24468824274650/" class="">
+      4.10 DenseNet网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-17076fe90a2d84e207bbd0c829983325" class="toggle" checked />
+    <label for="section-17076fe90a2d84e207bbd0c829983325" class="flex">
+      <a role="button" class="">
+        第 5 章 模型训练与复用</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/4557a6f03dec4475/" class="">
+      5.1 参数及日志管理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/e7c4c6da085148d0/" class="">
+      5.2 Tensorboard可视化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/27387966672c45ed/" class="">
+      5.3 模型的保存与复用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/211b26bdd8f248ac/" class="active">
+      5.4 模型的迁移学习</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/345c1b72253043cb/" class="">
+      5.5 开源模型复用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/c912dda030c946d9/" class="">
+      5.6 多GPU训练</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/f065af80f3844b0b/" class="">
+      5.7 数据预处理与缓存</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-2d091d454d5c3f03f5e0a202c37cc226" class="toggle"  />
+    <label for="section-2d091d454d5c3f03f5e0a202c37cc226" class="flex">
+      <a role="button" class="">
+        第 6 章 模型优化方法</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/cc35bb112783410e/" class="">
+      6.1 学习率调度器</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/fc024c283f164849/" class="">
+      6.2 梯度裁剪</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/27ed3ed136e24092/" class="">
+      6.3 批归一化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/fdd5ba4b41f74a0e/" class="">
+      6.4 层归一化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/9246afed14eb436c/" class="">
+      6.5 组归一化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/fcbc66ad051a4336/" class="">
+      6.6 动量法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/8b83d654898c40a2/" class="">
+      6.7 AdaGrad算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/078f2394980d41d2/" class="">
+      6.8 AdaDelta算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/28ad7fb39987447e/" class="">
+      6.9 Adam算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/4b81b8d39721434d/" class="">
+      6.10 初始化方法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f2f78ba4851131558fc284d927542d28" class="toggle"  />
+    <label for="section-f2f78ba4851131558fc284d927542d28" class="flex">
+      <a role="button" class="">
+        第 7 章 循环神经网络</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/88ba4e03337b4233/" class="">
+      7.1 RNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/ec8ff069aadc49b9/" class="">
+      7.2 时序数据</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/b4c5ddcc9e904238/" class="">
+      7.3 LSTM网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/4112672112224dc1/" class="">
+      7.4 GRU网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/b6e5ccb6cd064f74/" class="">
+      7.5 BiRNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/4bf3ecf7b21e45fb/" class="">
+      7.6 CharRNN网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-49992cff6143e64ae5d7f2209dcfb054" class="toggle"  />
+    <label for="section-49992cff6143e64ae5d7f2209dcfb054" class="flex">
+      <a role="button" class="">
+        第 8 章 时序与模型融合</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/2be88fbc08a5418f/" class="">
+      8.1 TextCNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/9023d1f822a54226/" class="">
+      8.2 TextRNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/9edd7db2d439402f/" class="">
+      8.3 CNN-RNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/19c2b86e85f2461e/" class="">
+      8.4 ConvLSTM网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/1e6da79bf7b44c20/" class="">
+      8.5 3DCNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/5f426a9190e7454b/" class="">
+      8.6 STResNet网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ca07c572acb4d7fd40854f5b367c247b" class="toggle"  />
+    <label for="section-ca07c572acb4d7fd40854f5b367c247b" class="flex">
+      <a role="button" class="">
+        第 9 章 自然语言处理</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/e0cb9a7aae814045/" class="">
+      9.1 自然语言处理介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/d4703d990f8d4fed/" class="">
+      9.2 Word2Vec词向量</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/1bb6351b01a2479b/" class="">
+      9.3 Word2Vec训练与使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/40a8a1146d934c55/" class="">
+      9.4 GloVe词向量</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/c6aa1405b8cf46d8/" class="">
+      9.5 词向量的微调使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/48c26d04b342452d/" class="">
+      9.6 fastText网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/03a0166e195f443f/" class="">
+      9.7 Seq2Seq网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/271bda16904544af/" class="">
+      9.8 序列模型评价指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/fefa60e0bc854a17/" class="">
+      9.9 NMT网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/5bcd8b0920414f34/" class="">
+      9.10 注意力机制</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/8a78e8213ee04aac/" class="">
+      9.11 含注意力的NMT网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/474ac7a1867d4b5e/" class="">
+      9.12 含注意力的RNN网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-8cdec04c2fd8683c5c7373c78d943528" class="toggle"  />
+    <label for="section-8cdec04c2fd8683c5c7373c78d943528" class="flex">
+      <a role="button" class="">
+        第10章 现代神经网络</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/7523731afc0241c0/" class="">
+      10.1 ELMo网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/4987d1044939480d/" class="">
+      10.2 Transformer网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/a469ed1a25e1498f/" class="">
+      10.3 Transformer结构</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/d50c490eef3b4565/" class="">
+      10.4 Transformer实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/f6c507b3d2d74f03/" class="">
+      10.5 Transformer对联模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/3aedea1d3f3e48dd/" class="">
+      10.6 BERT网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/82a1cd0def084620/" class="">
+      10.7 从零实现BERT</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/e736d3974ed0484c/" class="">
+      10.8 BERT文本分类模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/f5076cbadda84d4e/" class="">
+      10.9 BERT问题选择模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/25d9ef3d9b34472a/" class="">
+      10.10 BERT问题回答模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/64d3ec5593ec4b94/" class="">
+      10.11 BERT命名体识别模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/90ea8d3e090d48b4/" class="">
+      10.12 BERT从零训练</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/e36878dad7a647d8/" class="">
+      10.13 GPT-1模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/94dda9bbbc994913/" class="">
+      10.14 GPT-2与GPT-3模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/4af57a29308840de/" class="">
+      10.15 基于GPT-2的中文预训练模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/9f5c00cadde14d31/" class="">
+      10.16 InstructGPT与ChatGPT</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/050b54fd34ca480a/" class="">
+      10.17 ChatGPT与提示词工程</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/a90b0d71389b4d69/" class="">
+      10.18 百川大模型使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/40c1c9ade70c4ce7/" class="">
+      10.19 百川大模型实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/ea1b4cf8b40c4b05/" class="">
+      10.20 GPT-4与GPTs使用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a>
+      机器学习</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/43fc00b3809d4be6/" class="">
+      学习思维导图</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-0a3254d1ca9963fd6975aa5bc0b3edcc" class="toggle"  />
+    <label for="section-0a3254d1ca9963fd6975aa5bc0b3edcc" class="flex">
+      <a role="button" class="">
+        第 1 章 环境配置</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/baafb91f0af14a84/" class="">
+      1.1 安装使用Conda</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/7a01c403acd6488a/" class="">
+      1.2 开发环境安装配置</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-4569258198323c16bc8a634ea44fd5db" class="toggle"  />
+    <label for="section-4569258198323c16bc8a634ea44fd5db" class="flex">
+      <a role="button" class="">
+        第 2 章 线性回归</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/2414d4b6648d405a/" class="">
+      2.1 模型的建立与求解</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/3e9ba14da71f4fd3/" class="">
+      2.2 多变量线性回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/4a16c0dc82a84e78/" class="">
+      2.3 多项式回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/f8dea699983c48c6/" class="">
+      2.4 回归模型评估</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/df41c2e97f554e68/" class="">
+      2.5 梯度下降</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/71ef816e0005492d/" class="">
+      2.6 正态分布</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/803bee4f70be4dca/" class="">
+      2.7 目标函数推导</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-a6ca5e2f846ebd900d1a868e6718dc82" class="toggle"  />
+    <label for="section-a6ca5e2f846ebd900d1a868e6718dc82" class="flex">
+      <a role="button" class="">
+        第 3 章 逻辑回归</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/96d46b53aee14c3b/" class="">
+      3.1 模型的建立与求解</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/fac70083dd764141/" class="">
+      3.2 多分类任务</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/6d7cfd79ef304cbd/" class="">
+      3.3 常见的分类评估指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/2fdc655d00c74548/" class="">
+      3.4 目标函数推导</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/a4b61c5bbadd43a6/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-9f462f716bd0e46ef79984b356eeb5a2" class="toggle"  />
+    <label for="section-9f462f716bd0e46ef79984b356eeb5a2" class="flex">
+      <a role="button" class="">
+        第 4 章 模型的改善与泛化</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/2089400b28f54dd9/" class="">
+      4.1 基本概念</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/56b788b624cd4971/" class="">
+      4.2 特征标准化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/ca091dc393a84518/" class="">
+      4.3过拟合</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/5097d3b8c1144427/" class="">
+      4.4 正则化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/3c7eee1621d4480b/" class="">
+      4.5 偏差、方差与交叉验证</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/c5957e0753d04746/" class="">
+      4.6 实例分析手写体识别</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/a915e49586eb4426/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-327db48e4f4df6236855078634147679" class="toggle"  />
+    <label for="section-327db48e4f4df6236855078634147679" class="flex">
+      <a role="button" class="">
+        第 5 章 K近邻</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/7c610e923e754259/" class="">
+      5.1 K近邻思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/1a97571e0a6447ef/" class="">
+      5.2 K近邻原理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/d245bda107034e65/" class="">
+      5.3 sklearn接口与示例代码</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/24378571ce404d9c/" class="">
+      5.4 kd树构建与搜索</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/40f253b916f24038/" class="">
+      5.5 从零实现K近邻</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/76818d9e48944f8c/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-94d0a5f5555d92c51e0903b148e34993" class="toggle"  />
+    <label for="section-94d0a5f5555d92c51e0903b148e34993" class="flex">
+      <a role="button" class="">
+        第 6 章 文本特征与模型复用</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/e05b5928c41d4841/" class="">
+      6.1 词袋模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/de59bf74d753457e/" class="">
+      6 .2 基于K近邻算法的垃圾邮件分类</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/c6fdc78b49d44453/" class="">
+      6.3 考虑权重的词袋模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/825fde8589654b16/" class="">
+      6.4 词云图</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/8451cffe49f5477c/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-544be5d1e48c4fd8b33ba2f91964c6dd" class="toggle"  />
+    <label for="section-544be5d1e48c4fd8b33ba2f91964c6dd" class="flex">
+      <a role="button" class="">
+        第 7 章 朴素贝叶斯</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/faf303eb93a241d1/" class="">
+      7.1 朴素贝叶斯算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/842c7b8684c747d2/" class="">
+      7.2 贝叶斯估计</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/724bf42b09bb440e/" class="">
+      7.3 朴素贝叶斯实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/1a9deee1d5f042b5/" class="">
+      7.4 多项式朴素贝叶斯原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/5c27cdd8b3264f50/" class="">
+      7.5 高斯朴素贝叶斯原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/715b8eaf245f45f1/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-d1884c6b3e8f1260019220c57d615371" class="toggle"  />
+    <label for="section-d1884c6b3e8f1260019220c57d615371" class="flex">
+      <a role="button" class="">
+        第 8 章 决策树</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/690fe2be21834c2a/" class="">
+      8.1 决策树的基本思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/ee9ada9729124049/" class="">
+      8.2 决策树建模与可视化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/5887cf1408dd4c7f/" class="">
+      8.3 决策树生成之ID3与C4.5</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/87ba589d6c17434d/" class="">
+      8.4 决策树剪枝过程</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/34bc962c974646f4/" class="">
+      8.5 从零实现ID3与C4.5算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/c44682dbb3364be4/" class="">
+      8.6 连续型特征变量下决策树实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/4eead717a84a4dbf/" class="">
+      8.7 CART生成与剪枝算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/1c72d67dffc64dc9/" class="">
+      8.8 从零实现CART算法及剪枝示例</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/ae452792b2604e84/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-1f0a2178f0a580ba251c7da2649aa52f" class="toggle"  />
+    <label for="section-1f0a2178f0a580ba251c7da2649aa52f" class="flex">
+      <a role="button" class="">
+        第 9 章 集成学习与提升算法</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/9eff4004fd6c437d/" class="">
+      9.1 集成学习算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/18980c9f757e42c8/" class="">
+      9.2 随机森林</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/8a91b358b2f74d56/" class="">
+      9.3 泰坦尼克号生还预测</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/73f6914844f549f1/" class="">
+      9.4 AdaBoost原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/71fd0e44294e4abb/" class="">
+      9.5 MultiAdaBoost原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/f3c2341ce7d64f70/" class="">
+      9.6 Gradient Boost 原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/4f9b26d5b65541f5/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f63defd924ef7373144c8643a39fd7b2" class="toggle"  />
+    <label for="section-f63defd924ef7373144c8643a39fd7b2" class="flex">
+      <a role="button" class="">
+        第 10 章 支持向量机</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/dce7180d4eb047d7/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/515b54e2307a4c8a/" class="">
+      10.1 SVM思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/9c3862bc843c4179/" class="">
+      10.2 SVM线性不可分</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/fbdb6f8adace457d/" class="">
+      10.3 SVM原理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/1a3ffa363b1d4f83/" class="">
+      10.4 SVM中的软间隔</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/8b7a06412a9f4267/" class="">
+      10.5 拉格朗日乘数法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/40e977f0a2f84ac0/" class="">
+      10.6 对偶性与KKT条件</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/b18d45a772574ddb/" class="">
+      10.7 SVM优化问题</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/c53ed12f7bc04405/" class="">
+      10.8 SVM核函数原理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/26d9b2b328a849c2/" class="">
+      10.9 SMO算法求解SVM</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/215a1e15c0f2470d/" class="">
+      10.10 从零实现SVM分类算法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bdcc54d1c295c5cc69c9c851c02886ea" class="toggle"  />
+    <label for="section-bdcc54d1c295c5cc69c9c851c02886ea" class="flex">
+      <a role="button" class="">
+        第 11 章 聚类分析</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/f9d9305a55a548a1/" class="">
+      11.1 聚类算法的思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/e635df24de32487a/" class="">
+      11.2 Kmeans聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/e75b8efa232249ab/" class="">
+      11.3 Kmeans算法求解</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/60e49a33d1aa4f50/" class="">
+      11.4 从零实现Kmeans聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/c8b45d8a3d8c4cf4/" class="">
+      11.5 Kmeans&#43;&#43;聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/1ede2f3557d0438f/" class="">
+      11.6 聚类外部评价指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/e6a75df19f85498c/" class="">
+      11.7 加权Kmeans聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/c52cf7920f1d4636/" class="">
+      11.8 聚类内部评价指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/f95259c359b146ba/" class="">
+      11.9 聚类K值选取与分析</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/b85c1a858f7c4686/" class="">
+      11.10 基于密度的聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/2f01ba751d914336/" class="">
+      11.11 基于层次的聚类算法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bafa8c48214ccf62d333a6d0457c5f72" class="toggle"  />
+    <label for="section-bafa8c48214ccf62d333a6d0457c5f72" class="flex">
+      <a role="button" class="">
+        第 12 章 降维算法</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/9478de824edd44c6/" class="">
+      12.1 主成分分析</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/909356aa90fe456a/" class="">
+      12.2 基于核函数的主成分分析</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-d5f143889a719ce66d602e75b72bffb9" class="toggle"  />
+    <label for="section-d5f143889a719ce66d602e75b72bffb9" class="flex">
+      <a role="button" class="">
+        第 13 章 自训练与标签传播</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/8d71301c2e414efe/" class="">
+      13.1 Self-Training 自训练算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/87fdcf0be1c34644/" class="">
+      13.2 Label Propagation算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/7fc8b0fc47d2427c/" class="">
+      13.3 Label Spreading 算法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+
+
+
+
+
+
+
+
+
+
+
+
+</nav>
+
+
+
+
+  <script>(function(){var e=document.querySelector("aside .book-menu-content");addEventListener("beforeunload",function(){localStorage.setItem("menu.scrollTop",e.scrollTop)}),e.scrollTop=localStorage.getItem("menu.scrollTop")})()</script>
+
+
+
+  </div>
+</aside>
+ 
+
+    <div class="book-page">
+      <header class="book-header hidden">
+        
+  <div class="flex align-center justify-between">
+  <label for="menu-control">
+    <img src="/icons/menu.svg" class="book-icon" alt="Menu" />
+  </label>
+
+  <h3>5.4 模型的迁移学习</h3>
+
+  <label for="toc-control">
+    
+    <img src="/icons/toc.svg" class="book-icon" alt="Table of Contents" />
+    
+  </label>
+</div>
+
+
+  
+  <aside class="hidden">
+    
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#541-迁移学习">5.4.1 迁移学习</a></li>
+    <li><a href="#542-模型定义与比较">5.4.2 模型定义与比较</a></li>
+    <li><a href="#543-参数微调">5.4.3 参数微调</a></li>
+  </ul>
+</nav>
+
+
+
+  </aside>
+  
+ 
+      </header>
+
+      
+      
+  <article class="markdown book-article"><h1 id="54-模型的迁移学习">5.4 模型的迁移学习<a class="anchor" href="#54-%e6%a8%a1%e5%9e%8b%e7%9a%84%e8%bf%81%e7%a7%bb%e5%ad%a6%e4%b9%a0">#</a></h1>
+<p>在前面几节内容中，我们详细介绍了PyTorch中模型的保存及载入推理和复用等过程。在有了前期这些基础知识后，接下来我们再来介绍关于模型迁移学习（Transfer Learning）部分的内容。</p>
+<h2 id="541-迁移学习">5.4.1 迁移学习<a class="anchor" href="#541-%e8%bf%81%e7%a7%bb%e5%ad%a6%e4%b9%a0">#</a></h2>
+<p>在深度神经网络中由于模型通常都含有大量的可学习参数，所以在训练数据不充分的情况下模型极易出现过拟合或者泛化能力差的情况。而另一方面，数据样本的标注又是一项既耗费时间又耗费财力的工作[6]，尤其是在一些需要业务专家介入的复杂任务标注中。因此，如何利用有限的数据来训练模型便成为了热门的研究方向。受到人类学习的启发——人类在学习并解决一个新问题的时候，总是可以依赖于先前所拥有的经验并迅速迁移到当前的场景中——研究人员开始提出一种两段式的学习框架，即先在一个通用的大规模数据集上训练得到一个预训练模型（Pre-trained Model），然后针对于特定的任务场景再根据少量的标注数据对整个模型进行微调（Fine-tuning），而这也被称为迁移学习。</p>
+<p>在深度学习中迁移学习主要起源于图像处理领域，其背后的理念是如果一个模型是基于足够大且通用的数据集所训练得到，那么该模型将可以有效地充当视觉领域的通用模型，随后便可以直接将这些学习到的模型参数迁移到下游任务中而不必再从头开始训练整个模型[1]。</p>
+<p>在图像处理领域中ImageNet是一个非常著名的大型通用数据集，它是由李飞飞团队于2007年所发起构建的一个项目，包含有超过1400万张手动标注的图片，旨在为世界各地的研究人员提供用于训练大规模物体识别模型的图像数据。[2]。自2010年以来，ImageNet项目每年都举办了一次大规模视觉识别挑战赛（ILSVRC），挑战赛使用了1000个类别的图片用于正确分类和检测目标及场景[3]。如图5-20所示便是ImageNet数据集中的部分图像。</p>
+<div align=center><img width="400" src="/images/dl/cnn_embed_full_1k.jpg"/></div><center>图 5-20. ImageNet数据集示例图</center>
+<p>根据<a href="dl/Chapter04/5b3e3152e9e54f4f">4.2.3节</a>内容可知，越是靠近输出层特征越抽象，越是靠近输入层的特征越具体。因此假如现在有一个开源的图片分类模型A是基于ImageNet数据集训练而来，如果在某任务场景中需要训练另外一个10分类模型B用于汽车型号的分类，那么便可以直接取模型A中的前若干层（靠近输入层）网络作为特征提取器，然后在此基础上再加入一个新的全连接分类层来构造得到模型B完成整个10分类任务，此时称模型A为预训练（Pre-trained）模型。同时，通常来说还可以根据是否让预训练模型中的参数参与整个模型的训练这两种方式来完成模型的迁移学习任务[4]。</p>
+<p>在接下来的内容中，我们将会通过一个实际的示例来对模型的迁移学习过程进行介绍。以下完整示例代码可参见<code>Code/Chapter05/C05_ModelTrans/</code>文件夹。</p>
+<h2 id="542-模型定义与比较">5.4.2 模型定义与比较<a class="anchor" href="#542-%e6%a8%a1%e5%9e%8b%e5%ae%9a%e4%b9%89%e4%b8%8e%e6%af%94%e8%be%83">#</a></h2>
+<p>在<a href="dl/Chapter04/c8af5d84174b4420">4.4节</a>内容中，我们详细介绍了LeNet5网络模型的原理及现实过程，并且同时根据<a href="dl/Chapter05/27387966672c45ed">5.3节</a>的介绍我们也清楚了模型的保存与复用。现在假设有一个LeNet6网络模型，它是在LeNet5的基础上多增加了一个全连接层，此时便可以通过迁移学习将LeNet5模型中的部分参数用于LeNet6模型中。具体地，LeNet6模型结构的实现代码如下所示：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#ae81ff">1</span> <span style="color:#66d9ef">class</span> <span style="color:#a6e22e">LeNet6</span>(nn<span style="color:#f92672">.</span>Module):
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">2</span>     <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">__init__</span>(self, ):
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">3</span>         super(LeNet6, self)<span style="color:#f92672">.</span><span style="color:#a6e22e">__init__</span>()
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">4</span>         self<span style="color:#f92672">.</span>conv <span style="color:#f92672">=</span> nn<span style="color:#f92672">.</span>Sequential(
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">5</span>             nn<span style="color:#f92672">.</span>Conv2d(in_channels<span style="color:#f92672">=</span><span style="color:#ae81ff">1</span>, out_channels<span style="color:#f92672">=</span><span style="color:#ae81ff">6</span>, 
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">6</span>                 kernel_size<span style="color:#f92672">=</span><span style="color:#ae81ff">5</span>, padding<span style="color:#f92672">=</span><span style="color:#ae81ff">2</span>),
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">7</span>             nn<span style="color:#f92672">.</span>ReLU(), nn<span style="color:#f92672">.</span>MaxPool2d(<span style="color:#ae81ff">2</span>, <span style="color:#ae81ff">2</span>), nn<span style="color:#f92672">.</span>Conv2d(<span style="color:#ae81ff">6</span>, <span style="color:#ae81ff">16</span>, <span style="color:#ae81ff">5</span>), 
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">8</span>             nn<span style="color:#f92672">.</span>ReLU(),nn<span style="color:#f92672">.</span>MaxPool2d(<span style="color:#ae81ff">2</span>, <span style="color:#ae81ff">2</span>))
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">9</span>         self<span style="color:#f92672">.</span>fc <span style="color:#f92672">=</span> nn<span style="color:#f92672">.</span>Sequential(
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">10</span>             nn<span style="color:#f92672">.</span>Flatten(),nn<span style="color:#f92672">.</span>Linear(<span style="color:#ae81ff">16</span> <span style="color:#f92672">*</span> <span style="color:#ae81ff">5</span> <span style="color:#f92672">*</span> <span style="color:#ae81ff">5</span>, <span style="color:#ae81ff">120</span>),
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">11</span>             nn<span style="color:#f92672">.</span>ReLU(),nn<span style="color:#f92672">.</span>Linear(<span style="color:#ae81ff">120</span>, <span style="color:#ae81ff">84</span>),nn<span style="color:#f92672">.</span>ReLU(),
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">12</span>             nn<span style="color:#f92672">.</span>Linear(<span style="color:#ae81ff">84</span>, <span style="color:#ae81ff">64</span>),nn<span style="color:#f92672">.</span>ReLU(),nn<span style="color:#f92672">.</span>Linear(<span style="color:#ae81ff">64</span>, <span style="color:#ae81ff">10</span>))</span></span></code></pre></div><p>在上述代码中，第1~11行是LeNet5模型的前4层。第12行便是LeNet6模型中新加入的一个网络层。</p>
+<p>在模型定义结束后，便可以输出模型中对应的参数信息。同时，为了完成后续模型的迁移过程这里也将LeNet5保存在本地权重参数载入输出以便两者进行对比，示例代码如下所示：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#ae81ff">1</span> <span style="color:#66d9ef">if</span> __name__ <span style="color:#f92672">==</span> <span style="color:#e6db74">&#39;__main__&#39;</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">2</span>     print(<span style="color:#e6db74">&#34;</span><span style="color:#ae81ff">\n</span><span style="color:#e6db74">=====Model paras in LeNet6:&#34;</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">3</span>     model <span style="color:#f92672">=</span> LeNet6()
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">4</span>     <span style="color:#66d9ef">for</span> (name, param) <span style="color:#f92672">in</span> model<span style="color:#f92672">.</span>state_dict()<span style="color:#f92672">.</span>items():
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">5</span>         print(name, param<span style="color:#f92672">.</span>size())
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">6</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">7</span>     model_save_path <span style="color:#f92672">=</span> os<span style="color:#f92672">.</span>path<span style="color:#f92672">.</span>join(<span style="color:#e6db74">&#39;../C04_ModelSaving&#39;</span>, <span style="color:#e6db74">&#39;lenet5.pt&#39;</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">8</span>     print(<span style="color:#e6db74">&#34;</span><span style="color:#ae81ff">\n</span><span style="color:#e6db74">=====Model paras in LeNet5:&#34;</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">9</span>     loaded_paras <span style="color:#f92672">=</span> torch<span style="color:#f92672">.</span>load(model_save_path)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">10</span>     <span style="color:#66d9ef">for</span> (name, param) <span style="color:#f92672">in</span> loaded_paras<span style="color:#f92672">.</span>items():
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">11</span>         print(name, param<span style="color:#f92672">.</span>size())</span></span></code></pre></div><p>在上述代码中，第2~5行是输出LeNet6模型中各个权重参数的名称和形状信息。第7~11行则是载入上一节中持久化保存到本地的LeNet5权重参数，并同时也输出每个参数的名称和形状。</p>
+<p>在上述代码运行结束后便可以得到如下所示结果：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#ae81ff">1</span> <span style="color:#f92672">=====</span>Model paras <span style="color:#f92672">in</span> LeNet6:
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">2</span> conv<span style="color:#ae81ff">.0</span><span style="color:#f92672">.</span>weight torch<span style="color:#f92672">.</span>Size([<span style="color:#ae81ff">6</span>, <span style="color:#ae81ff">1</span>, <span style="color:#ae81ff">5</span>, <span style="color:#ae81ff">5</span>])
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">3</span> conv<span style="color:#ae81ff">.0</span><span style="color:#f92672">.</span>bias torch<span style="color:#f92672">.</span>Size([<span style="color:#ae81ff">6</span>])
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">4</span> conv<span style="color:#ae81ff">.3</span><span style="color:#f92672">.</span>weight torch<span style="color:#f92672">.</span>Size([<span style="color:#ae81ff">16</span>, <span style="color:#ae81ff">6</span>, <span style="color:#ae81ff">5</span>, <span style="color:#ae81ff">5</span>])
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">5</span> conv<span style="color:#ae81ff">.3</span><span style="color:#f92672">.</span>bias torch<span style="color:#f92672">.</span>Size([<span style="color:#ae81ff">16</span>])
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">6</span> fc<span style="color:#ae81ff">.1</span><span style="color:#f92672">.</span>weight torch<span style="color:#f92672">.</span>Size([<span style="color:#ae81ff">120</span>, <span style="color:#ae81ff">400</span>])
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">7</span> fc<span style="color:#ae81ff">.1</span><span style="color:#f92672">.</span>bias torch<span style="color:#f92672">.</span>Size([<span style="color:#ae81ff">120</span>])
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">8</span> fc<span style="color:#ae81ff">.3</span><span style="color:#f92672">.</span>weight torch<span style="color:#f92672">.</span>Size([<span style="color:#ae81ff">84</span>, <span style="color:#ae81ff">120</span>])
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">9</span> fc<span style="color:#ae81ff">.3</span><span style="color:#f92672">.</span>bias torch<span style="color:#f92672">.</span>Size([<span style="color:#ae81ff">84</span>])
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">10</span> fc<span style="color:#ae81ff">.5</span><span style="color:#f92672">.</span>weight torch<span style="color:#f92672">.</span>Size([<span style="color:#ae81ff">64</span>, <span style="color:#ae81ff">84</span>])
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">11</span> fc<span style="color:#ae81ff">.5</span><span style="color:#f92672">.</span>bias torch<span style="color:#f92672">.</span>Size([<span style="color:#ae81ff">64</span>])
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">12</span> fc<span style="color:#ae81ff">.7</span><span style="color:#f92672">.</span>weight torch<span style="color:#f92672">.</span>Size([<span style="color:#ae81ff">10</span>, <span style="color:#ae81ff">64</span>])
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">13</span> fc<span style="color:#ae81ff">.7</span><span style="color:#f92672">.</span>bias torch<span style="color:#f92672">.</span>Size([<span style="color:#ae81ff">10</span>])
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">14</span> <span style="color:#f92672">=====</span>Model paras <span style="color:#f92672">in</span> LeNet5:
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">15</span> conv<span style="color:#ae81ff">.0</span><span style="color:#f92672">.</span>weight torch<span style="color:#f92672">.</span>Size([<span style="color:#ae81ff">6</span>, <span style="color:#ae81ff">1</span>, <span style="color:#ae81ff">5</span>, <span style="color:#ae81ff">5</span>])
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">16</span> conv<span style="color:#ae81ff">.0</span><span style="color:#f92672">.</span>bias torch<span style="color:#f92672">.</span>Size([<span style="color:#ae81ff">6</span>])
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">17</span> conv<span style="color:#ae81ff">.3</span><span style="color:#f92672">.</span>weight torch<span style="color:#f92672">.</span>Size([<span style="color:#ae81ff">16</span>, <span style="color:#ae81ff">6</span>, <span style="color:#ae81ff">5</span>, <span style="color:#ae81ff">5</span>])
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">18</span> conv<span style="color:#ae81ff">.3</span><span style="color:#f92672">.</span>bias torch<span style="color:#f92672">.</span>Size([<span style="color:#ae81ff">16</span>])
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">19</span> fc<span style="color:#ae81ff">.1</span><span style="color:#f92672">.</span>weight torch<span style="color:#f92672">.</span>Size([<span style="color:#ae81ff">120</span>, <span style="color:#ae81ff">400</span>])
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">20</span> fc<span style="color:#ae81ff">.1</span><span style="color:#f92672">.</span>bias torch<span style="color:#f92672">.</span>Size([<span style="color:#ae81ff">120</span>])
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">21</span> fc<span style="color:#ae81ff">.3</span><span style="color:#f92672">.</span>weight torch<span style="color:#f92672">.</span>Size([<span style="color:#ae81ff">84</span>, <span style="color:#ae81ff">120</span>])
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">22</span> fc<span style="color:#ae81ff">.3</span><span style="color:#f92672">.</span>bias torch<span style="color:#f92672">.</span>Size([<span style="color:#ae81ff">84</span>])
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">23</span> fc<span style="color:#ae81ff">.5</span><span style="color:#f92672">.</span>weight torch<span style="color:#f92672">.</span>Size([<span style="color:#ae81ff">10</span>, <span style="color:#ae81ff">84</span>])
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">24</span> fc<span style="color:#ae81ff">.5</span><span style="color:#f92672">.</span>bias torch<span style="color:#f92672">.</span>Size([<span style="color:#ae81ff">10</span>])</span></span></code></pre></div><p>在上述结果中，第1~13行和第14~24行分别的两个模型的参数输出信息，其中第2~9行与第15~22行则是两这对应的相同部分（即可以复用），区别在于前者是随机初始化的权重参数而后者是训练得到的权重参数。第10~13行便是LeNet6模型中所改动的部分。</p>
+<p>在理清楚了新旧模型的参数信息后，下面便可以将LeNet5模型中需要的参数取出来并迁移到LeNet6模型中。</p>
+<h2 id="543-参数微调">5.4.3 参数微调<a class="anchor" href="#543-%e5%8f%82%e6%95%b0%e5%be%ae%e8%b0%83">#</a></h2>
+<p>在迁移学习中，最直观的一种方式就是让所有迁移过来的参数一同参与到整个模型的训练过程，即参数的微调（Fine Tuning），然后再将训练完成的整个参数保存到本地用于后续的推理过程。在进行模型参数微调前，首先需要在类<code>LeNet6</code>中实现一个方法来对LeNet5中的权重参数进行解析并将其用于LeNet6模型部分参数的初始化，实现代码如下所示：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#ae81ff">1</span> <span style="color:#a6e22e">@classmethod</span>
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">2</span> <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">from_pretrained</span>(cls, pretrained_model_dir<span style="color:#f92672">=</span><span style="color:#66d9ef">None</span>):
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">3</span>     model <span style="color:#f92672">=</span> cls()
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">4</span>     pretrained_model_path <span style="color:#f92672">=</span> os<span style="color:#f92672">.</span>path<span style="color:#f92672">.</span>join(pretrained_model_dir, <span style="color:#e6db74">&#34;lenet5.pt&#34;</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">5</span>     <span style="color:#66d9ef">if</span> <span style="color:#f92672">not</span> os<span style="color:#f92672">.</span>path<span style="color:#f92672">.</span>exists(pretrained_model_path):
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">6</span>         <span style="color:#66d9ef">raise</span> <span style="color:#a6e22e">ValueError</span>(<span style="color:#e6db74">f</span><span style="color:#e6db74">&#34;&lt;路径：</span><span style="color:#e6db74">{</span>pretrained_model_path<span style="color:#e6db74">}</span><span style="color:#e6db74"> 中的模型不存在，请仔细检查！&gt;&#34;</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">7</span>     loaded_paras <span style="color:#f92672">=</span> torch<span style="color:#f92672">.</span>load(pretrained_model_path)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">8</span>     state_dict <span style="color:#f92672">=</span> deepcopy(model<span style="color:#f92672">.</span>state_dict())
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">9</span>     <span style="color:#66d9ef">for</span> key <span style="color:#f92672">in</span> state_dict: 
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">10</span>         <span style="color:#66d9ef">if</span> key <span style="color:#f92672">in</span> loaded_paras <span style="color:#f92672">and</span> 
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">11</span>             state_dict[key]<span style="color:#f92672">.</span>size() <span style="color:#f92672">==</span> loaded_paras[key]<span style="color:#f92672">.</span>size():
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">12</span>             logging<span style="color:#f92672">.</span>info(<span style="color:#e6db74">f</span><span style="color:#e6db74">&#34;成功初始化参数: </span><span style="color:#e6db74">{</span>key<span style="color:#e6db74">}</span><span style="color:#e6db74">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">13</span>             state_dict[key] <span style="color:#f92672">=</span> loaded_paras[key]
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">14</span>     model<span style="color:#f92672">.</span>load_state_dict(state_dict)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">15</span>     <span style="color:#66d9ef">return</span> model</span></span></code></pre></div><p>在上述代码中，第2行<code>pretrained_model_dir</code>用来指定预训练模型所在的目录。第3行是实例化<code>LeNet6</code>这个模型。第4~6行是构造得到预训练模型的路径并判断是否存在。第7~8行是分别载入预训练模型和深度拷贝一份LeNet6模型中的参数，之所以深度拷贝是因为<code>model.state_dict()</code>返回的是一个引用，无法直接修改里面的权重参数。第9~13行是在LeNet6网络模型中遍历每个参数，并根据参数名和参数形状来判断LeNet5模型中是否有相同的参数，如有则对LeNet6网络模型中的参数进行替换。第14~15行则是对LeNet6中的部分权重参数进行重新初始化并返回。</p>
+<p>这里值得一提的是，对于不同的迁移场景，第10~11行的判断条件并不一致，需要根据第5.4.2节中的介绍进行分析确定。</p>
+<p>在完成上述代码之后，便可以通过如下方式进行载入，并输出部分结果进行对比，示例代码如下所示：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#ae81ff">1</span> <span style="color:#66d9ef">if</span> __name__ <span style="color:#f92672">==</span> <span style="color:#e6db74">&#39;__main__&#39;</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">2</span>     model_save_path <span style="color:#f92672">=</span> os<span style="color:#f92672">.</span>path<span style="color:#f92672">.</span>join(<span style="color:#e6db74">&#39;../C04_ModelSaving&#39;</span>, <span style="color:#e6db74">&#39;lenet5.pt&#39;</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">3</span>     print(<span style="color:#e6db74">&#34;</span><span style="color:#ae81ff">\n</span><span style="color:#e6db74">=====Model paras in LeNet5:&#34;</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">4</span>     loaded_paras <span style="color:#f92672">=</span> torch<span style="color:#f92672">.</span>load(model_save_path)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">5</span>     print(<span style="color:#e6db74">f</span><span style="color:#e6db74">&#34;LeNet5模型中第一层权重参数（部分）为：</span>
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">6</span>                     {loaded_paras[<span style="color:#e6db74">&#39;conv.0.weight&#39;</span>][<span style="color:#ae81ff">0</span>, <span style="color:#ae81ff">0</span>]}<span style="color:#e6db74">&#34;)</span>
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">7</span>     print(<span style="color:#e6db74">&#34;</span><span style="color:#ae81ff">\n</span><span style="color:#e6db74">=====Load model from pretrained &#34;</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">8</span>     model <span style="color:#f92672">=</span> LeNet6<span style="color:#f92672">.</span>from_pretrained(<span style="color:#e6db74">&#39;../C04_ModelSaving&#39;</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">9</span>     print(<span style="color:#e6db74">f</span><span style="color:#e6db74">&#34;LeNet6模型中第一层权重参数（部分）为：</span>
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">10</span>                 {model<span style="color:#f92672">.</span>state_dict()[<span style="color:#e6db74">&#39;conv.0.weight&#39;</span>][<span style="color:#ae81ff">0</span>, <span style="color:#ae81ff">0</span>]}<span style="color:#e6db74">&#34;)</span></span></span></code></pre></div><p>在上述代码中，第2~6用于载入本地的LeNet5模型对应的参数并输出第1个卷积层对应的部分参数。第7~10行则是根据上面所实现的<code>from_pretrained</code>方法来完成权重参数的迁移过程。</p>
+<p>在上述代码运行结束后，便可以看到类似如下所示的验证结果：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#ae81ff">1</span> LeNet5模型中第一层权重参数<span style="color:#960050;background-color:#1e0010">（</span>部分<span style="color:#960050;background-color:#1e0010">）</span>为<span style="color:#960050;background-color:#1e0010">：</span>
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">2</span> tensor([[<span style="color:#f92672">-</span><span style="color:#ae81ff">0.0538</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.4352</span>,  <span style="color:#ae81ff">0.2128</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.0808</span>,  <span style="color:#ae81ff">0.0599</span>],
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">3</span>         [ <span style="color:#ae81ff">0.1359</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.4566</span>,  <span style="color:#ae81ff">0.0987</span>,  <span style="color:#ae81ff">0.1395</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.0719</span>],
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">4</span>         [<span style="color:#f92672">-</span><span style="color:#ae81ff">0.1107</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.2895</span>,  <span style="color:#ae81ff">0.3242</span>,  <span style="color:#ae81ff">0.3209</span>,  <span style="color:#ae81ff">0.1349</span>],
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">5</span>         [ <span style="color:#ae81ff">0.2209</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.2949</span>,  <span style="color:#ae81ff">0.2101</span>,  <span style="color:#ae81ff">0.0179</span>,  <span style="color:#ae81ff">0.0596</span>],
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">6</span>         [<span style="color:#f92672">-</span><span style="color:#ae81ff">0.0431</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.2913</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.0029</span>,  <span style="color:#ae81ff">0.1416</span>,  <span style="color:#ae81ff">0.0864</span>]])
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">7</span> LeNet6模型中第一层权重参数<span style="color:#960050;background-color:#1e0010">（</span>部分<span style="color:#960050;background-color:#1e0010">）</span>为<span style="color:#960050;background-color:#1e0010">：</span>
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">8</span> tensor([[<span style="color:#f92672">-</span><span style="color:#ae81ff">0.0538</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.4352</span>,  <span style="color:#ae81ff">0.2128</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.0808</span>,  <span style="color:#ae81ff">0.0599</span>],
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">9</span>         [ <span style="color:#ae81ff">0.1359</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.4566</span>,  <span style="color:#ae81ff">0.0987</span>,  <span style="color:#ae81ff">0.1395</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.0719</span>],
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">10</span>         [<span style="color:#f92672">-</span><span style="color:#ae81ff">0.1107</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.2895</span>,  <span style="color:#ae81ff">0.3242</span>,  <span style="color:#ae81ff">0.3209</span>,  <span style="color:#ae81ff">0.1349</span>],
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">11</span>         [ <span style="color:#ae81ff">0.2209</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.2949</span>,  <span style="color:#ae81ff">0.2101</span>,  <span style="color:#ae81ff">0.0179</span>,  <span style="color:#ae81ff">0.0596</span>],
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">12</span>         [<span style="color:#f92672">-</span><span style="color:#ae81ff">0.0431</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.2913</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.0029</span>,  <span style="color:#ae81ff">0.1416</span>,  <span style="color:#ae81ff">0.0864</span>]])</span></span></code></pre></div><p>从上述输出结果可以看出，LeNet6模型中第1个卷积层的权重参数已经变成了LeNet5中对应部分的参数。</p>
+<p>最后，在训练初始化 <code>LeNet6</code>模型时，只需要像上面一样用<code>from_pretrained</code>方法来完成参数的迁移即可，其它部分的代码并没有发生任何改变。</p>
+<p><subscribe>63</subscribe></p>
+<br>
+<br>
+<br>
+</article>
+ 
+      
+
+      <footer class="book-footer">
+        
+  <div class="flex flex-wrap justify-between">
+
+<div>
+
+</div>
+
+<div>
+
+</div>
+
+</div>
+
+<div class="flex flex-wrap justify-between">
+    <span>
+    
+      <a href="/dl/chapter05/27387966672c45ed/" class="flex align-center">
+        <img src="/icons/backward.svg" class="book-icon" alt="Backward" />
+        <span>5.3 模型的保存与复用</span>
+      </a>
+    
+    </span>
+    <span>
+    
+      <a href="/dl/chapter05/345c1b72253043cb/" class="flex align-center">
+        <span>5.5 开源模型复用</span>
+        <img src="/icons/forward.svg" class="book-icon" alt="Forward" />
+      </a>
+    
+    </span>
+  </div>
+
+ 
+        
+  
+  <div class="book-comments">
+
+</div>
+  
+ 
+        
+  <link rel="stylesheet" href="/katex/katex.min.css" />
+  <script defer src="/katex/katex.min.js"></script>
+  <script defer src="/katex/auto-render.min.js"></script>
+  
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        if (window.renderMathInElement) {
+          renderMathInElement(
+            document.querySelector(".book-page"),
+            Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
+          );
+        }
+      });
+    </script>
+  
+
+
+        
+  
+ 
+        
+  
+    <script>(function(){document.querySelectorAll("pre:has(code)").forEach(e=>{e.addEventListener("click",e.focus),e.addEventListener("copy",function(t){if(t.preventDefault(),navigator.clipboard){const t=window.getSelection().toString()||e.textContent;navigator.clipboard.writeText(t)}})})})()</script>
+  
+
+      </footer>
+
+      <label for="menu-control" class="hidden book-menu-overlay"></label>
+    </div>
+
+    
+  
+  <aside class="book-toc">
+    <div class="book-toc-content">
+      
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#541-迁移学习">5.4.1 迁移学习</a></li>
+    <li><a href="#542-模型定义与比较">5.4.2 模型定义与比较</a></li>
+    <li><a href="#543-参数微调">5.4.3 参数微调</a></li>
+  </ul>
+</nav>
+
+
+
+    </div>
+  </aside>
+  
+ 
+  </main>
+
+  
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

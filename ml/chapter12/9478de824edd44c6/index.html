@@ -1,0 +1,3877 @@
+<!DOCTYPE html>
+<html lang="zh_CN" dir="ltr">
+<head>
+  <!--
+Made with Book Theme
+https://github.com/alex-shpak/hugo-book
+-->
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="在前面几章内容中，我们陆续介绍了无监督算法中几种常见的聚类算法，包括基于Kmeans、Kmeans&#43;&#43;、WKmeans、DBSCAN和HCA聚类算法。在接下来的这篇文章中，我们将会继续介绍无监督算法中的另外一种经典算法——主成分分析（Principal Component Analysis, PCA）算法。那什么又是PCA算法呢？
+12.1 主成分分析# 在机器学习的建模过程中我们通常会遇到这样两个问题：①对于高维数据来说如何对其进行可视化？②对于包含冗余特征的数据集来说如何进行特征筛选？尽管对于第②个问题来说可以通过决策树这样的树模型来进行特征筛选，但是此时却需要样本对应的真实标签，属于有监督的学习过程。此时，通过PCA算法这两个问题便可以迎刃而解。如图12-1所示便是主成分分析算法的学习路线图，我们将先介绍其对应的思想以及sklearn的建模过程，然后再来介绍其背后的原理与求解过程，最后一步步来实现主成分分析算法。
+图 12-1 主成分分析算法学习路线图 12.1.1 PCA算法思想# 主成分分析算法的核心思想在于“主成分”3个字，通俗点讲就是通过一种合适的方法将高维度的特征转换为低维度的特征，因此主成分分析算法实质上也是一种降维算法。这里值得注意的是，我们描述的是将高维特征“转换”为低维特征，而不是从高维特征中选择部分特征来作为数据集的特征表示，这与树模型的特征选择有所不同。
+图 12-2 二维PCA算法思想图（一） 如图12-2所示，黑色原点为某数据集分布在二维平面中的场景。现在，假如只能让你用一个维度来对这些样本点进行表示，那应该是哪个维度呢？由于降维后仅剩下一个维度，因此我们可以尝试过原点做一条直线并旋转一周，然后从所有情况中选择最优的那条直线作为降维后的坐标轴，最后再将原始样本点投影到新坐标轴的投影点作为降维后的样本表示，如图12-3所示。
+图 12-3 二维PCA算法思想图（二） 如图12-3所示，假设以$z_1$为起点顺时针旋转一周，我们便可以得到4条有代表性的投影方向，分别是$z_1,x,y,z_2$。对于这4种情况来说，相信绝大多数读者都会选择$z_1$所在的方向，不过这是为什么呢？很多读者可能会说感觉上是，我们只能说你的感觉没有错。不过真实的原因是在于降维算法的准则就是要使得降维后的特征表示能够尽可能多地保留原有数据的结构信息，直观上来看就是样本之间间距较大重叠部分较少。
+例如对于图12-3所示的样本点来说，如果将其投影到$z_2$所在的方向，那么大多数样本点将会密集地聚在一起从而无法有效区分。但是，如果将这些样本点投影到$z_1$所在的方向，那么绝大多数样本在新的投影空间中依旧能够有效地进行区分。如图12-4所示便是在$z_1$方向投影后的结果。
+图 12-4 二维PCA算法思想图（三） 如图12-4所示，黑色圆点便是图12-3中各个样本在$z_1$方向投影后的结果。此时，我们便可以仅通过一个坐标轴来表示这些样本，从而实现了降维的目的。
+进一步，如图12-5所示，如果想要对这些三维空间中的样本点进行降维处理，那么同样也要找到一个最优的投影平面然后进行投影处理。
+图 12-5 三维PCA算法思想图（一） 如图12-5所示，如果需要对于这些三维空间中的样本点进行降维，那么同样需要找到其对应的最优平面，如图12-6所示。
+图 12-6 三维PCA算法思想图（二） 从图12-6中可以看出，只有将原始样本投影到$z_0$与$z_1$所构成的平面中才能最大程度上地保留原始样本点的结构信息，投影后的结果如图12-7所示。
+图 12-7 三维PCA算法思想图（三） 如图12-7所示便是上面三维样本点在二维平面上的投影结果。上述可视化代码可参见 AllBooKCode/Chapter12/C01_PCA_visualization.py 文件。
+以上就是整个PCA降维算法的核心思想，总结起来就是对于$n$维特征数据来说，可以通过PCA算法找到其对应的$n$个主要成分，然后根据需要选择前$k$个最重要的成分，最后再将原始数据投影到由这$k$个主要成分所构成的$k$维空间中便达到了降维的目的。到此，PCA算法的核心思想就介绍完了，下面来看如何在sklearn中使用PCA模型。
+12.1.2 PCA示例代码# 在sklearn中，可以通过sklearn.decomposition中的PCA模块来完成整个建模过程。下面我们以iris数据集在决策树上的分类为例，分别展示降维前和降维后分类模型的效果，完整示例代码可参见 AllBooKCode/Chapter12/C02_PCA_train.py 文件。
+首先需要实现一个函数来载入数据集，并根据传入的参数来判断是否要进行降维处理，示例代码如下：
+1 from sklearn.decomposition import PCA 2 from sklearn.datasets import load_iris 3 from sklearn.model_selection import train_test_split 4 5 def load_data(reduction=False, n_components=3): 6 x, y = load_iris(return_X_y=True) 7 x_train, x_test, y_train, y_test = \ 8 train_test_split(x, y, test_size=0.3, random_state=2022) 9 if reduction: 10 pca = PCA(n_components) 11 x_train = pca.fit_transform(x_train) 12 x_test = pca.transform(x_test) 13 return x_train, x_test, y_train, y_test在上述代码中，第1行是导入PCA模块。第5行中n_components表示降维的维度。第6~8行是载入原始数据集，并分割成训练集和测试集。第9~12行是根据条件判断是否对数据进行降维，同时需要注意的是在训练集x_train上使用的是fit_trainsform方法（即先fit再transformer），而在测试集x_test上则是直接使用在训练集上得到的参数（投影平面）进行降维。第13行是返回训练集和测试集。
+">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
+<meta name="color-scheme" content="light dark"><meta property="og:url" content="https://mlwithme.github.io/ml/chapter12/9478de824edd44c6/">
+	<meta property="og:site_name" content="《从零学AI指南手册》">
+	<meta property="og:title" content="12.1 主成分分析">
+	<meta property="og:description" content="在前面几章内容中，我们陆续介绍了无监督算法中几种常见的聚类算法，包括基于Kmeans、Kmeans&#43;&#43;、WKmeans、DBSCAN和HCA聚类算法。在接下来的这篇文章中，我们将会继续介绍无监督算法中的另外一种经典算法——主成分分析（Principal Component Analysis, PCA）算法。那什么又是PCA算法呢？
+12.1 主成分分析# 在机器学习的建模过程中我们通常会遇到这样两个问题：①对于高维数据来说如何对其进行可视化？②对于包含冗余特征的数据集来说如何进行特征筛选？尽管对于第②个问题来说可以通过决策树这样的树模型来进行特征筛选，但是此时却需要样本对应的真实标签，属于有监督的学习过程。此时，通过PCA算法这两个问题便可以迎刃而解。如图12-1所示便是主成分分析算法的学习路线图，我们将先介绍其对应的思想以及sklearn的建模过程，然后再来介绍其背后的原理与求解过程，最后一步步来实现主成分分析算法。
+图 12-1 主成分分析算法学习路线图 12.1.1 PCA算法思想# 主成分分析算法的核心思想在于“主成分”3个字，通俗点讲就是通过一种合适的方法将高维度的特征转换为低维度的特征，因此主成分分析算法实质上也是一种降维算法。这里值得注意的是，我们描述的是将高维特征“转换”为低维特征，而不是从高维特征中选择部分特征来作为数据集的特征表示，这与树模型的特征选择有所不同。
+图 12-2 二维PCA算法思想图（一） 如图12-2所示，黑色原点为某数据集分布在二维平面中的场景。现在，假如只能让你用一个维度来对这些样本点进行表示，那应该是哪个维度呢？由于降维后仅剩下一个维度，因此我们可以尝试过原点做一条直线并旋转一周，然后从所有情况中选择最优的那条直线作为降维后的坐标轴，最后再将原始样本点投影到新坐标轴的投影点作为降维后的样本表示，如图12-3所示。
+图 12-3 二维PCA算法思想图（二） 如图12-3所示，假设以$z_1$为起点顺时针旋转一周，我们便可以得到4条有代表性的投影方向，分别是$z_1,x,y,z_2$。对于这4种情况来说，相信绝大多数读者都会选择$z_1$所在的方向，不过这是为什么呢？很多读者可能会说感觉上是，我们只能说你的感觉没有错。不过真实的原因是在于降维算法的准则就是要使得降维后的特征表示能够尽可能多地保留原有数据的结构信息，直观上来看就是样本之间间距较大重叠部分较少。
+例如对于图12-3所示的样本点来说，如果将其投影到$z_2$所在的方向，那么大多数样本点将会密集地聚在一起从而无法有效区分。但是，如果将这些样本点投影到$z_1$所在的方向，那么绝大多数样本在新的投影空间中依旧能够有效地进行区分。如图12-4所示便是在$z_1$方向投影后的结果。
+图 12-4 二维PCA算法思想图（三） 如图12-4所示，黑色圆点便是图12-3中各个样本在$z_1$方向投影后的结果。此时，我们便可以仅通过一个坐标轴来表示这些样本，从而实现了降维的目的。
+进一步，如图12-5所示，如果想要对这些三维空间中的样本点进行降维处理，那么同样也要找到一个最优的投影平面然后进行投影处理。
+图 12-5 三维PCA算法思想图（一） 如图12-5所示，如果需要对于这些三维空间中的样本点进行降维，那么同样需要找到其对应的最优平面，如图12-6所示。
+图 12-6 三维PCA算法思想图（二） 从图12-6中可以看出，只有将原始样本投影到$z_0$与$z_1$所构成的平面中才能最大程度上地保留原始样本点的结构信息，投影后的结果如图12-7所示。
+图 12-7 三维PCA算法思想图（三） 如图12-7所示便是上面三维样本点在二维平面上的投影结果。上述可视化代码可参见 AllBooKCode/Chapter12/C01_PCA_visualization.py 文件。
+以上就是整个PCA降维算法的核心思想，总结起来就是对于$n$维特征数据来说，可以通过PCA算法找到其对应的$n$个主要成分，然后根据需要选择前$k$个最重要的成分，最后再将原始数据投影到由这$k$个主要成分所构成的$k$维空间中便达到了降维的目的。到此，PCA算法的核心思想就介绍完了，下面来看如何在sklearn中使用PCA模型。
+12.1.2 PCA示例代码# 在sklearn中，可以通过sklearn.decomposition中的PCA模块来完成整个建模过程。下面我们以iris数据集在决策树上的分类为例，分别展示降维前和降维后分类模型的效果，完整示例代码可参见 AllBooKCode/Chapter12/C02_PCA_train.py 文件。
+首先需要实现一个函数来载入数据集，并根据传入的参数来判断是否要进行降维处理，示例代码如下：
+1 from sklearn.decomposition import PCA 2 from sklearn.datasets import load_iris 3 from sklearn.model_selection import train_test_split 4 5 def load_data(reduction=False, n_components=3): 6 x, y = load_iris(return_X_y=True) 7 x_train, x_test, y_train, y_test = \ 8 train_test_split(x, y, test_size=0.3, random_state=2022) 9 if reduction: 10 pca = PCA(n_components) 11 x_train = pca.fit_transform(x_train) 12 x_test = pca.transform(x_test) 13 return x_train, x_test, y_train, y_test在上述代码中，第1行是导入PCA模块。第5行中n_components表示降维的维度。第6~8行是载入原始数据集，并分割成训练集和测试集。第9~12行是根据条件判断是否对数据进行降维，同时需要注意的是在训练集x_train上使用的是fit_trainsform方法（即先fit再transformer），而在测试集x_test上则是直接使用在训练集上得到的参数（投影平面）进行降维。第13行是返回训练集和测试集。">
+	<meta property="og:locale" content="zh_CN">
+	<meta property="og:type" content="article">
+		<meta property="article:section" content="ml">
+
+
+	<meta itemprop="name" content="12.1 主成分分析">
+	<meta itemprop="description" content="在前面几章内容中，我们陆续介绍了无监督算法中几种常见的聚类算法，包括基于Kmeans、Kmeans&#43;&#43;、WKmeans、DBSCAN和HCA聚类算法。在接下来的这篇文章中，我们将会继续介绍无监督算法中的另外一种经典算法——主成分分析（Principal Component Analysis, PCA）算法。那什么又是PCA算法呢？
+12.1 主成分分析# 在机器学习的建模过程中我们通常会遇到这样两个问题：①对于高维数据来说如何对其进行可视化？②对于包含冗余特征的数据集来说如何进行特征筛选？尽管对于第②个问题来说可以通过决策树这样的树模型来进行特征筛选，但是此时却需要样本对应的真实标签，属于有监督的学习过程。此时，通过PCA算法这两个问题便可以迎刃而解。如图12-1所示便是主成分分析算法的学习路线图，我们将先介绍其对应的思想以及sklearn的建模过程，然后再来介绍其背后的原理与求解过程，最后一步步来实现主成分分析算法。
+图 12-1 主成分分析算法学习路线图 12.1.1 PCA算法思想# 主成分分析算法的核心思想在于“主成分”3个字，通俗点讲就是通过一种合适的方法将高维度的特征转换为低维度的特征，因此主成分分析算法实质上也是一种降维算法。这里值得注意的是，我们描述的是将高维特征“转换”为低维特征，而不是从高维特征中选择部分特征来作为数据集的特征表示，这与树模型的特征选择有所不同。
+图 12-2 二维PCA算法思想图（一） 如图12-2所示，黑色原点为某数据集分布在二维平面中的场景。现在，假如只能让你用一个维度来对这些样本点进行表示，那应该是哪个维度呢？由于降维后仅剩下一个维度，因此我们可以尝试过原点做一条直线并旋转一周，然后从所有情况中选择最优的那条直线作为降维后的坐标轴，最后再将原始样本点投影到新坐标轴的投影点作为降维后的样本表示，如图12-3所示。
+图 12-3 二维PCA算法思想图（二） 如图12-3所示，假设以$z_1$为起点顺时针旋转一周，我们便可以得到4条有代表性的投影方向，分别是$z_1,x,y,z_2$。对于这4种情况来说，相信绝大多数读者都会选择$z_1$所在的方向，不过这是为什么呢？很多读者可能会说感觉上是，我们只能说你的感觉没有错。不过真实的原因是在于降维算法的准则就是要使得降维后的特征表示能够尽可能多地保留原有数据的结构信息，直观上来看就是样本之间间距较大重叠部分较少。
+例如对于图12-3所示的样本点来说，如果将其投影到$z_2$所在的方向，那么大多数样本点将会密集地聚在一起从而无法有效区分。但是，如果将这些样本点投影到$z_1$所在的方向，那么绝大多数样本在新的投影空间中依旧能够有效地进行区分。如图12-4所示便是在$z_1$方向投影后的结果。
+图 12-4 二维PCA算法思想图（三） 如图12-4所示，黑色圆点便是图12-3中各个样本在$z_1$方向投影后的结果。此时，我们便可以仅通过一个坐标轴来表示这些样本，从而实现了降维的目的。
+进一步，如图12-5所示，如果想要对这些三维空间中的样本点进行降维处理，那么同样也要找到一个最优的投影平面然后进行投影处理。
+图 12-5 三维PCA算法思想图（一） 如图12-5所示，如果需要对于这些三维空间中的样本点进行降维，那么同样需要找到其对应的最优平面，如图12-6所示。
+图 12-6 三维PCA算法思想图（二） 从图12-6中可以看出，只有将原始样本投影到$z_0$与$z_1$所构成的平面中才能最大程度上地保留原始样本点的结构信息，投影后的结果如图12-7所示。
+图 12-7 三维PCA算法思想图（三） 如图12-7所示便是上面三维样本点在二维平面上的投影结果。上述可视化代码可参见 AllBooKCode/Chapter12/C01_PCA_visualization.py 文件。
+以上就是整个PCA降维算法的核心思想，总结起来就是对于$n$维特征数据来说，可以通过PCA算法找到其对应的$n$个主要成分，然后根据需要选择前$k$个最重要的成分，最后再将原始数据投影到由这$k$个主要成分所构成的$k$维空间中便达到了降维的目的。到此，PCA算法的核心思想就介绍完了，下面来看如何在sklearn中使用PCA模型。
+12.1.2 PCA示例代码# 在sklearn中，可以通过sklearn.decomposition中的PCA模块来完成整个建模过程。下面我们以iris数据集在决策树上的分类为例，分别展示降维前和降维后分类模型的效果，完整示例代码可参见 AllBooKCode/Chapter12/C02_PCA_train.py 文件。
+首先需要实现一个函数来载入数据集，并根据传入的参数来判断是否要进行降维处理，示例代码如下：
+1 from sklearn.decomposition import PCA 2 from sklearn.datasets import load_iris 3 from sklearn.model_selection import train_test_split 4 5 def load_data(reduction=False, n_components=3): 6 x, y = load_iris(return_X_y=True) 7 x_train, x_test, y_train, y_test = \ 8 train_test_split(x, y, test_size=0.3, random_state=2022) 9 if reduction: 10 pca = PCA(n_components) 11 x_train = pca.fit_transform(x_train) 12 x_test = pca.transform(x_test) 13 return x_train, x_test, y_train, y_test在上述代码中，第1行是导入PCA模块。第5行中n_components表示降维的维度。第6~8行是载入原始数据集，并分割成训练集和测试集。第9~12行是根据条件判断是否对数据进行降维，同时需要注意的是在训练集x_train上使用的是fit_trainsform方法（即先fit再transformer），而在测试集x_test上则是直接使用在训练集上得到的参数（投影平面）进行降维。第13行是返回训练集和测试集。">
+	<meta itemprop="wordCount" content="307">
+
+<title>12.1 主成分分析 • 《从零学AI指南手册》</title>
+<link rel="icon" href="/favicon.png" >
+<link rel="manifest" href="/manifest.json">
+<link rel="canonical" href="https://mlwithme.github.io/ml/chapter12/9478de824edd44c6/">
+<link rel="stylesheet" href="/book.min.6097ccf1d338ddfaa037d2f96478059a71fa573d0f917d128bab595efea338ca.css" integrity="sha256-YJfM8dM43fqgN9L5ZHgFmnH6Vz0PkX0Si6tZXv6jOMo=" crossorigin="anonymous">
+
+
+  <script defer type="module" src="/en.search.min.ffaad769e546b38d39820301bb9e5c193822f7bf0f46a855602e4e14707802e0.js" integrity="sha256-/6rXaeVGs405ggMBu55cGTgi978PRqhVYC5OFHB4AuA=" crossorigin="anonymous"></script>
+
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-23SZ6E8VY7"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-23SZ6E8VY7');
+</script>
+<script async src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
+
+</head>
+<body dir="ltr" class="book-kind-page book-type-ml">
+  <input type="checkbox" class="hidden toggle" id="menu-control" />
+  <input type="checkbox" class="hidden toggle" id="toc-control" />
+  <main class="container flex">
+    
+<aside class="book-menu">
+  <div class="book-menu-content">
+    
+  <nav>
+<h2 class="book-brand">
+  <a class="flex align-center" href="/"><span>《从零学AI指南手册》</span>
+  </a>
+</h2>
+
+
+<div class="book-search hidden">
+  <input id="book-search-input" type="text" 
+    placeholder="Search"
+    aria-label="Search"
+    maxlength="64" />
+  <div class="book-search-spinner hidden"></div>
+  <ul id="book-search-results"></ul>
+</div>
+<script>document.querySelector(".book-search").classList.remove("hidden")</script>
+
+
+
+
+
+
+
+
+
+
+  
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a>
+      大模型Agent开发</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-253e26e732e57a78f635dcf47df3d0a3" class="toggle"  />
+    <label for="section-253e26e732e57a78f635dcf47df3d0a3" class="flex">
+      <a role="button" class="">
+        第 1 章 RAG 基础概念</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/454f0942222e471e/" class="">
+      1.1 RAG 提出背景</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/d7623d619f884b25/" class="">
+      1.2 RAG 流程概览</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-810ee5a2a3a24c9b7c25ab5324ae7db7" class="toggle"  />
+    <label for="section-810ee5a2a3a24c9b7c25ab5324ae7db7" class="flex">
+      <a role="button" class="">
+        第 2 章 大模型接入与使用</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/d43adfc00df54515/" class="">
+      2.1 SDK 介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/8b9059fde1d644a4/" class="">
+      2.2 现代大模型中的 SDK</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/95d3214ab80b4769/" class="">
+      2.3 DashScope 接口体系</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/b9843c089d654494/" class="">
+      2.4 千问大模型接入与使用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ed1727f01d0e40dc9b7961b72e42160e" class="toggle"  />
+    <label for="section-ed1727f01d0e40dc9b7961b72e42160e" class="flex">
+      <a role="button" class="">
+        第 3 章 文档标准化与语义检索</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/7f4af6d48c5b425c/" class="">
+      3.1 文档加载与标准化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/572ba4c9cb114677/" class="">
+      3.2 常见文本切分策略</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/06e588cd33fa4454/" class="">
+      3.3 向量数据库选择</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/ff27306c0d7b4387/" class="">
+      3.4 Qwen3 Embedding 模型介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/303035851c5e42f2/" class="">
+      3.5 语义搜索引擎构建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/e1328cb23e8c412b/" class="">
+      3.6  Milvus 模块解析</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-caaf9d8eb5e5559f7ca8bb11c41da71a" class="toggle"  />
+    <label for="section-caaf9d8eb5e5559f7ca8bb11c41da71a" class="flex">
+      <a role="button" class="">
+        第 4 章 RAG 与 Agent</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/4c646aa07f3b4b74/" class="">
+      4.1 两步式 RAG 搭建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/5c35e934bab24ac3/" class="">
+      4.2 Function Calling 概念介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/88ff352fc22e4cd6/" class="">
+      4.3 LangChain 中的 Tool 修饰器</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/83fe26536a5d4b6e/" class="">
+      4.4 RAG Agent 原理与搭建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/b7e49268357a4bca/" class="">
+      4.5 复杂问题拆解与ReAct框架</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/469b5963f2ca4799/" class="">
+      4.6 RAG 中的两阶段索引</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/10fb92a6c5484039/" class="">
+      4.7 Qwen3 Reranking 原理与使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/45d286aec1bc4d66/" class="">
+      4.8 基于两阶段索引的 RAG Agent 搭建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/43af483460574e48/" class="">
+      4.9 LangGraph 基本概念介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/0def4564f3aa455d/" class="">
+      4.10  基于 LangGraph 构建自定义 RAG Agent</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a>
+      深度学习</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/70e5f9cdbedc4b2c/" class="">
+      学习思维导图</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-a9b664bcf9e1dab8add449268565f466" class="toggle"  />
+    <label for="section-a9b664bcf9e1dab8add449268565f466" class="flex">
+      <a role="button" class="">
+        第 1 章 深度学习简介</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/647eb9c607874e3a/" class="">
+      1.1 深度学习的发展阶段</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/f31da36a6f444afe/" class="">
+      1.2 深度学习中的关键人物</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/da9fa13021e64f3c/" class="">
+      1.3 深度学习框架介绍</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-e6e0db5d4bc28bd97dfe8d5210249e63" class="toggle"  />
+    <label for="section-e6e0db5d4bc28bd97dfe8d5210249e63" class="flex">
+      <a role="button" class="">
+        第 2 章 环境配置</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/a0c5d1e0de0140cb/" class="">
+      2.1 体系结构介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/04f07b9246984577/" class="">
+      2.2 深度学习环境安装</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/5bf6454673194c67/" class="">
+      2.3 开发环境安装配置</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-0a2ca47f15332c8b06ae83247328edb4" class="toggle"  />
+    <label for="section-0a2ca47f15332c8b06ae83247328edb4" class="flex">
+      <a role="button" class="">
+        第 3 章 深度学习基础</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/75c5fa7839174c16/" class="">
+      3.1 线性回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/ca16f8cb6df444a6/" class="">
+      3.2 线性回归简洁实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/97e1da1143cd4554/" class="">
+      3.3 梯度下降与反向传播</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/7b865de988ea422c/" class="">
+      3.4 从零实现回归模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/18fdd1deff424a16/" class="">
+      3.5 从逻辑回归到Softmax回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/55967b0f642b4509/" class="">
+      3.6 Softmax回归简洁实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/381bbd56509e4a6f/" class="">
+      3.7 从零实现分类模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/2c061df4435d4928/" class="">
+      3.8 回归模型评估指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/e3442eff254e473c/" class="">
+      3.9 分类模型评估指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/307f927c8a1245c5/" class="">
+      3.10 过拟合与正则化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/bcb64de5aa404f18/" class="">
+      3.11 超参数与交叉验证</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/66dd7425cdd04565/" class="">
+      3.12 激活函数</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/0d3dacfff4c04794/" class="">
+      3.13 多标签分类</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-95b7e7417bf2b821a1b760975d3acc22" class="toggle"  />
+    <label for="section-95b7e7417bf2b821a1b760975d3acc22" class="flex">
+      <a role="button" class="">
+        第 4 章 卷积神经网络</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/102e183e8be94f46/" class="">
+      4.1 卷积的概念</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/5b3e3152e9e54f4f/" class="">
+      4.2 卷积的计算过程</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/762f60de801a4ccd/" class="">
+      4.3 填充和池化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/c8af5d84174b4420/" class="">
+      4.4 LeNet5网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/de007462967e4701/" class="">
+      4.5 AlexNet网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/f084f181c3554082/" class="">
+      4.6 VGG网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/911b961cc5d949b6/" class="">
+      4.7 NIN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/47da186baf3e4a0b/" class="">
+      4.8 GoogLeNet网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/da16c61397454b2c/" class="">
+      4.9 ResNet网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/1c24468824274650/" class="">
+      4.10 DenseNet网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-17076fe90a2d84e207bbd0c829983325" class="toggle"  />
+    <label for="section-17076fe90a2d84e207bbd0c829983325" class="flex">
+      <a role="button" class="">
+        第 5 章 模型训练与复用</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/4557a6f03dec4475/" class="">
+      5.1 参数及日志管理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/e7c4c6da085148d0/" class="">
+      5.2 Tensorboard可视化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/27387966672c45ed/" class="">
+      5.3 模型的保存与复用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/211b26bdd8f248ac/" class="">
+      5.4 模型的迁移学习</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/345c1b72253043cb/" class="">
+      5.5 开源模型复用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/c912dda030c946d9/" class="">
+      5.6 多GPU训练</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/f065af80f3844b0b/" class="">
+      5.7 数据预处理与缓存</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-2d091d454d5c3f03f5e0a202c37cc226" class="toggle"  />
+    <label for="section-2d091d454d5c3f03f5e0a202c37cc226" class="flex">
+      <a role="button" class="">
+        第 6 章 模型优化方法</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/cc35bb112783410e/" class="">
+      6.1 学习率调度器</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/fc024c283f164849/" class="">
+      6.2 梯度裁剪</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/27ed3ed136e24092/" class="">
+      6.3 批归一化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/fdd5ba4b41f74a0e/" class="">
+      6.4 层归一化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/9246afed14eb436c/" class="">
+      6.5 组归一化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/fcbc66ad051a4336/" class="">
+      6.6 动量法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/8b83d654898c40a2/" class="">
+      6.7 AdaGrad算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/078f2394980d41d2/" class="">
+      6.8 AdaDelta算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/28ad7fb39987447e/" class="">
+      6.9 Adam算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/4b81b8d39721434d/" class="">
+      6.10 初始化方法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f2f78ba4851131558fc284d927542d28" class="toggle"  />
+    <label for="section-f2f78ba4851131558fc284d927542d28" class="flex">
+      <a role="button" class="">
+        第 7 章 循环神经网络</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/88ba4e03337b4233/" class="">
+      7.1 RNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/ec8ff069aadc49b9/" class="">
+      7.2 时序数据</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/b4c5ddcc9e904238/" class="">
+      7.3 LSTM网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/4112672112224dc1/" class="">
+      7.4 GRU网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/b6e5ccb6cd064f74/" class="">
+      7.5 BiRNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/4bf3ecf7b21e45fb/" class="">
+      7.6 CharRNN网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-49992cff6143e64ae5d7f2209dcfb054" class="toggle"  />
+    <label for="section-49992cff6143e64ae5d7f2209dcfb054" class="flex">
+      <a role="button" class="">
+        第 8 章 时序与模型融合</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/2be88fbc08a5418f/" class="">
+      8.1 TextCNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/9023d1f822a54226/" class="">
+      8.2 TextRNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/9edd7db2d439402f/" class="">
+      8.3 CNN-RNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/19c2b86e85f2461e/" class="">
+      8.4 ConvLSTM网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/1e6da79bf7b44c20/" class="">
+      8.5 3DCNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/5f426a9190e7454b/" class="">
+      8.6 STResNet网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ca07c572acb4d7fd40854f5b367c247b" class="toggle"  />
+    <label for="section-ca07c572acb4d7fd40854f5b367c247b" class="flex">
+      <a role="button" class="">
+        第 9 章 自然语言处理</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/e0cb9a7aae814045/" class="">
+      9.1 自然语言处理介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/d4703d990f8d4fed/" class="">
+      9.2 Word2Vec词向量</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/1bb6351b01a2479b/" class="">
+      9.3 Word2Vec训练与使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/40a8a1146d934c55/" class="">
+      9.4 GloVe词向量</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/c6aa1405b8cf46d8/" class="">
+      9.5 词向量的微调使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/48c26d04b342452d/" class="">
+      9.6 fastText网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/03a0166e195f443f/" class="">
+      9.7 Seq2Seq网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/271bda16904544af/" class="">
+      9.8 序列模型评价指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/fefa60e0bc854a17/" class="">
+      9.9 NMT网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/5bcd8b0920414f34/" class="">
+      9.10 注意力机制</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/8a78e8213ee04aac/" class="">
+      9.11 含注意力的NMT网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/474ac7a1867d4b5e/" class="">
+      9.12 含注意力的RNN网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-8cdec04c2fd8683c5c7373c78d943528" class="toggle"  />
+    <label for="section-8cdec04c2fd8683c5c7373c78d943528" class="flex">
+      <a role="button" class="">
+        第10章 现代神经网络</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/7523731afc0241c0/" class="">
+      10.1 ELMo网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/4987d1044939480d/" class="">
+      10.2 Transformer网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/a469ed1a25e1498f/" class="">
+      10.3 Transformer结构</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/d50c490eef3b4565/" class="">
+      10.4 Transformer实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/f6c507b3d2d74f03/" class="">
+      10.5 Transformer对联模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/3aedea1d3f3e48dd/" class="">
+      10.6 BERT网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/82a1cd0def084620/" class="">
+      10.7 从零实现BERT</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/e736d3974ed0484c/" class="">
+      10.8 BERT文本分类模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/f5076cbadda84d4e/" class="">
+      10.9 BERT问题选择模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/25d9ef3d9b34472a/" class="">
+      10.10 BERT问题回答模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/64d3ec5593ec4b94/" class="">
+      10.11 BERT命名体识别模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/90ea8d3e090d48b4/" class="">
+      10.12 BERT从零训练</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/e36878dad7a647d8/" class="">
+      10.13 GPT-1模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/94dda9bbbc994913/" class="">
+      10.14 GPT-2与GPT-3模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/4af57a29308840de/" class="">
+      10.15 基于GPT-2的中文预训练模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/9f5c00cadde14d31/" class="">
+      10.16 InstructGPT与ChatGPT</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/050b54fd34ca480a/" class="">
+      10.17 ChatGPT与提示词工程</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/a90b0d71389b4d69/" class="">
+      10.18 百川大模型使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/40c1c9ade70c4ce7/" class="">
+      10.19 百川大模型实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/ea1b4cf8b40c4b05/" class="">
+      10.20 GPT-4与GPTs使用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a>
+      机器学习</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/43fc00b3809d4be6/" class="">
+      学习思维导图</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-0a3254d1ca9963fd6975aa5bc0b3edcc" class="toggle"  />
+    <label for="section-0a3254d1ca9963fd6975aa5bc0b3edcc" class="flex">
+      <a role="button" class="">
+        第 1 章 环境配置</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/baafb91f0af14a84/" class="">
+      1.1 安装使用Conda</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/7a01c403acd6488a/" class="">
+      1.2 开发环境安装配置</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-4569258198323c16bc8a634ea44fd5db" class="toggle"  />
+    <label for="section-4569258198323c16bc8a634ea44fd5db" class="flex">
+      <a role="button" class="">
+        第 2 章 线性回归</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/2414d4b6648d405a/" class="">
+      2.1 模型的建立与求解</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/3e9ba14da71f4fd3/" class="">
+      2.2 多变量线性回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/4a16c0dc82a84e78/" class="">
+      2.3 多项式回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/f8dea699983c48c6/" class="">
+      2.4 回归模型评估</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/df41c2e97f554e68/" class="">
+      2.5 梯度下降</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/71ef816e0005492d/" class="">
+      2.6 正态分布</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/803bee4f70be4dca/" class="">
+      2.7 目标函数推导</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-a6ca5e2f846ebd900d1a868e6718dc82" class="toggle"  />
+    <label for="section-a6ca5e2f846ebd900d1a868e6718dc82" class="flex">
+      <a role="button" class="">
+        第 3 章 逻辑回归</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/96d46b53aee14c3b/" class="">
+      3.1 模型的建立与求解</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/fac70083dd764141/" class="">
+      3.2 多分类任务</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/6d7cfd79ef304cbd/" class="">
+      3.3 常见的分类评估指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/2fdc655d00c74548/" class="">
+      3.4 目标函数推导</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/a4b61c5bbadd43a6/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-9f462f716bd0e46ef79984b356eeb5a2" class="toggle"  />
+    <label for="section-9f462f716bd0e46ef79984b356eeb5a2" class="flex">
+      <a role="button" class="">
+        第 4 章 模型的改善与泛化</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/2089400b28f54dd9/" class="">
+      4.1 基本概念</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/56b788b624cd4971/" class="">
+      4.2 特征标准化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/ca091dc393a84518/" class="">
+      4.3过拟合</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/5097d3b8c1144427/" class="">
+      4.4 正则化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/3c7eee1621d4480b/" class="">
+      4.5 偏差、方差与交叉验证</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/c5957e0753d04746/" class="">
+      4.6 实例分析手写体识别</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/a915e49586eb4426/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-327db48e4f4df6236855078634147679" class="toggle"  />
+    <label for="section-327db48e4f4df6236855078634147679" class="flex">
+      <a role="button" class="">
+        第 5 章 K近邻</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/7c610e923e754259/" class="">
+      5.1 K近邻思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/1a97571e0a6447ef/" class="">
+      5.2 K近邻原理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/d245bda107034e65/" class="">
+      5.3 sklearn接口与示例代码</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/24378571ce404d9c/" class="">
+      5.4 kd树构建与搜索</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/40f253b916f24038/" class="">
+      5.5 从零实现K近邻</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/76818d9e48944f8c/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-94d0a5f5555d92c51e0903b148e34993" class="toggle"  />
+    <label for="section-94d0a5f5555d92c51e0903b148e34993" class="flex">
+      <a role="button" class="">
+        第 6 章 文本特征与模型复用</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/e05b5928c41d4841/" class="">
+      6.1 词袋模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/de59bf74d753457e/" class="">
+      6 .2 基于K近邻算法的垃圾邮件分类</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/c6fdc78b49d44453/" class="">
+      6.3 考虑权重的词袋模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/825fde8589654b16/" class="">
+      6.4 词云图</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/8451cffe49f5477c/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-544be5d1e48c4fd8b33ba2f91964c6dd" class="toggle"  />
+    <label for="section-544be5d1e48c4fd8b33ba2f91964c6dd" class="flex">
+      <a role="button" class="">
+        第 7 章 朴素贝叶斯</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/faf303eb93a241d1/" class="">
+      7.1 朴素贝叶斯算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/842c7b8684c747d2/" class="">
+      7.2 贝叶斯估计</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/724bf42b09bb440e/" class="">
+      7.3 朴素贝叶斯实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/1a9deee1d5f042b5/" class="">
+      7.4 多项式朴素贝叶斯原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/5c27cdd8b3264f50/" class="">
+      7.5 高斯朴素贝叶斯原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/715b8eaf245f45f1/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-d1884c6b3e8f1260019220c57d615371" class="toggle"  />
+    <label for="section-d1884c6b3e8f1260019220c57d615371" class="flex">
+      <a role="button" class="">
+        第 8 章 决策树</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/690fe2be21834c2a/" class="">
+      8.1 决策树的基本思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/ee9ada9729124049/" class="">
+      8.2 决策树建模与可视化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/5887cf1408dd4c7f/" class="">
+      8.3 决策树生成之ID3与C4.5</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/87ba589d6c17434d/" class="">
+      8.4 决策树剪枝过程</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/34bc962c974646f4/" class="">
+      8.5 从零实现ID3与C4.5算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/c44682dbb3364be4/" class="">
+      8.6 连续型特征变量下决策树实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/4eead717a84a4dbf/" class="">
+      8.7 CART生成与剪枝算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/1c72d67dffc64dc9/" class="">
+      8.8 从零实现CART算法及剪枝示例</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/ae452792b2604e84/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-1f0a2178f0a580ba251c7da2649aa52f" class="toggle"  />
+    <label for="section-1f0a2178f0a580ba251c7da2649aa52f" class="flex">
+      <a role="button" class="">
+        第 9 章 集成学习与提升算法</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/9eff4004fd6c437d/" class="">
+      9.1 集成学习算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/18980c9f757e42c8/" class="">
+      9.2 随机森林</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/8a91b358b2f74d56/" class="">
+      9.3 泰坦尼克号生还预测</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/73f6914844f549f1/" class="">
+      9.4 AdaBoost原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/71fd0e44294e4abb/" class="">
+      9.5 MultiAdaBoost原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/f3c2341ce7d64f70/" class="">
+      9.6 Gradient Boost 原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/4f9b26d5b65541f5/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f63defd924ef7373144c8643a39fd7b2" class="toggle"  />
+    <label for="section-f63defd924ef7373144c8643a39fd7b2" class="flex">
+      <a role="button" class="">
+        第 10 章 支持向量机</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/dce7180d4eb047d7/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/515b54e2307a4c8a/" class="">
+      10.1 SVM思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/9c3862bc843c4179/" class="">
+      10.2 SVM线性不可分</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/fbdb6f8adace457d/" class="">
+      10.3 SVM原理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/1a3ffa363b1d4f83/" class="">
+      10.4 SVM中的软间隔</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/8b7a06412a9f4267/" class="">
+      10.5 拉格朗日乘数法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/40e977f0a2f84ac0/" class="">
+      10.6 对偶性与KKT条件</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/b18d45a772574ddb/" class="">
+      10.7 SVM优化问题</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/c53ed12f7bc04405/" class="">
+      10.8 SVM核函数原理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/26d9b2b328a849c2/" class="">
+      10.9 SMO算法求解SVM</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/215a1e15c0f2470d/" class="">
+      10.10 从零实现SVM分类算法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bdcc54d1c295c5cc69c9c851c02886ea" class="toggle"  />
+    <label for="section-bdcc54d1c295c5cc69c9c851c02886ea" class="flex">
+      <a role="button" class="">
+        第 11 章 聚类分析</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/f9d9305a55a548a1/" class="">
+      11.1 聚类算法的思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/e635df24de32487a/" class="">
+      11.2 Kmeans聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/e75b8efa232249ab/" class="">
+      11.3 Kmeans算法求解</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/60e49a33d1aa4f50/" class="">
+      11.4 从零实现Kmeans聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/c8b45d8a3d8c4cf4/" class="">
+      11.5 Kmeans&#43;&#43;聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/1ede2f3557d0438f/" class="">
+      11.6 聚类外部评价指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/e6a75df19f85498c/" class="">
+      11.7 加权Kmeans聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/c52cf7920f1d4636/" class="">
+      11.8 聚类内部评价指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/f95259c359b146ba/" class="">
+      11.9 聚类K值选取与分析</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/b85c1a858f7c4686/" class="">
+      11.10 基于密度的聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/2f01ba751d914336/" class="">
+      11.11 基于层次的聚类算法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bafa8c48214ccf62d333a6d0457c5f72" class="toggle" checked />
+    <label for="section-bafa8c48214ccf62d333a6d0457c5f72" class="flex">
+      <a role="button" class="">
+        第 12 章 降维算法</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/9478de824edd44c6/" class="active">
+      12.1 主成分分析</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/909356aa90fe456a/" class="">
+      12.2 基于核函数的主成分分析</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-d5f143889a719ce66d602e75b72bffb9" class="toggle"  />
+    <label for="section-d5f143889a719ce66d602e75b72bffb9" class="flex">
+      <a role="button" class="">
+        第 13 章 自训练与标签传播</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/8d71301c2e414efe/" class="">
+      13.1 Self-Training 自训练算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/87fdcf0be1c34644/" class="">
+      13.2 Label Propagation算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/7fc8b0fc47d2427c/" class="">
+      13.3 Label Spreading 算法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+
+
+
+
+
+
+
+
+
+
+
+
+</nav>
+
+
+
+
+  <script>(function(){var e=document.querySelector("aside .book-menu-content");addEventListener("beforeunload",function(){localStorage.setItem("menu.scrollTop",e.scrollTop)}),e.scrollTop=localStorage.getItem("menu.scrollTop")})()</script>
+
+
+
+  </div>
+</aside>
+ 
+
+    <div class="book-page">
+      <header class="book-header hidden">
+        
+  <div class="flex align-center justify-between">
+  <label for="menu-control">
+    <img src="/icons/menu.svg" class="book-icon" alt="Menu" />
+  </label>
+
+  <h3>12.1 主成分分析</h3>
+
+  <label for="toc-control">
+    
+    <img src="/icons/toc.svg" class="book-icon" alt="Table of Contents" />
+    
+  </label>
+</div>
+
+
+  
+  <aside class="hidden">
+    
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#1211-pca算法思想">12.1.1 PCA算法思想</a></li>
+    <li><a href="#1212-pca示例代码">12.1.2 PCA示例代码</a></li>
+    <li><a href="#1213-pca算法原理">12.1.3 PCA算法原理</a></li>
+    <li><a href="#1214-pca算法投影示例">12.1.4 PCA算法投影示例</a></li>
+    <li><a href="#1215-pca算法求解">12.1.5 PCA算法求解</a></li>
+    <li><a href="#1216-从零实现pca算法">12.1.6 从零实现PCA算法</a></li>
+    <li><a href="#1217-小结">12.1.7 小结</a></li>
+  </ul>
+</nav>
+
+
+
+  </aside>
+  
+ 
+      </header>
+
+      
+      
+  <article class="markdown book-article"><p>在前面几章内容中，我们陆续介绍了无监督算法中几种常见的聚类算法，包括基于Kmeans、Kmeans++、WKmeans、DBSCAN和HCA聚类算法。在接下来的这篇文章中，我们将会继续介绍无监督算法中的另外一种经典算法——主成分分析（Principal Component Analysis, PCA）算法。那什么又是PCA算法呢？</p>
+<h1 id="121-主成分分析">12.1 主成分分析<a class="anchor" href="#121-%e4%b8%bb%e6%88%90%e5%88%86%e5%88%86%e6%9e%90">#</a></h1>
+<p>在机器学习的建模过程中我们通常会遇到这样两个问题：①对于高维数据来说如何对其进行可视化？②对于包含冗余特征的数据集来说如何进行特征筛选？尽管对于第②个问题来说可以通过决策树这样的树模型来进行特征筛选，但是此时却需要样本对应的真实标签，属于有监督的学习过程。此时，通过PCA算法这两个问题便可以迎刃而解。如图12-1所示便是主成分分析算法的学习路线图，我们将先介绍其对应的思想以及sklearn的建模过程，然后再来介绍其背后的原理与求解过程，最后一步步来实现主成分分析算法。</p>
+<div align=center><img width="400" src="/images/ml/240427161728.jpg"/> </div><center>图 12-1 主成分分析算法学习路线图</center>
+<h2 id="1211-pca算法思想">12.1.1 PCA算法思想<a class="anchor" href="#1211-pca%e7%ae%97%e6%b3%95%e6%80%9d%e6%83%b3">#</a></h2>
+<p>主成分分析算法的核心思想在于“主成分”3个字，通俗点讲就是通过一种合适的方法将高维度的特征转换为低维度的特征，因此主成分分析算法实质上也是一种降维算法。这里值得注意的是，我们描述的是将高维特征“转换”为低维特征，而不是从高维特征中选择部分特征来作为数据集的特征表示，这与树模型的特征选择有所不同。</p>
+<div align=center><img width="300" src="/images/ml/22052839980.jpg"/></div><center>图 12-2 二维PCA算法思想图（一）</center>
+<p>如图12-2所示，黑色原点为某数据集分布在二维平面中的场景。现在，假如只能让你用一个维度来对这些样本点进行表示，那应该是哪个维度呢？由于降维后仅剩下一个维度，因此我们可以尝试过原点做一条直线并旋转一周，然后从所有情况中选择最优的那条直线作为降维后的坐标轴，最后再将原始样本点投影到新坐标轴的投影点作为降维后的样本表示，如图12-3所示。</p>
+<div align=center><img width="300" src="/images/ml/22052812300.jpg"/></div><center>图 12-3 二维PCA算法思想图（二）</center>
+<p>如图12-3所示，假设以$z_1$为起点顺时针旋转一周，我们便可以得到4条有代表性的投影方向，分别是$z_1,x,y,z_2$。对于这4种情况来说，相信绝大多数读者都会选择$z_1$所在的方向，不过这是为什么呢？很多读者可能会说感觉上是，我们只能说你的感觉没有错。不过真实的原因是在于降维算法的准则就是要使得降维后的特征表示能够尽可能多地保留原有数据的结构信息，直观上来看就是样本之间间距较大重叠部分较少。</p>
+<p>例如对于图12-3所示的样本点来说，如果将其投影到$z_2$所在的方向，那么大多数样本点将会密集地聚在一起从而无法有效区分。但是，如果将这些样本点投影到$z_1$所在的方向，那么绝大多数样本在新的投影空间中依旧能够有效地进行区分。如图12-4所示便是在$z_1$方向投影后的结果。</p>
+<div align=center><img width="270" src="/images/ml/240529192003.jpg"/></div><center>图 12-4 二维PCA算法思想图（三）</center>
+<p>如图12-4所示，黑色圆点便是图12-3中各个样本在$z_1$方向投影后的结果。此时，我们便可以仅通过一个坐标轴来表示这些样本，从而实现了降维的目的。</p>
+<p>进一步，如图12-5所示，如果想要对这些三维空间中的样本点进行降维处理，那么同样也要找到一个最优的投影平面然后进行投影处理。</p>
+<div align=center><img width="400" src="/images/ml/22052806242.jpg"/></div><center>图 12-5 三维PCA算法思想图（一）</center>
+<p>如图12-5所示，如果需要对于这些三维空间中的样本点进行降维，那么同样需要找到其对应的最优平面，如图12-6所示。</p>
+<div align=center><img width="380" src="/images/ml/22052910030.jpg"/></div><center> 图 12-6 三维PCA算法思想图（二）</center>
+<p>从图12-6中可以看出，只有将原始样本投影到$z_0$与$z_1$所构成的平面中才能最大程度上地保留原始样本点的结构信息，投影后的结果如图12-7所示。</p>
+<div align=center><img width="350" src="/images/ml/22052952588.jpg"/></div><center>图 12-7 三维PCA算法思想图（三）</center>
+<p>如图12-7所示便是上面三维样本点在二维平面上的投影结果。上述可视化代码可参见 <code>AllBooKCode/Chapter12/C01_PCA_visualization.py</code> 文件。</p>
+<p>以上就是整个PCA降维算法的核心思想，总结起来就是对于$n$维特征数据来说，可以通过PCA算法找到其对应的$n$个主要成分，然后根据需要选择前$k$个最重要的成分，最后再将原始数据投影到由这$k$个主要成分所构成的$k$维空间中便达到了降维的目的。到此，PCA算法的核心思想就介绍完了，下面来看如何在sklearn中使用PCA模型。</p>
+<h2 id="1212-pca示例代码">12.1.2 PCA示例代码<a class="anchor" href="#1212-pca%e7%a4%ba%e4%be%8b%e4%bb%a3%e7%a0%81">#</a></h2>
+<p>在sklearn中，可以通过<code>sklearn.decomposition</code>中的<code>PCA</code>模块来完成整个建模过程。下面我们以iris数据集在决策树上的分类为例，分别展示降维前和降维后分类模型的效果，完整示例代码可参见 <code>AllBooKCode/Chapter12/C02_PCA_train.py</code> 文件。</p>
+<p>首先需要实现一个函数来载入数据集，并根据传入的参数来判断是否要进行降维处理，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#ae81ff">1</span> <span style="color:#f92672">from</span> sklearn.decomposition <span style="color:#f92672">import</span> PCA
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">2</span> <span style="color:#f92672">from</span> sklearn.datasets <span style="color:#f92672">import</span> load_iris
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">3</span> <span style="color:#f92672">from</span> sklearn.model_selection <span style="color:#f92672">import</span> train_test_split
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">4</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">5</span> <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">load_data</span>(reduction<span style="color:#f92672">=</span><span style="color:#66d9ef">False</span>, n_components<span style="color:#f92672">=</span><span style="color:#ae81ff">3</span>):
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">6</span>     x, y <span style="color:#f92672">=</span> load_iris(return_X_y<span style="color:#f92672">=</span><span style="color:#66d9ef">True</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">7</span>     x_train, x_test, y_train, y_test <span style="color:#f92672">=</span> \
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">8</span>         train_test_split(x, y, test_size<span style="color:#f92672">=</span><span style="color:#ae81ff">0.3</span>, random_state<span style="color:#f92672">=</span><span style="color:#ae81ff">2022</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">9</span>     <span style="color:#66d9ef">if</span> reduction:
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">10</span>         pca <span style="color:#f92672">=</span> PCA(n_components)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">11</span>         x_train <span style="color:#f92672">=</span> pca<span style="color:#f92672">.</span>fit_transform(x_train)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">12</span>         x_test <span style="color:#f92672">=</span> pca<span style="color:#f92672">.</span>transform(x_test)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">13</span>     <span style="color:#66d9ef">return</span> x_train, x_test, y_train, y_test</span></span></code></pre></div><p>在上述代码中，第1行是导入<code>PCA</code>模块。第5行中<code>n_components</code>表示降维的维度。第6~8行是载入原始数据集，并分割成训练集和测试集。第9~12行是根据条件判断是否对数据进行降维，同时需要注意的是在训练集<code>x_train</code>上使用的是<code>fit_trainsform</code>方法（即先<code>fit</code>再<code>transformer</code>），而在测试集<code>x_test</code>上则是直接使用在训练集上得到的参数（投影平面）进行降维。第13行是返回训练集和测试集。</p>
+<p>接着分别用降维前和降维后的数据集来进行分类和测试，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#ae81ff">1</span> <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">decision_tree</span>():
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">2</span>     x_train, x_test, y_train, y_test <span style="color:#f92672">=</span> load_data(reduction<span style="color:#f92672">=</span><span style="color:#66d9ef">False</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">3</span>     model <span style="color:#f92672">=</span> DecisionTreeClassifier()
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">4</span>     model<span style="color:#f92672">.</span>fit(x_train, y_train)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">5</span>     acc <span style="color:#f92672">=</span> model<span style="color:#f92672">.</span>score(x_test, y_test)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">6</span>     print(<span style="color:#e6db74">f</span><span style="color:#e6db74">&#34;降维前的准确率为：</span><span style="color:#e6db74">{</span>acc<span style="color:#e6db74">}</span><span style="color:#e6db74">，形状为</span><span style="color:#e6db74">{</span>x_test<span style="color:#f92672">.</span>shape<span style="color:#e6db74">}</span><span style="color:#e6db74">&#34;</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">7</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">8</span>     x_train, x_test, y_train, y_test <span style="color:#f92672">=</span> load_data(reduction<span style="color:#f92672">=</span><span style="color:#66d9ef">True</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">9</span>     model <span style="color:#f92672">=</span> DecisionTreeClassifier()
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">10</span>     model<span style="color:#f92672">.</span>fit(x_train, y_train)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">11</span>     acc <span style="color:#f92672">=</span> model<span style="color:#f92672">.</span>score(x_test, y_test)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">12</span>     print(<span style="color:#e6db74">f</span><span style="color:#e6db74">&#34;降维后的准确率为：</span><span style="color:#e6db74">{</span>acc<span style="color:#e6db74">}</span><span style="color:#e6db74">，形状为</span><span style="color:#e6db74">{</span>x_test<span style="color:#f92672">.</span>shape<span style="color:#e6db74">}</span><span style="color:#e6db74">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">13</span> 
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">14</span> <span style="color:#66d9ef">if</span> __name__ <span style="color:#f92672">==</span> <span style="color:#e6db74">&#39;__main__&#39;</span>:
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">15</span>     decision_tree()</span></span></code></pre></div><p>上述代码运行后会出现类似如下的结果：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#ae81ff">1</span> 降维前的准确率为<span style="color:#960050;background-color:#1e0010">：</span><span style="color:#ae81ff">0.956</span><span style="color:#960050;background-color:#1e0010">，</span>形状为(<span style="color:#ae81ff">45</span>, <span style="color:#ae81ff">4</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">2</span> 降维后的准确率为<span style="color:#960050;background-color:#1e0010">：</span><span style="color:#ae81ff">0.978</span><span style="color:#960050;background-color:#1e0010">，</span>形状为(<span style="color:#ae81ff">45</span>, <span style="color:#ae81ff">3</span>)</span></span></code></pre></div><p>在运行上述代码多次后可以发现，大多数情况下降维后的准确率都会好于没有降维时的准确率，这可能是因为在原始的4个特征中本来就有特征是冗余的，在决策树的建模过程中反而会影响节点的分裂方式。</p>
+<h2 id="1213-pca算法原理">12.1.3 PCA算法原理<a class="anchor" href="#1213-pca%e7%ae%97%e6%b3%95%e5%8e%9f%e7%90%86">#</a></h2>
+<p>通过12.1.1小节内容的介绍相信各位读者对于PCA算法已经有了一个感性的认识，那么应该如何建模PCA算法并进行求解呢？根据PCA算法的思想可知，为了能使得降维后样本点之间的间距尽可能大，那么在降维时就应该选择前$k$个方差较大的维度作为主成分进行投影。同时，为了方便后续推导，需要先对原始特征维度进行去均值的标准化处理，使得每个维度的均值为0。</p>
+<div align=center><img width="300" src="/images/ml/22052959489.jpg"/></div><center>图 12-8 二维PCA原理图</center>
+<p>如图12-8所示，在二维平面上“十”字形为原始样本点，圆点为原始样本降维后的投影点，$u$为投影方向所在的单位方向向量，原始样本与投影方向的夹角为$\theta$。此时，对于任意原始样本点$x$来说，其投影点到原点的距离为
+</p>
+$$
+d=cos\theta\cdot\|x\|=\frac{x^Tu}{\|x\|\cdot\|u\|}\|x\|=x^Tu\tag{12-1}
+$$<p>
+注：$x$和$u$均为列向量。</p>
+<p>进一步，为了使得降维后所有投影点的整体方差最大，则只需要最大化式(12-2)即可
+</p>
+$$
+\begin{aligned}
+\frac{1}{m}\sum_{i=1}^m\left(x^{(i)^T}u\right)^2=\frac{1}{m}\sum_{i=1}^mu^Tx^{(i)}x^{(i)^T}u
+=u^T\left(\frac{1}{m}\sum_{i=1}^mx^{(i)}x^{(i)^T}\right)u
+\end{aligned}
+\tag{12-2}
+$$<p>
+其中$x^{(i)}$表示第$i$个样本，$m$表示样本总数。</p>
+<p>同理，对于三维空间中的样本点来说，其投影后的结果如图12-9所示。</p>
+<div align=center><img width="350" src="/images/ml/22053137758.jpg"/></div><center>图 12-9 三维PCA原理图</center>
+<p>如图12-9所示，在三维空间空“十”字形表示原始样本点，黑色圆点表示降维后的投影点，$u_1,u_2$为构成投影平面的一组正交单位向量，$u$为原点指向投影点的方向向量，原始样本与投影面的夹角为$\theta$。此时，对于任意原始样本点$x$来说，其投影点到原点的距离为</p>
+$$
+d=cos\theta\cdot\|x\|=\frac{x^Tu}{\|x\|\cdot\|u\|}\|x\|=x^T\frac{u}{\|u\|}\tag{12-3}
+$$<p>
+因为$u=\beta_1u_1+\beta_2u_2$，所以有
+</p>
+$$
+d=x^T\frac{(\beta_1u_1+\beta_2u_2)}{\|\beta_1u_1+\beta_2u_2\|}=\frac{\beta_1}{\|\beta_1u_1+\beta_2u_2\|}x^Tu_1+\frac{\beta_2}{\|\beta_1u_1+\beta_2u_2\|}x^Tu_2\tag{12-4}
+$$<p>
+进一步，为了使得降维后所有投影点的整体方差最大，则只需要最大化式(12-5)即可</p>
+<h2 id="1214-pca算法投影示例">12.1.4 PCA算法投影示例<a class="anchor" href="#1214-pca%e7%ae%97%e6%b3%95%e6%8a%95%e5%bd%b1%e7%a4%ba%e4%be%8b">#</a></h2>
+<p>假如，现在某数据集已经求解得到了对应的$k$个主要成分，那应该怎么完成降维呢？换句话说应该如何将原始的样本点投影到新的低维空间中呢？我们知道在平面直角坐标系中通常会选择$i=(1,0)^T,j=(0,1)^T$这两个正交单位向量作为基向量来对平面中的所有点进行表示，如图12-10所示。</p>
+<div align=center><img width="270" src="/images/ml/22060153446.jpg"/>
+</div><center>图 12-10 二维平面坐标表示图</center>
+<p>在图12-10中，向量$x=(5,6)^T$的含义便是在方向$i$上移动$i^T\cdot x=5$个单位，在方向$j$上移动$j^T\cdot x=6$个单位。不过这样可能感观并不明显，下面旋转一下坐标系。</p>
+<div align=center><img width="290" src="/images/ml/22060137988.jpg"/></div><center>图 12-11 平面坐标旋转图</center>
+<p>如图12-11所示，此时选取$\hat{i}=(\frac{1}{\sqrt{2}},\frac{1}{\sqrt{2}})^T,\hat{j}=(-\frac{1}{\sqrt{2}},\frac{1}{\sqrt{2}})^T$来作为基向量，那么$i,j$坐标系中的样本点$x=(2,4)^T$在$\hat{i},\hat{j}$所表示的坐标系中是多少呢？答案便是：先在$\hat{i}$方向移动$\hat{i}^T\cdot x=3\sqrt{2}$的长度；然后在$\hat{j}$方向移动$\hat{j}^T\cdot x=\sqrt{2}$的长度。所以，在新的坐标系下样本点$x$的坐标为
+</p>
+$$
+\begin{bmatrix} \hat{i}^T\\\hat{j}^T \end{bmatrix}\cdot x=\begin{bmatrix} \frac{1}{\sqrt{2}} & \frac{1}{\sqrt{2}} \\ -\frac{1}{\sqrt{2}} & \frac{1}{\sqrt{2}} \\ \end{bmatrix} \cdot\begin{bmatrix} 2\\4 \end{bmatrix}=\begin{bmatrix} 3\sqrt{2}\\\sqrt{2} \end{bmatrix}\tag{12-7}
+$$<p>
+所以在PCA中，降维（更换坐标系）之后的新坐标计算公式为
+</p>
+$$
+y^{(i)}=\begin{bmatrix} u^T_1x^{(i)}\\u^T_2x^{(i)}\\u^T_3x^{(i)}\\\vdots\\u^T_kx^{(i)}\end{bmatrix}\;\tag{12-8}
+$$<p>
+其中$u_1,u_2,...,u_k$是表示前$k$个主要成分的列向量，$x^{(i)}$表示原始第$i$个样本的表示，$y^{(i)}$表示样本$i$降维后的表示。</p>
+<h2 id="1215-pca算法求解">12.1.5 PCA算法求解<a class="anchor" href="#1215-pca%e7%ae%97%e6%b3%95%e6%b1%82%e8%a7%a3">#</a></h2>
+<p>在介绍完PCA算法的思想及原理后接下来我们继续来看目标函数的求解过程。根据12.1.3节内容可知，在$n$维空间可以通过最大化投影点与原点的方差来求得最佳的投影维度，即
+</p>
+$$
+\begin{aligned}
+\frac{1}{m}\sum_{i=1}^m\left(x^{(i)^T}u\right)^2=\frac{1}{m}\sum_{i=1}^mu^Tx^{(i)}x^{(i)^T}u
+=u^T\left(\frac{1}{m}\sum_{i=1}^mx^{(i)}x^{(i)^T}\right)u
+\end{aligned}
+\tag{12-9}
+$$<p>
+其中$u$为单位向量。</p>
+<p>进一步，根据式(12-9)可以构造得到如下拉格朗日函数
+</p>
+$$
+\begin{aligned}
+\mathcal{L} &= u^T\left(
+\frac{1}{m}\sum_{i=1}^mx^{(i)}x^{(i)^T}\right)u-\lambda(u^Tu-1)
+\end{aligned}\tag{12-10}
+$$<p>
+对$u$求偏导并令其为$0$有</p>
+$$
+\begin{aligned}
+\frac{\partial\mathcal{L}}{\partial u}&=u^T\frac{1}{m}\sum_{i=1}^mx^{(i)}x^{(i)^T}-\lambda u^T=0\\[2ex]
+u^T \Sigma&=\lambda u^T \\[2ex]
+(u^T\Sigma)^T&=(\lambda u^T)^T\\[2ex]
+ \Sigma u &= \lambda u
+\end{aligned}\tag{12-11}
+$$<p>
+其中$\Sigma=\frac{1}{m}\sum_{i=1}^mx^{(i)}x^{(i)^T}$是一个对称矩阵，也称之为协方差矩阵（Covariance Matrix）。</p>
+<p>最终，可以求得满足等式(12-11)的解为$\Sigma$对应的$m$个特征向量$(u_1,u_2,...,u_m)$和$\Sigma$对应的$m$个特征值$(\lambda_1,\lambda_2,...,\lambda_m)$，其中$(m\leq n)$。</p>
+<p>进一步，又因为投影点到原点的距离为$u^T\Sigma u=u^T\lambda u=\lambda u^Tu=\lambda$，所以上述解中$\lambda_i$越大，其对应特征向量作为投影维度时投影点到原点的方差便越大。此时可以得出一个重要的结论便是，对于原始$n$维样本空间来说其必定存在$k$个相互正交（在实对称矩阵中不同特征值对应的特征向量正交）的特征向量，且特征值最大的特征向量便是使得投影点与原点方差最大的投影维度。</p>
+<p>所以，对于高维空间中的样本点来说，根据上述步骤便可以求得最佳的投影维度。但是通常我们并不会将高维空间中的样本直接投影到一个维度上，而是寻找对应的低维空间进行投影。因此可以选择前$k$个最大的特征值对应的特征向量来作为投影平面进行投影，因为此时所有投影点与原点之间的方差最大。</p>
+<p>假设某数据集有$n$个特征维度，$u_1,u_2,...,u_s$是根据上述步骤求得的$s(s\leq n)$个单位特征向量，$(\lambda_1,\lambda_2,...,\lambda_s)$为对应的特征值，现需要将其降维到 $k (k\leq s)$维空间中。根据式(12-1)可知，此时对于任意样本点$x$来说，其投影点到原点的距离为
+</p>
+$$
+d=cos\theta\cdot\|x\|=\frac{x^Tu}{\|x\|\cdot\|u\|}|x|=x^T\frac{u}{\|u\|}\tag{12-12}
+$$<p>
+其中$u$为原点指向投影点的方向向量，且 $u$ 可以表示为$u=\beta_1u_1+\beta_2u_2+...+\beta_ku_k$，因此式(12-12)可进一步写为
+</p>
+$$
+d=x^T\frac{(\beta_1u_1+...+\beta_ku_k)}{\|\beta_1u_1+...+\beta_ku_k\|}=\frac{\beta_1}{\|\beta_1u_1+...+\beta_ku_k\|}x^Tu_1+...+\frac{\beta_k}{\|\beta_1u_1+...+\beta_ku_k\|}x^Tu_k\tag{12-13}
+$$<h2 id="1216-从零实现pca算法">12.1.6 从零实现PCA算法<a class="anchor" href="#1216-%e4%bb%8e%e9%9b%b6%e5%ae%9e%e7%8e%b0pca%e7%ae%97%e6%b3%95">#</a></h2>
+<h2 id="1217-小结">12.1.7 小结<a class="anchor" href="#1217-%e5%b0%8f%e7%bb%93">#</a></h2>
+<p><subscribe>32</subscribe></p>
+<br>
+<br>
+<br></article>
+ 
+      
+
+      <footer class="book-footer">
+        
+  <div class="flex flex-wrap justify-between">
+
+<div>
+
+</div>
+
+<div>
+
+</div>
+
+</div>
+
+<div class="flex flex-wrap justify-between">
+    <span>
+    
+      <a href="/ml/chapter11/2f01ba751d914336/" class="flex align-center">
+        <img src="/icons/backward.svg" class="book-icon" alt="Backward" />
+        <span>11.11 基于层次的聚类算法</span>
+      </a>
+    
+    </span>
+    <span>
+    
+      <a href="/ml/chapter12/909356aa90fe456a/" class="flex align-center">
+        <span>12.2 基于核函数的主成分分析</span>
+        <img src="/icons/forward.svg" class="book-icon" alt="Forward" />
+      </a>
+    
+    </span>
+  </div>
+
+ 
+        
+  
+  <div class="book-comments">
+
+</div>
+  
+ 
+        
+  <link rel="stylesheet" href="/katex/katex.min.css" />
+  <script defer src="/katex/katex.min.js"></script>
+  <script defer src="/katex/auto-render.min.js"></script>
+  
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        if (window.renderMathInElement) {
+          renderMathInElement(
+            document.querySelector(".book-page"),
+            Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
+          );
+        }
+      });
+    </script>
+  
+
+
+        
+  
+ 
+        
+  
+    <script>(function(){document.querySelectorAll("pre:has(code)").forEach(e=>{e.addEventListener("click",e.focus),e.addEventListener("copy",function(t){if(t.preventDefault(),navigator.clipboard){const t=window.getSelection().toString()||e.textContent;navigator.clipboard.writeText(t)}})})})()</script>
+  
+
+      </footer>
+
+      <label for="menu-control" class="hidden book-menu-overlay"></label>
+    </div>
+
+    
+  
+  <aside class="book-toc">
+    <div class="book-toc-content">
+      
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#1211-pca算法思想">12.1.1 PCA算法思想</a></li>
+    <li><a href="#1212-pca示例代码">12.1.2 PCA示例代码</a></li>
+    <li><a href="#1213-pca算法原理">12.1.3 PCA算法原理</a></li>
+    <li><a href="#1214-pca算法投影示例">12.1.4 PCA算法投影示例</a></li>
+    <li><a href="#1215-pca算法求解">12.1.5 PCA算法求解</a></li>
+    <li><a href="#1216-从零实现pca算法">12.1.6 从零实现PCA算法</a></li>
+    <li><a href="#1217-小结">12.1.7 小结</a></li>
+  </ul>
+</nav>
+
+
+
+    </div>
+  </aside>
+  
+ 
+  </main>
+
+  
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

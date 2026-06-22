@@ -1,0 +1,4005 @@
+<!DOCTYPE html>
+<html lang="zh_CN" dir="ltr">
+<head>
+  <!--
+Made with Book Theme
+https://github.com/alex-shpak/hugo-book
+-->
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="4.10 基于 LangGraph 构建自定义 RAG Agent# 在第4.9节内容中，我们介绍了 LangGraph 中的3个核心图结构——State、Node 和 Edge。在本节中，我们将把这些概念真正用起来，基于 LangGraph 从零构建一个具备自我评估和问题重写能力的 Agentic RAG 系统。
+4.10.1 流程构建思路# 与之前我们用 create_agent 快速搭建的版本相比，本节的实现方式更加透明：每一个判断节点、每一条条件边，都由我们显式定义，整个执行路径完全可控。整个系统的核心流程如图4-14所示。
+图 4-14 RAG Agent 流程图 从图4-14可以看出，整个系统包含4个核心节点和2个条件判断分支。首先判断用户提问是否需要调用工具，不需要则直接回答，例如“你好”这样的招呼用户；其次判断检索到的内容是否与问题相关，相关则进一步结合问题生成回答；不相关则重写问题并进入一开始的循环。
+下面，将按照图4-12中从左到右的顺序逐一进行介绍。
+4.10.2 检索工具改造# 尽管在第4.8节内容中已经介绍过 retrieve_context 检索工具，但是这里为了满足需要还要稍微略作调整。在内容相关性判断中，将取 retrieve_context 工具检索并重排序后相关性最高的内容进行质量评估，如果与原问题不相关则对应所有 Top-n 的返回内容都不相关，明显可能是由于原问题描述不当导致，则需重写问题，因此检索工具的返回结果还要加上结构化的形式。
+1 @tool(response_format=&#34;content_and_artifact&#34;) 2 def retrieve_context(query: str, config: RunnableConfig): 3 &#34;&#34;&#34; 4 信息检索工具，通过检索得到的信息回答用户提问。 5 Args: 6 query: 待检索向量，例如用户提问或子问题。 7 &#34;&#34;&#34; 8 vector_store = config[&#39;configurable&#39;].get(&#34;vector_store&#34;) 9 k = config[&#39;configurable&#39;].get(&#34;k&#34;) 10 top_n = config[&#39;configurable&#39;].get(&#34;top_n&#34;) 11 artifact = vector_store.similarity_search(query, k=k) 12 filtered_doc, filter_info = text_rerank(query, artifact, top_n=top_n) 13 content = &#34;\n\n&#34;.join((f&#34;{doc.page_content}&#34;) for doc in filtered_doc) 14 return content, filtered_doc在上述代码中，第1行 content_and_artifact 表示同时返回分别供大模型读取和程序读取的内容，前者为非结构化的文本块，后者为结构化的文本内容。
+">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
+<meta name="color-scheme" content="light dark"><meta property="og:url" content="https://mlwithme.github.io/agent/chapter04/0def4564f3aa455d/">
+	<meta property="og:site_name" content="《从零学AI指南手册》">
+	<meta property="og:title" content="4.10  基于 LangGraph 构建自定义 RAG Agent">
+	<meta property="og:description" content="4.10 基于 LangGraph 构建自定义 RAG Agent# 在第4.9节内容中，我们介绍了 LangGraph 中的3个核心图结构——State、Node 和 Edge。在本节中，我们将把这些概念真正用起来，基于 LangGraph 从零构建一个具备自我评估和问题重写能力的 Agentic RAG 系统。
+4.10.1 流程构建思路# 与之前我们用 create_agent 快速搭建的版本相比，本节的实现方式更加透明：每一个判断节点、每一条条件边，都由我们显式定义，整个执行路径完全可控。整个系统的核心流程如图4-14所示。
+图 4-14 RAG Agent 流程图 从图4-14可以看出，整个系统包含4个核心节点和2个条件判断分支。首先判断用户提问是否需要调用工具，不需要则直接回答，例如“你好”这样的招呼用户；其次判断检索到的内容是否与问题相关，相关则进一步结合问题生成回答；不相关则重写问题并进入一开始的循环。
+下面，将按照图4-12中从左到右的顺序逐一进行介绍。
+4.10.2 检索工具改造# 尽管在第4.8节内容中已经介绍过 retrieve_context 检索工具，但是这里为了满足需要还要稍微略作调整。在内容相关性判断中，将取 retrieve_context 工具检索并重排序后相关性最高的内容进行质量评估，如果与原问题不相关则对应所有 Top-n 的返回内容都不相关，明显可能是由于原问题描述不当导致，则需重写问题，因此检索工具的返回结果还要加上结构化的形式。
+1 @tool(response_format=&#34;content_and_artifact&#34;) 2 def retrieve_context(query: str, config: RunnableConfig): 3 &#34;&#34;&#34; 4 信息检索工具，通过检索得到的信息回答用户提问。 5 Args: 6 query: 待检索向量，例如用户提问或子问题。 7 &#34;&#34;&#34; 8 vector_store = config[&#39;configurable&#39;].get(&#34;vector_store&#34;) 9 k = config[&#39;configurable&#39;].get(&#34;k&#34;) 10 top_n = config[&#39;configurable&#39;].get(&#34;top_n&#34;) 11 artifact = vector_store.similarity_search(query, k=k) 12 filtered_doc, filter_info = text_rerank(query, artifact, top_n=top_n) 13 content = &#34;\n\n&#34;.join((f&#34;{doc.page_content}&#34;) for doc in filtered_doc) 14 return content, filtered_doc在上述代码中，第1行 content_and_artifact 表示同时返回分别供大模型读取和程序读取的内容，前者为非结构化的文本块，后者为结构化的文本内容。">
+	<meta property="og:locale" content="zh_CN">
+	<meta property="og:type" content="article">
+		<meta property="article:section" content="agent">
+
+
+	<meta itemprop="name" content="4.10  基于 LangGraph 构建自定义 RAG Agent">
+	<meta itemprop="description" content="4.10 基于 LangGraph 构建自定义 RAG Agent# 在第4.9节内容中，我们介绍了 LangGraph 中的3个核心图结构——State、Node 和 Edge。在本节中，我们将把这些概念真正用起来，基于 LangGraph 从零构建一个具备自我评估和问题重写能力的 Agentic RAG 系统。
+4.10.1 流程构建思路# 与之前我们用 create_agent 快速搭建的版本相比，本节的实现方式更加透明：每一个判断节点、每一条条件边，都由我们显式定义，整个执行路径完全可控。整个系统的核心流程如图4-14所示。
+图 4-14 RAG Agent 流程图 从图4-14可以看出，整个系统包含4个核心节点和2个条件判断分支。首先判断用户提问是否需要调用工具，不需要则直接回答，例如“你好”这样的招呼用户；其次判断检索到的内容是否与问题相关，相关则进一步结合问题生成回答；不相关则重写问题并进入一开始的循环。
+下面，将按照图4-12中从左到右的顺序逐一进行介绍。
+4.10.2 检索工具改造# 尽管在第4.8节内容中已经介绍过 retrieve_context 检索工具，但是这里为了满足需要还要稍微略作调整。在内容相关性判断中，将取 retrieve_context 工具检索并重排序后相关性最高的内容进行质量评估，如果与原问题不相关则对应所有 Top-n 的返回内容都不相关，明显可能是由于原问题描述不当导致，则需重写问题，因此检索工具的返回结果还要加上结构化的形式。
+1 @tool(response_format=&#34;content_and_artifact&#34;) 2 def retrieve_context(query: str, config: RunnableConfig): 3 &#34;&#34;&#34; 4 信息检索工具，通过检索得到的信息回答用户提问。 5 Args: 6 query: 待检索向量，例如用户提问或子问题。 7 &#34;&#34;&#34; 8 vector_store = config[&#39;configurable&#39;].get(&#34;vector_store&#34;) 9 k = config[&#39;configurable&#39;].get(&#34;k&#34;) 10 top_n = config[&#39;configurable&#39;].get(&#34;top_n&#34;) 11 artifact = vector_store.similarity_search(query, k=k) 12 filtered_doc, filter_info = text_rerank(query, artifact, top_n=top_n) 13 content = &#34;\n\n&#34;.join((f&#34;{doc.page_content}&#34;) for doc in filtered_doc) 14 return content, filtered_doc在上述代码中，第1行 content_and_artifact 表示同时返回分别供大模型读取和程序读取的内容，前者为非结构化的文本块，后者为结构化的文本内容。">
+	<meta itemprop="wordCount" content="1095">
+
+<title>4.10  基于 LangGraph 构建自定义 RAG Agent • 《从零学AI指南手册》</title>
+<link rel="icon" href="/favicon.png" >
+<link rel="manifest" href="/manifest.json">
+<link rel="canonical" href="https://mlwithme.github.io/agent/chapter04/0def4564f3aa455d/">
+<link rel="stylesheet" href="/book.min.6097ccf1d338ddfaa037d2f96478059a71fa573d0f917d128bab595efea338ca.css" integrity="sha256-YJfM8dM43fqgN9L5ZHgFmnH6Vz0PkX0Si6tZXv6jOMo=" crossorigin="anonymous">
+
+
+  <script defer type="module" src="/en.search.min.ffaad769e546b38d39820301bb9e5c193822f7bf0f46a855602e4e14707802e0.js" integrity="sha256-/6rXaeVGs405ggMBu55cGTgi978PRqhVYC5OFHB4AuA=" crossorigin="anonymous"></script>
+
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-23SZ6E8VY7"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-23SZ6E8VY7');
+</script>
+<script async src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
+
+</head>
+<body dir="ltr" class="book-kind-page book-type-agent">
+  <input type="checkbox" class="hidden toggle" id="menu-control" />
+  <input type="checkbox" class="hidden toggle" id="toc-control" />
+  <main class="container flex">
+    
+<aside class="book-menu">
+  <div class="book-menu-content">
+    
+  <nav>
+<h2 class="book-brand">
+  <a class="flex align-center" href="/"><span>《从零学AI指南手册》</span>
+  </a>
+</h2>
+
+
+<div class="book-search hidden">
+  <input id="book-search-input" type="text" 
+    placeholder="Search"
+    aria-label="Search"
+    maxlength="64" />
+  <div class="book-search-spinner hidden"></div>
+  <ul id="book-search-results"></ul>
+</div>
+<script>document.querySelector(".book-search").classList.remove("hidden")</script>
+
+
+
+
+
+
+
+
+
+
+  
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a>
+      大模型Agent开发</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-253e26e732e57a78f635dcf47df3d0a3" class="toggle"  />
+    <label for="section-253e26e732e57a78f635dcf47df3d0a3" class="flex">
+      <a role="button" class="">
+        第 1 章 RAG 基础概念</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/454f0942222e471e/" class="">
+      1.1 RAG 提出背景</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/d7623d619f884b25/" class="">
+      1.2 RAG 流程概览</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-810ee5a2a3a24c9b7c25ab5324ae7db7" class="toggle"  />
+    <label for="section-810ee5a2a3a24c9b7c25ab5324ae7db7" class="flex">
+      <a role="button" class="">
+        第 2 章 大模型接入与使用</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/d43adfc00df54515/" class="">
+      2.1 SDK 介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/8b9059fde1d644a4/" class="">
+      2.2 现代大模型中的 SDK</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/95d3214ab80b4769/" class="">
+      2.3 DashScope 接口体系</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/b9843c089d654494/" class="">
+      2.4 千问大模型接入与使用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ed1727f01d0e40dc9b7961b72e42160e" class="toggle"  />
+    <label for="section-ed1727f01d0e40dc9b7961b72e42160e" class="flex">
+      <a role="button" class="">
+        第 3 章 文档标准化与语义检索</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/7f4af6d48c5b425c/" class="">
+      3.1 文档加载与标准化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/572ba4c9cb114677/" class="">
+      3.2 常见文本切分策略</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/06e588cd33fa4454/" class="">
+      3.3 向量数据库选择</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/ff27306c0d7b4387/" class="">
+      3.4 Qwen3 Embedding 模型介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/303035851c5e42f2/" class="">
+      3.5 语义搜索引擎构建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/e1328cb23e8c412b/" class="">
+      3.6  Milvus 模块解析</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-caaf9d8eb5e5559f7ca8bb11c41da71a" class="toggle" checked />
+    <label for="section-caaf9d8eb5e5559f7ca8bb11c41da71a" class="flex">
+      <a role="button" class="">
+        第 4 章 RAG 与 Agent</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/4c646aa07f3b4b74/" class="">
+      4.1 两步式 RAG 搭建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/5c35e934bab24ac3/" class="">
+      4.2 Function Calling 概念介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/88ff352fc22e4cd6/" class="">
+      4.3 LangChain 中的 Tool 修饰器</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/83fe26536a5d4b6e/" class="">
+      4.4 RAG Agent 原理与搭建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/b7e49268357a4bca/" class="">
+      4.5 复杂问题拆解与ReAct框架</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/469b5963f2ca4799/" class="">
+      4.6 RAG 中的两阶段索引</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/10fb92a6c5484039/" class="">
+      4.7 Qwen3 Reranking 原理与使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/45d286aec1bc4d66/" class="">
+      4.8 基于两阶段索引的 RAG Agent 搭建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/43af483460574e48/" class="">
+      4.9 LangGraph 基本概念介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/0def4564f3aa455d/" class="active">
+      4.10  基于 LangGraph 构建自定义 RAG Agent</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a>
+      深度学习</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/70e5f9cdbedc4b2c/" class="">
+      学习思维导图</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-a9b664bcf9e1dab8add449268565f466" class="toggle"  />
+    <label for="section-a9b664bcf9e1dab8add449268565f466" class="flex">
+      <a role="button" class="">
+        第 1 章 深度学习简介</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/647eb9c607874e3a/" class="">
+      1.1 深度学习的发展阶段</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/f31da36a6f444afe/" class="">
+      1.2 深度学习中的关键人物</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/da9fa13021e64f3c/" class="">
+      1.3 深度学习框架介绍</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-e6e0db5d4bc28bd97dfe8d5210249e63" class="toggle"  />
+    <label for="section-e6e0db5d4bc28bd97dfe8d5210249e63" class="flex">
+      <a role="button" class="">
+        第 2 章 环境配置</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/a0c5d1e0de0140cb/" class="">
+      2.1 体系结构介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/04f07b9246984577/" class="">
+      2.2 深度学习环境安装</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/5bf6454673194c67/" class="">
+      2.3 开发环境安装配置</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-0a2ca47f15332c8b06ae83247328edb4" class="toggle"  />
+    <label for="section-0a2ca47f15332c8b06ae83247328edb4" class="flex">
+      <a role="button" class="">
+        第 3 章 深度学习基础</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/75c5fa7839174c16/" class="">
+      3.1 线性回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/ca16f8cb6df444a6/" class="">
+      3.2 线性回归简洁实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/97e1da1143cd4554/" class="">
+      3.3 梯度下降与反向传播</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/7b865de988ea422c/" class="">
+      3.4 从零实现回归模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/18fdd1deff424a16/" class="">
+      3.5 从逻辑回归到Softmax回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/55967b0f642b4509/" class="">
+      3.6 Softmax回归简洁实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/381bbd56509e4a6f/" class="">
+      3.7 从零实现分类模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/2c061df4435d4928/" class="">
+      3.8 回归模型评估指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/e3442eff254e473c/" class="">
+      3.9 分类模型评估指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/307f927c8a1245c5/" class="">
+      3.10 过拟合与正则化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/bcb64de5aa404f18/" class="">
+      3.11 超参数与交叉验证</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/66dd7425cdd04565/" class="">
+      3.12 激活函数</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/0d3dacfff4c04794/" class="">
+      3.13 多标签分类</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-95b7e7417bf2b821a1b760975d3acc22" class="toggle"  />
+    <label for="section-95b7e7417bf2b821a1b760975d3acc22" class="flex">
+      <a role="button" class="">
+        第 4 章 卷积神经网络</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/102e183e8be94f46/" class="">
+      4.1 卷积的概念</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/5b3e3152e9e54f4f/" class="">
+      4.2 卷积的计算过程</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/762f60de801a4ccd/" class="">
+      4.3 填充和池化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/c8af5d84174b4420/" class="">
+      4.4 LeNet5网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/de007462967e4701/" class="">
+      4.5 AlexNet网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/f084f181c3554082/" class="">
+      4.6 VGG网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/911b961cc5d949b6/" class="">
+      4.7 NIN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/47da186baf3e4a0b/" class="">
+      4.8 GoogLeNet网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/da16c61397454b2c/" class="">
+      4.9 ResNet网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/1c24468824274650/" class="">
+      4.10 DenseNet网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-17076fe90a2d84e207bbd0c829983325" class="toggle"  />
+    <label for="section-17076fe90a2d84e207bbd0c829983325" class="flex">
+      <a role="button" class="">
+        第 5 章 模型训练与复用</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/4557a6f03dec4475/" class="">
+      5.1 参数及日志管理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/e7c4c6da085148d0/" class="">
+      5.2 Tensorboard可视化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/27387966672c45ed/" class="">
+      5.3 模型的保存与复用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/211b26bdd8f248ac/" class="">
+      5.4 模型的迁移学习</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/345c1b72253043cb/" class="">
+      5.5 开源模型复用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/c912dda030c946d9/" class="">
+      5.6 多GPU训练</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/f065af80f3844b0b/" class="">
+      5.7 数据预处理与缓存</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-2d091d454d5c3f03f5e0a202c37cc226" class="toggle"  />
+    <label for="section-2d091d454d5c3f03f5e0a202c37cc226" class="flex">
+      <a role="button" class="">
+        第 6 章 模型优化方法</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/cc35bb112783410e/" class="">
+      6.1 学习率调度器</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/fc024c283f164849/" class="">
+      6.2 梯度裁剪</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/27ed3ed136e24092/" class="">
+      6.3 批归一化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/fdd5ba4b41f74a0e/" class="">
+      6.4 层归一化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/9246afed14eb436c/" class="">
+      6.5 组归一化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/fcbc66ad051a4336/" class="">
+      6.6 动量法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/8b83d654898c40a2/" class="">
+      6.7 AdaGrad算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/078f2394980d41d2/" class="">
+      6.8 AdaDelta算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/28ad7fb39987447e/" class="">
+      6.9 Adam算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/4b81b8d39721434d/" class="">
+      6.10 初始化方法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f2f78ba4851131558fc284d927542d28" class="toggle"  />
+    <label for="section-f2f78ba4851131558fc284d927542d28" class="flex">
+      <a role="button" class="">
+        第 7 章 循环神经网络</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/88ba4e03337b4233/" class="">
+      7.1 RNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/ec8ff069aadc49b9/" class="">
+      7.2 时序数据</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/b4c5ddcc9e904238/" class="">
+      7.3 LSTM网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/4112672112224dc1/" class="">
+      7.4 GRU网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/b6e5ccb6cd064f74/" class="">
+      7.5 BiRNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/4bf3ecf7b21e45fb/" class="">
+      7.6 CharRNN网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-49992cff6143e64ae5d7f2209dcfb054" class="toggle"  />
+    <label for="section-49992cff6143e64ae5d7f2209dcfb054" class="flex">
+      <a role="button" class="">
+        第 8 章 时序与模型融合</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/2be88fbc08a5418f/" class="">
+      8.1 TextCNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/9023d1f822a54226/" class="">
+      8.2 TextRNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/9edd7db2d439402f/" class="">
+      8.3 CNN-RNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/19c2b86e85f2461e/" class="">
+      8.4 ConvLSTM网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/1e6da79bf7b44c20/" class="">
+      8.5 3DCNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/5f426a9190e7454b/" class="">
+      8.6 STResNet网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ca07c572acb4d7fd40854f5b367c247b" class="toggle"  />
+    <label for="section-ca07c572acb4d7fd40854f5b367c247b" class="flex">
+      <a role="button" class="">
+        第 9 章 自然语言处理</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/e0cb9a7aae814045/" class="">
+      9.1 自然语言处理介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/d4703d990f8d4fed/" class="">
+      9.2 Word2Vec词向量</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/1bb6351b01a2479b/" class="">
+      9.3 Word2Vec训练与使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/40a8a1146d934c55/" class="">
+      9.4 GloVe词向量</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/c6aa1405b8cf46d8/" class="">
+      9.5 词向量的微调使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/48c26d04b342452d/" class="">
+      9.6 fastText网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/03a0166e195f443f/" class="">
+      9.7 Seq2Seq网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/271bda16904544af/" class="">
+      9.8 序列模型评价指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/fefa60e0bc854a17/" class="">
+      9.9 NMT网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/5bcd8b0920414f34/" class="">
+      9.10 注意力机制</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/8a78e8213ee04aac/" class="">
+      9.11 含注意力的NMT网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/474ac7a1867d4b5e/" class="">
+      9.12 含注意力的RNN网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-8cdec04c2fd8683c5c7373c78d943528" class="toggle"  />
+    <label for="section-8cdec04c2fd8683c5c7373c78d943528" class="flex">
+      <a role="button" class="">
+        第10章 现代神经网络</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/7523731afc0241c0/" class="">
+      10.1 ELMo网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/4987d1044939480d/" class="">
+      10.2 Transformer网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/a469ed1a25e1498f/" class="">
+      10.3 Transformer结构</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/d50c490eef3b4565/" class="">
+      10.4 Transformer实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/f6c507b3d2d74f03/" class="">
+      10.5 Transformer对联模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/3aedea1d3f3e48dd/" class="">
+      10.6 BERT网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/82a1cd0def084620/" class="">
+      10.7 从零实现BERT</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/e736d3974ed0484c/" class="">
+      10.8 BERT文本分类模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/f5076cbadda84d4e/" class="">
+      10.9 BERT问题选择模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/25d9ef3d9b34472a/" class="">
+      10.10 BERT问题回答模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/64d3ec5593ec4b94/" class="">
+      10.11 BERT命名体识别模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/90ea8d3e090d48b4/" class="">
+      10.12 BERT从零训练</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/e36878dad7a647d8/" class="">
+      10.13 GPT-1模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/94dda9bbbc994913/" class="">
+      10.14 GPT-2与GPT-3模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/4af57a29308840de/" class="">
+      10.15 基于GPT-2的中文预训练模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/9f5c00cadde14d31/" class="">
+      10.16 InstructGPT与ChatGPT</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/050b54fd34ca480a/" class="">
+      10.17 ChatGPT与提示词工程</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/a90b0d71389b4d69/" class="">
+      10.18 百川大模型使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/40c1c9ade70c4ce7/" class="">
+      10.19 百川大模型实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/ea1b4cf8b40c4b05/" class="">
+      10.20 GPT-4与GPTs使用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a>
+      机器学习</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/43fc00b3809d4be6/" class="">
+      学习思维导图</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-0a3254d1ca9963fd6975aa5bc0b3edcc" class="toggle"  />
+    <label for="section-0a3254d1ca9963fd6975aa5bc0b3edcc" class="flex">
+      <a role="button" class="">
+        第 1 章 环境配置</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/baafb91f0af14a84/" class="">
+      1.1 安装使用Conda</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/7a01c403acd6488a/" class="">
+      1.2 开发环境安装配置</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-4569258198323c16bc8a634ea44fd5db" class="toggle"  />
+    <label for="section-4569258198323c16bc8a634ea44fd5db" class="flex">
+      <a role="button" class="">
+        第 2 章 线性回归</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/2414d4b6648d405a/" class="">
+      2.1 模型的建立与求解</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/3e9ba14da71f4fd3/" class="">
+      2.2 多变量线性回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/4a16c0dc82a84e78/" class="">
+      2.3 多项式回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/f8dea699983c48c6/" class="">
+      2.4 回归模型评估</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/df41c2e97f554e68/" class="">
+      2.5 梯度下降</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/71ef816e0005492d/" class="">
+      2.6 正态分布</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/803bee4f70be4dca/" class="">
+      2.7 目标函数推导</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-a6ca5e2f846ebd900d1a868e6718dc82" class="toggle"  />
+    <label for="section-a6ca5e2f846ebd900d1a868e6718dc82" class="flex">
+      <a role="button" class="">
+        第 3 章 逻辑回归</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/96d46b53aee14c3b/" class="">
+      3.1 模型的建立与求解</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/fac70083dd764141/" class="">
+      3.2 多分类任务</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/6d7cfd79ef304cbd/" class="">
+      3.3 常见的分类评估指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/2fdc655d00c74548/" class="">
+      3.4 目标函数推导</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/a4b61c5bbadd43a6/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-9f462f716bd0e46ef79984b356eeb5a2" class="toggle"  />
+    <label for="section-9f462f716bd0e46ef79984b356eeb5a2" class="flex">
+      <a role="button" class="">
+        第 4 章 模型的改善与泛化</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/2089400b28f54dd9/" class="">
+      4.1 基本概念</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/56b788b624cd4971/" class="">
+      4.2 特征标准化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/ca091dc393a84518/" class="">
+      4.3过拟合</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/5097d3b8c1144427/" class="">
+      4.4 正则化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/3c7eee1621d4480b/" class="">
+      4.5 偏差、方差与交叉验证</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/c5957e0753d04746/" class="">
+      4.6 实例分析手写体识别</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/a915e49586eb4426/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-327db48e4f4df6236855078634147679" class="toggle"  />
+    <label for="section-327db48e4f4df6236855078634147679" class="flex">
+      <a role="button" class="">
+        第 5 章 K近邻</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/7c610e923e754259/" class="">
+      5.1 K近邻思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/1a97571e0a6447ef/" class="">
+      5.2 K近邻原理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/d245bda107034e65/" class="">
+      5.3 sklearn接口与示例代码</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/24378571ce404d9c/" class="">
+      5.4 kd树构建与搜索</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/40f253b916f24038/" class="">
+      5.5 从零实现K近邻</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/76818d9e48944f8c/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-94d0a5f5555d92c51e0903b148e34993" class="toggle"  />
+    <label for="section-94d0a5f5555d92c51e0903b148e34993" class="flex">
+      <a role="button" class="">
+        第 6 章 文本特征与模型复用</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/e05b5928c41d4841/" class="">
+      6.1 词袋模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/de59bf74d753457e/" class="">
+      6 .2 基于K近邻算法的垃圾邮件分类</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/c6fdc78b49d44453/" class="">
+      6.3 考虑权重的词袋模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/825fde8589654b16/" class="">
+      6.4 词云图</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/8451cffe49f5477c/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-544be5d1e48c4fd8b33ba2f91964c6dd" class="toggle"  />
+    <label for="section-544be5d1e48c4fd8b33ba2f91964c6dd" class="flex">
+      <a role="button" class="">
+        第 7 章 朴素贝叶斯</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/faf303eb93a241d1/" class="">
+      7.1 朴素贝叶斯算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/842c7b8684c747d2/" class="">
+      7.2 贝叶斯估计</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/724bf42b09bb440e/" class="">
+      7.3 朴素贝叶斯实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/1a9deee1d5f042b5/" class="">
+      7.4 多项式朴素贝叶斯原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/5c27cdd8b3264f50/" class="">
+      7.5 高斯朴素贝叶斯原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/715b8eaf245f45f1/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-d1884c6b3e8f1260019220c57d615371" class="toggle"  />
+    <label for="section-d1884c6b3e8f1260019220c57d615371" class="flex">
+      <a role="button" class="">
+        第 8 章 决策树</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/690fe2be21834c2a/" class="">
+      8.1 决策树的基本思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/ee9ada9729124049/" class="">
+      8.2 决策树建模与可视化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/5887cf1408dd4c7f/" class="">
+      8.3 决策树生成之ID3与C4.5</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/87ba589d6c17434d/" class="">
+      8.4 决策树剪枝过程</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/34bc962c974646f4/" class="">
+      8.5 从零实现ID3与C4.5算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/c44682dbb3364be4/" class="">
+      8.6 连续型特征变量下决策树实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/4eead717a84a4dbf/" class="">
+      8.7 CART生成与剪枝算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/1c72d67dffc64dc9/" class="">
+      8.8 从零实现CART算法及剪枝示例</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/ae452792b2604e84/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-1f0a2178f0a580ba251c7da2649aa52f" class="toggle"  />
+    <label for="section-1f0a2178f0a580ba251c7da2649aa52f" class="flex">
+      <a role="button" class="">
+        第 9 章 集成学习与提升算法</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/9eff4004fd6c437d/" class="">
+      9.1 集成学习算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/18980c9f757e42c8/" class="">
+      9.2 随机森林</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/8a91b358b2f74d56/" class="">
+      9.3 泰坦尼克号生还预测</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/73f6914844f549f1/" class="">
+      9.4 AdaBoost原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/71fd0e44294e4abb/" class="">
+      9.5 MultiAdaBoost原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/f3c2341ce7d64f70/" class="">
+      9.6 Gradient Boost 原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/4f9b26d5b65541f5/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f63defd924ef7373144c8643a39fd7b2" class="toggle"  />
+    <label for="section-f63defd924ef7373144c8643a39fd7b2" class="flex">
+      <a role="button" class="">
+        第 10 章 支持向量机</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/dce7180d4eb047d7/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/515b54e2307a4c8a/" class="">
+      10.1 SVM思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/9c3862bc843c4179/" class="">
+      10.2 SVM线性不可分</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/fbdb6f8adace457d/" class="">
+      10.3 SVM原理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/1a3ffa363b1d4f83/" class="">
+      10.4 SVM中的软间隔</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/8b7a06412a9f4267/" class="">
+      10.5 拉格朗日乘数法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/40e977f0a2f84ac0/" class="">
+      10.6 对偶性与KKT条件</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/b18d45a772574ddb/" class="">
+      10.7 SVM优化问题</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/c53ed12f7bc04405/" class="">
+      10.8 SVM核函数原理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/26d9b2b328a849c2/" class="">
+      10.9 SMO算法求解SVM</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/215a1e15c0f2470d/" class="">
+      10.10 从零实现SVM分类算法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bdcc54d1c295c5cc69c9c851c02886ea" class="toggle"  />
+    <label for="section-bdcc54d1c295c5cc69c9c851c02886ea" class="flex">
+      <a role="button" class="">
+        第 11 章 聚类分析</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/f9d9305a55a548a1/" class="">
+      11.1 聚类算法的思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/e635df24de32487a/" class="">
+      11.2 Kmeans聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/e75b8efa232249ab/" class="">
+      11.3 Kmeans算法求解</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/60e49a33d1aa4f50/" class="">
+      11.4 从零实现Kmeans聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/c8b45d8a3d8c4cf4/" class="">
+      11.5 Kmeans&#43;&#43;聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/1ede2f3557d0438f/" class="">
+      11.6 聚类外部评价指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/e6a75df19f85498c/" class="">
+      11.7 加权Kmeans聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/c52cf7920f1d4636/" class="">
+      11.8 聚类内部评价指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/f95259c359b146ba/" class="">
+      11.9 聚类K值选取与分析</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/b85c1a858f7c4686/" class="">
+      11.10 基于密度的聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/2f01ba751d914336/" class="">
+      11.11 基于层次的聚类算法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bafa8c48214ccf62d333a6d0457c5f72" class="toggle"  />
+    <label for="section-bafa8c48214ccf62d333a6d0457c5f72" class="flex">
+      <a role="button" class="">
+        第 12 章 降维算法</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/9478de824edd44c6/" class="">
+      12.1 主成分分析</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/909356aa90fe456a/" class="">
+      12.2 基于核函数的主成分分析</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-d5f143889a719ce66d602e75b72bffb9" class="toggle"  />
+    <label for="section-d5f143889a719ce66d602e75b72bffb9" class="flex">
+      <a role="button" class="">
+        第 13 章 自训练与标签传播</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/8d71301c2e414efe/" class="">
+      13.1 Self-Training 自训练算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/87fdcf0be1c34644/" class="">
+      13.2 Label Propagation算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/7fc8b0fc47d2427c/" class="">
+      13.3 Label Spreading 算法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+
+
+
+
+
+
+
+
+
+
+
+
+</nav>
+
+
+
+
+  <script>(function(){var e=document.querySelector("aside .book-menu-content");addEventListener("beforeunload",function(){localStorage.setItem("menu.scrollTop",e.scrollTop)}),e.scrollTop=localStorage.getItem("menu.scrollTop")})()</script>
+
+
+
+  </div>
+</aside>
+ 
+
+    <div class="book-page">
+      <header class="book-header hidden">
+        
+  <div class="flex align-center justify-between">
+  <label for="menu-control">
+    <img src="/icons/menu.svg" class="book-icon" alt="Menu" />
+  </label>
+
+  <h3>4.10  基于 LangGraph 构建自定义 RAG Agent</h3>
+
+  <label for="toc-control">
+    
+    <img src="/icons/toc.svg" class="book-icon" alt="Table of Contents" />
+    
+  </label>
+</div>
+
+
+  
+  <aside class="hidden">
+    
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#4101-流程构建思路">4.10.1 流程构建思路</a></li>
+    <li><a href="#4102-检索工具改造">4.10.2 检索工具改造</a></li>
+    <li><a href="#4103-决策节点实现">4.10.3 决策节点实现</a></li>
+    <li><a href="#4104-检索文档质量评估">4.10.4 检索文档质量评估</a></li>
+    <li><a href="#4105-问题重写">4.10.5 问题重写</a></li>
+    <li><a href="#4106-生成最终回答">4.10.6 生成最终回答</a></li>
+    <li><a href="#4107-搭建完整流程">4.10.7 搭建完整流程</a></li>
+  </ul>
+</nav>
+
+
+
+  </aside>
+  
+ 
+      </header>
+
+      
+      
+  <article class="markdown book-article"><h1 id="410--基于-langgraph-构建自定义-rag-agent">4.10  基于 LangGraph 构建自定义 RAG Agent<a class="anchor" href="#410--%e5%9f%ba%e4%ba%8e-langgraph-%e6%9e%84%e5%bb%ba%e8%87%aa%e5%ae%9a%e4%b9%89-rag-agent">#</a></h1>
+<p>在第4.9节内容中，我们介绍了 LangGraph 中的3个核心图结构——State、Node 和 Edge。在本节中，我们将把这些概念真正用起来，基于 LangGraph 从零构建一个具备自我评估和问题重写能力的 Agentic RAG 系统。</p>
+<h2 id="4101-流程构建思路">4.10.1 流程构建思路<a class="anchor" href="#4101-%e6%b5%81%e7%a8%8b%e6%9e%84%e5%bb%ba%e6%80%9d%e8%b7%af">#</a></h2>
+<p>与之前我们用 <code>create_agent</code> 快速搭建的版本相比，本节的实现方式更加透明：每一个判断节点、每一条条件边，都由我们显式定义，整个执行路径完全可控。整个系统的核心流程如图4-14所示。</p>
+<div align=center><img width="500" src="/images/agent/202604301657.jpg"/> </div><center>图 4-14 RAG Agent 流程图 </center>
+<p>从图4-14可以看出，整个系统包含4个核心节点和2个条件判断分支。首先判断用户提问是否需要调用工具，不需要则直接回答，例如“你好”这样的招呼用户；其次判断检索到的内容是否与问题相关，相关则进一步结合问题生成回答；不相关则重写问题并进入一开始的循环。</p>
+<p>下面，将按照图4-12中从左到右的顺序逐一进行介绍。</p>
+<h2 id="4102-检索工具改造">4.10.2 检索工具改造<a class="anchor" href="#4102-%e6%a3%80%e7%b4%a2%e5%b7%a5%e5%85%b7%e6%94%b9%e9%80%a0">#</a></h2>
+<p>尽管在第4.8节内容中已经介绍过 <code>retrieve_context</code> 检索工具，但是这里为了满足需要还要稍微略作调整。在内容相关性判断中，将取 <code>retrieve_context</code> 工具检索并重排序后相关性最高的内容进行质量评估，如果与原问题不相关则对应所有 Top-n 的返回内容都不相关，明显可能是由于原问题描述不当导致，则需重写问题，因此检索工具的返回结果还要加上结构化的形式。</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#ae81ff">1</span> <span style="color:#a6e22e">@tool</span>(response_format<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;content_and_artifact&#34;</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">2</span> <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">retrieve_context</span>(query: str, config: RunnableConfig):
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">3</span>     <span style="color:#e6db74">&#34;&#34;&#34;
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74"> 4     信息检索工具，通过检索得到的信息回答用户提问。
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74"> 5     Args:
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74"> 6         query: 待检索向量，例如用户提问或子问题。
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74"> 7     &#34;&#34;&#34;</span>
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">8</span>     vector_store <span style="color:#f92672">=</span> config[<span style="color:#e6db74">&#39;configurable&#39;</span>]<span style="color:#f92672">.</span>get(<span style="color:#e6db74">&#34;vector_store&#34;</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">9</span>     k <span style="color:#f92672">=</span> config[<span style="color:#e6db74">&#39;configurable&#39;</span>]<span style="color:#f92672">.</span>get(<span style="color:#e6db74">&#34;k&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">10</span>     top_n <span style="color:#f92672">=</span> config[<span style="color:#e6db74">&#39;configurable&#39;</span>]<span style="color:#f92672">.</span>get(<span style="color:#e6db74">&#34;top_n&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">11</span>     artifact <span style="color:#f92672">=</span> vector_store<span style="color:#f92672">.</span>similarity_search(query, k<span style="color:#f92672">=</span>k)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">12</span>     filtered_doc, filter_info <span style="color:#f92672">=</span> text_rerank(query, artifact, top_n<span style="color:#f92672">=</span>top_n)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">13</span>     content <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;</span><span style="color:#ae81ff">\n\n</span><span style="color:#e6db74">&#34;</span><span style="color:#f92672">.</span>join((<span style="color:#e6db74">f</span><span style="color:#e6db74">&#34;</span><span style="color:#e6db74">{</span>doc<span style="color:#f92672">.</span>page_content<span style="color:#e6db74">}</span><span style="color:#e6db74">&#34;</span>) <span style="color:#66d9ef">for</span> doc <span style="color:#f92672">in</span> filtered_doc)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">14</span>     <span style="color:#66d9ef">return</span> content, filtered_doc</span></span></code></pre></div><p>在上述代码中，第1行 <code>content_and_artifact</code> 表示同时返回分别供大模型读取和程序读取的内容，前者为非结构化的文本块，后者为结构化的文本内容。</p>
+<p>进一步，可以通过如下用例来测试：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#ae81ff">1</span> <span style="color:#66d9ef">if</span> __name__ <span style="color:#f92672">==</span> <span style="color:#e6db74">&#39;__main__&#39;</span>:
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">2</span>     vector_store <span style="color:#f92672">=</span> get_vector_store()
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">3</span>     config <span style="color:#f92672">=</span> RunnableConfig(configurable<span style="color:#f92672">=</span>{<span style="color:#e6db74">&#34;vector_store&#34;</span>: vector_store, <span style="color:#e6db74">&#34;k&#34;</span>: <span style="color:#ae81ff">10</span>, <span style="color:#e6db74">&#34;top_n&#34;</span>: <span style="color:#ae81ff">3</span>})
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">4</span>     r <span style="color:#f92672">=</span> retrieve_context<span style="color:#f92672">.</span>invoke({
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">5</span>         <span style="color:#e6db74">&#34;args&#34;</span>: {<span style="color:#e6db74">&#34;query&#34;</span>: <span style="color:#e6db74">&#34;郭靖是谁？&#34;</span>}, <span style="color:#e6db74">&#34;id&#34;</span>: <span style="color:#e6db74">&#34;call_123&#34;</span>,
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">6</span>         <span style="color:#e6db74">&#34;name&#34;</span>: <span style="color:#e6db74">&#34;retrieve_context&#34;</span>, <span style="color:#e6db74">&#34;type&#34;</span>: <span style="color:#e6db74">&#34;tool_call&#34;</span>}, config<span style="color:#f92672">=</span>config) 
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">7</span>     print(r<span style="color:#f92672">.</span>content,r<span style="color:#f92672">.</span>artifact)</span></span></code></pre></div><p>这里需要注意的是，<code>content_and_artifact</code> 模式下，<code>invoke()</code>函数需要接收一个带 <code>tool_call_id</code>参数 的输入才会返回 <code>ToolMessage</code> 类型的返回值，直接传字符串时 LangChain 判断这不是一次&quot;工具调用&quot;，则退化为只返回 content 字符串。</p>
+<p>上述代码运行结束以后就会看到类似如下结果：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span>华筝幼时由父亲许配给王罕的孙子都史<span style="color:#f92672">...</span>
+</span></span><span style="display:flex;"><span>郭靖望着母亲<span style="color:#960050;background-color:#1e0010">，</span>就欲出口答应<span style="color:#960050;background-color:#1e0010">，</span>但想起<span style="color:#f92672">...</span>
+</span></span><span style="display:flex;"><span>长须人微笑问道<span style="color:#960050;background-color:#1e0010">：“</span>你猜我是谁<span style="color:#960050;background-color:#1e0010">？</span><span style="color:#f92672">...</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>[Document(metadata<span style="color:#f92672">=</span>{<span style="color:#e6db74">&#39;level_1&#39;</span>: <span style="color:#e6db74">&#39;第五回 弯弓射雕&#39;</span>, <span style="color:#e6db74">&#39;pk&#39;</span>: <span style="color:#ae81ff">464859367376683299</span>, <span style="color:#e6db74">&#39;source&#39;</span>: <span style="color:#e6db74">&#39;~RAGWithMe/data/jinyong/金庸-射雕英雄传精校版.txt&#39;</span>, <span style="color:#e6db74">&#39;start_index&#39;</span>: <span style="color:#ae81ff">6652</span>}, page_content<span style="color:#f92672">=</span><span style="color:#e6db74">&#39;华筝幼时由父亲许配给王罕的孙子都史...&#39;</span>), Document(metadata<span style="color:#f92672">=</span>{<span style="color:#e6db74">&#39;level_1&#39;</span>: <span style="color:#e6db74">&#39;第三十八回 锦囊密令&#39;</span>, <span style="color:#e6db74">&#39;pk&#39;</span>: <span style="color:#ae81ff">465290802323521715</span>, <span style="color:#e6db74">&#39;source&#39;</span>: <span style="color:#e6db74">&#39;~RAGWithMe/data/jinyong/金庸-射雕英雄传精校版.txt&#39;</span>, <span style="color:#e6db74">&#39;start_index&#39;</span>: <span style="color:#ae81ff">15090</span>}, page_content<span style="color:#f92672">=</span><span style="color:#e6db74">&#39;郭靖望着母亲，就欲出口答应，但想起母...&#39;</span>), Document(metadata<span style="color:#f92672">=</span>{<span style="color:#e6db74">&#39;level_1&#39;</span>: <span style="color:#e6db74">&#39;第十六回 《九阴真经》&#39;</span>, <span style="color:#e6db74">&#39;pk&#39;</span>: <span style="color:#ae81ff">465290719720374297</span>, <span style="color:#e6db74">&#39;source&#39;</span>: <span style="color:#e6db74">&#39;~RAGWithMe/data/jinyong/金庸-射雕英雄传精校版.txt&#39;</span>, <span style="color:#e6db74">&#39;start_index&#39;</span>: <span style="color:#ae81ff">14725</span>}, page_content<span style="color:#f92672">=</span><span style="color:#e6db74">&#39;长须人微笑问道：“你猜我是谁？...&#39;</span>)]</span></span></code></pre></div><p>从上述输出结果可以看出，前面3行仅为字符串，余下部分则为3个 <code>Document</code> 类对象可供后续程序使用。</p>
+<p>以上示例代码可参见 <code>Code/Chapter04/C13_custom_rag_case.py</code> 文件。</p>
+<h2 id="4103-决策节点实现">4.10.3 决策节点实现<a class="anchor" href="#4103-%e5%86%b3%e7%ad%96%e8%8a%82%e7%82%b9%e5%ae%9e%e7%8e%b0">#</a></h2>
+<p>Decide 节点是整个 Agent 的&quot;大脑&quot;，它的职责是判断用户的问题是否需要检索，如果需要则生成检索 Query，即工具对应的参数，并进行内容检索，否则直接回答，代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#ae81ff">1</span> <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">generate_query_or_respond</span>(state: MessagesState,
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">2</span>                 config: RunnableConfig) <span style="color:#f92672">-&gt;</span> MessagesState:
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">3</span>     response_model <span style="color:#f92672">=</span> get_llm_model()
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">4</span>     llm <span style="color:#f92672">=</span> response_model<span style="color:#f92672">.</span>bind_tools([retrieve_context])
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">5</span>     response <span style="color:#f92672">=</span> llm<span style="color:#f92672">.</span>invoke(state[<span style="color:#e6db74">&#34;messages&#34;</span>], config<span style="color:#f92672">=</span>config)  <span style="color:#75715e"># AIMessage</span>
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">6</span>     <span style="color:#66d9ef">return</span> {<span style="color:#e6db74">&#34;messages&#34;</span>: [response]} </span></span></code></pre></div><p>在上述代码中，第1行 <code>state</code> 表示根据输入拼接好全局状态。第4行中 <code>.bind_tools()</code> 是将提供的工具与模型绑定，告诉模型&quot;你有这些工具可以用&quot;，模型在生成回答时会自行决定是否触发工具调用，有需要可以通过 <code>print(llm.kwargs)</code> 打印工具的信息。第5行 <code>response</code> 是大模型根据输入返回的结果，类型是 <code>AIMessage</code> ，将对全局状态进行更新。</p>
+<p>进一步，可以用下面两个测试用例来验证它的行为：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#ae81ff">1</span> <span style="color:#66d9ef">if</span> __name__ <span style="color:#f92672">==</span> <span style="color:#e6db74">&#39;__main__&#39;</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">2</span>     vector_store <span style="color:#f92672">=</span> get_vector_store()
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">3</span>     SYSTEM_PROMPT <span style="color:#f92672">=</span> (<span style="color:#e6db74">&#34;你是一个问答助手，当用户提出问题时，必须调用 retrieve_context 工具进行检索。</span><span style="color:#ae81ff">\n</span><span style="color:#e6db74">&#34;</span>
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">4</span>                      <span style="color:#e6db74">&#34;如果用户只是普通打招呼或闲聊，直接回答即可，不需要调用工具。</span><span style="color:#ae81ff">\n</span><span style="color:#e6db74">&#34;</span>
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">5</span>                      <span style="color:#e6db74">&#34;请保持简洁友好的语气。&#34;</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">6</span>     config <span style="color:#f92672">=</span> RunnableConfig(configurable<span style="color:#f92672">=</span>{<span style="color:#e6db74">&#34;vector_store&#34;</span>: vector_store, <span style="color:#e6db74">&#34;k&#34;</span>: <span style="color:#ae81ff">10</span>, <span style="color:#e6db74">&#34;top_n&#34;</span>: <span style="color:#ae81ff">3</span>},)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">7</span>     <span style="color:#75715e"># 测试一：普通打招呼，不需要检索</span>
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">8</span>     input <span style="color:#f92672">=</span> MessagesState(messages<span style="color:#f92672">=</span>[
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">9</span>         {<span style="color:#e6db74">&#34;role&#34;</span>: <span style="color:#e6db74">&#34;system&#34;</span>, <span style="color:#e6db74">&#34;content&#34;</span>: SYSTEM_PROMPT},
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">10</span>         {<span style="color:#e6db74">&#34;role&#34;</span>: <span style="color:#e6db74">&#34;user&#34;</span>, <span style="color:#e6db74">&#34;content&#34;</span>: <span style="color:#e6db74">&#34;你好？&#34;</span>}])
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">11</span>     generate_query_or_respond(input, config)[<span style="color:#e6db74">&#34;messages&#34;</span>][<span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>]<span style="color:#f92672">.</span>pretty_print()
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">12</span>     <span style="color:#75715e"># 测试二：专业问题，触发检索工具调用</span>
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">13</span>     input <span style="color:#f92672">=</span> MessagesState(messages<span style="color:#f92672">=</span>[
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">14</span>         {<span style="color:#e6db74">&#34;role&#34;</span>: <span style="color:#e6db74">&#34;system&#34;</span>, <span style="color:#e6db74">&#34;content&#34;</span>: SYSTEM_PROMPT},
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">15</span>         {<span style="color:#e6db74">&#34;role&#34;</span>: <span style="color:#e6db74">&#34;user&#34;</span>, <span style="color:#e6db74">&#34;content&#34;</span>: <span style="color:#e6db74">&#34;郭靖是谁？&#34;</span>}])
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">16</span>     generate_query_or_respond(input, config)[<span style="color:#e6db74">&#34;messages&#34;</span>][<span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>]<span style="color:#f92672">.</span>pretty_print()</span></span></code></pre></div><p>在上述代码中，第3~5行是注入给模型的一个系统提示词，是模型能力而定。一般来说因为我们在定义工具 <code>retrieve_context()</code> 时已经写过了描述所以不用加这个 <code>SYSTEM_PROMPT</code> 大模型也能识别到需要调用工具，但是如果模型能力弱不一定能识别到，那么此时就可以通过上面的方式来强制约束</p>
+<p>上述代码运行结束以后就会看到类似如下结果：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#f92672">==================================</span> Ai Message <span style="color:#f92672">==================================</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>你好<span style="color:#960050;background-color:#1e0010">！</span>很高兴见到你<span style="color:#960050;background-color:#1e0010">，</span>有什么我可以帮忙的吗<span style="color:#960050;background-color:#1e0010">？😊</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">==================================</span> Ai Message <span style="color:#f92672">==================================</span>
+</span></span><span style="display:flex;"><span>Tool Calls:
+</span></span><span style="display:flex;"><span>  retrieve_context (call_949591dbf87a42218244d0)
+</span></span><span style="display:flex;"><span> Call ID: call_949591dbf87a42218244d0
+</span></span><span style="display:flex;"><span>  Args:
+</span></span><span style="display:flex;"><span>    query: 郭靖</span></span></code></pre></div><p>从测试结果可以看出，对于普通问候模型直接回答，对于需要查资料的问题模型会自动触发工具调用，这也正是我们希望的行为。</p>
+<p>同时，如果需要对整个过程进行调试，可以在第6行 <code>RunnableConfig</code> 中添加参数 <code>callbacks=[ConsoleCallbackHandler()]</code> 即可输出详细信息，包括 LangGraph 内部的交互和大模型调用的相关信息。</p>
+<p>例如对于上面第2个测试案例，可以打印出输入到大模型的实际内容，如下所示：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span>[llm<span style="color:#f92672">/</span>start] [llm:ChatOpenAI] Entering LLM run <span style="color:#66d9ef">with</span> input:
+</span></span><span style="display:flex;"><span>{<span style="color:#e6db74">&#34;prompts&#34;</span>: [
+</span></span><span style="display:flex;"><span>    <span style="color:#e6db74">&#34;System: 你是一个问答助手，当用户提出问题时，必须调用 retrieve_context 工具进行检索。</span><span style="color:#ae81ff">\n</span><span style="color:#e6db74">如果用户只是普通打招呼或闲聊，直接回答即可，不需要调用工具。</span><span style="color:#ae81ff">\n</span><span style="color:#e6db74">请保持简洁友好的语气。</span><span style="color:#ae81ff">\n</span><span style="color:#e6db74">Human: 郭靖是谁？&#34;</span>]
+</span></span><span style="display:flex;"><span>}</span></span></code></pre></div><p>以上示例代码可参见 <code>Code/Chapter04/C13_custom_rag_case.py</code> 文件。</p>
+<p>注意：工具对应的 Schema 信息是作为另外一个 <code>tools</code> 参数传入大模型的，可参见第4.2.5节内容，但也被算作是输入大模型的 Token，只是人为分成了两部分。</p>
+<h2 id="4104-检索文档质量评估">4.10.4 检索文档质量评估<a class="anchor" href="#4104-%e6%a3%80%e7%b4%a2%e6%96%87%e6%a1%a3%e8%b4%a8%e9%87%8f%e8%af%84%e4%bc%b0">#</a></h2>
+<p>由于检索工具返回的内容不一定都和问题相关，因此还需要一个节点负责评估检索结果的相关性，并根据评估结果决定下一步走哪条分支，即相关则直接生成回答，不相关则重写问题重新检索。</p>
+<p>具体地，对于文档质量评估部分实现代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#ae81ff">1</span> GRADE_PROMPT <span style="color:#f92672">=</span> (<span style="color:#e6db74">&#34;你是一个文档相关性评估助手。</span><span style="color:#ae81ff">\n</span><span style="color:#e6db74">&#34;</span>
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">2</span>                 <span style="color:#e6db74">&#34;检索到的文档内容：</span><span style="color:#ae81ff">\n\n</span><span style="color:#e6db74">{context}</span><span style="color:#ae81ff">\n\n</span><span style="color:#e6db74">&#34;</span>
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">3</span>                 <span style="color:#e6db74">&#34;用户问题：</span><span style="color:#e6db74">{question}</span><span style="color:#ae81ff">\n</span><span style="color:#e6db74">&#34;</span>
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">4</span>                 <span style="color:#e6db74">&#34;如果文档内容与问题语义相关，评分为 &#39;yes&#39;，否则为 &#39;no&#39;。&#34;</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">5</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">6</span> <span style="color:#66d9ef">class</span> <span style="color:#a6e22e">GradeDocuments</span>(BaseModel):
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">7</span>     binary_score: str <span style="color:#f92672">=</span> Field(
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">8</span>         description<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;相关性评分：&#39;yes&#39; 表示相关，&#39;no&#39; 表示不相关&#34;</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">9</span> 
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">10</span> <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">grade_documents</span>(
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">11</span>         state: MessagesState) <span style="color:#f92672">-&gt;</span> Literal[<span style="color:#e6db74">&#34;generate_answer&#34;</span>, <span style="color:#e6db74">&#34;rewrite_question&#34;</span>]:
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">12</span>     question <span style="color:#f92672">=</span> state[<span style="color:#e6db74">&#34;messages&#34;</span>][<span style="color:#ae81ff">0</span>]<span style="color:#f92672">.</span>content
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">13</span>     context <span style="color:#f92672">=</span> state[<span style="color:#e6db74">&#34;messages&#34;</span>][<span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>]<span style="color:#f92672">.</span>content  <span style="color:#75715e"># 最后一条消息是工具返回的检索结果</span>
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">14</span>     prompt <span style="color:#f92672">=</span> GRADE_PROMPT<span style="color:#f92672">.</span>format(question<span style="color:#f92672">=</span>question, context<span style="color:#f92672">=</span>context)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">15</span>     response <span style="color:#f92672">=</span> (get_llm_model()
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">16</span>         <span style="color:#f92672">.</span>with_structured_output(GradeDocuments)  <span style="color:#75715e"># 强制模型输出结构化结果</span>
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">17</span>         <span style="color:#f92672">.</span>invoke([{<span style="color:#e6db74">&#34;role&#34;</span>: <span style="color:#e6db74">&#34;user&#34;</span>, <span style="color:#e6db74">&#34;content&#34;</span>: prompt}]))
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">18</span>     <span style="color:#66d9ef">return</span> <span style="color:#e6db74">&#34;generate_answer&#34;</span> <span style="color:#66d9ef">if</span> response<span style="color:#f92672">.</span>binary_score <span style="color:#f92672">==</span> <span style="color:#e6db74">&#34;yes&#34;</span> <span style="color:#66d9ef">else</span> <span style="color:#e6db74">&#34;rewrite_question&#34;</span></span></span></code></pre></div><p>在上述代码中，第1~4行是定义一个评估的 prompt 模板。第6~8行定义大模型输出的 Schema 结构信息。第10~18行定义了大模型根据用户提问和检索解锁评估得到的相关性结果，其中第11行表示强制指定返回值只能是 <code>&quot;generate_answer&quot;</code> 或者 <code>&quot;rewrite_question&quot;</code>，第16行 <code>.with_structured_output(GradeDocuments)</code> 表示让模型强制按照 <code>GradeDocuments</code> 的 Schema 输出结果，而不是自由发挥，这保证了评估结果永远只有 <code>&quot;yes&quot;</code> 或 <code>&quot;no&quot;</code> 两种，不会出现模型说&quot;我觉得这个文档有点相关但不太确定……&ldquo;这种模糊答案。</p>
+<p>值得注意的是，这里<code>grade_documents</code> 函数的返回值不是状态更新，而是下一个节点的名称字符串，它直接决定图的执行路径。</p>
+<p>进一步，可以通过如下方式来测试：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#ae81ff">1</span> <span style="color:#66d9ef">if</span> __name__ <span style="color:#f92672">==</span> <span style="color:#e6db74">&#39;__main__&#39;</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">2</span>     <span style="color:#75715e"># 测试一： 回答内容与问题不相关</span>
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">3</span>     input <span style="color:#f92672">=</span> {
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">4</span>         <span style="color:#e6db74">&#34;messages&#34;</span>: convert_to_messages(
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">5</span>       [ {<span style="color:#e6db74">&#34;role&#34;</span>: <span style="color:#e6db74">&#34;user&#34;</span>, <span style="color:#e6db74">&#34;content&#34;</span>: <span style="color:#e6db74">&#34;郭靖是谁？&#34;</span>},
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">6</span>         {<span style="color:#e6db74">&#34;role&#34;</span>: <span style="color:#e6db74">&#34;assistant&#34;</span>, <span style="color:#e6db74">&#34;content&#34;</span>: <span style="color:#e6db74">&#34;&#34;</span>, <span style="color:#e6db74">&#34;tool_calls&#34;</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">7</span>             [{<span style="color:#e6db74">&#34;id&#34;</span>: <span style="color:#e6db74">&#34;1&#34;</span>, <span style="color:#e6db74">&#34;name&#34;</span>: <span style="color:#e6db74">&#34;retrieve_context&#34;</span>, <span style="color:#e6db74">&#34;args&#34;</span>: {<span style="color:#e6db74">&#34;query&#34;</span>: <span style="color:#e6db74">&#34;郭靖&#34;</span>}, }], },
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">8</span>         {<span style="color:#e6db74">&#34;role&#34;</span>: <span style="color:#e6db74">&#34;tool&#34;</span>,
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">9</span>          <span style="color:#e6db74">&#34;content&#34;</span>: <span style="color:#e6db74">&#34;李萍瞧着儿子憨憨的模样，说着什么“羊儿、马儿”，全带着自己柔软的临安乡下土音，时时不禁心酸：“你爹是山东好汉，你也该当说山东话才是。&#34;</span>,
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">10</span>          <span style="color:#e6db74">&#34;tool_call_id&#34;</span>: <span style="color:#e6db74">&#34;1&#34;</span>}])}
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">11</span>     print(grade_documents(input))
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">12</span> 
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">13</span>     <span style="color:#75715e"># 测试二： 回答内容与问题相关</span>
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">14</span>     input <span style="color:#f92672">=</span> {
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">15</span>         <span style="color:#e6db74">&#34;messages&#34;</span>: convert_to_messages(
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">16</span>       [ {<span style="color:#e6db74">&#34;role&#34;</span>: <span style="color:#e6db74">&#34;user&#34;</span>, <span style="color:#e6db74">&#34;content&#34;</span>: <span style="color:#e6db74">&#34;郭靖是谁？&#34;</span>},
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">17</span>         {<span style="color:#e6db74">&#34;role&#34;</span>: <span style="color:#e6db74">&#34;assistant&#34;</span>, <span style="color:#e6db74">&#34;content&#34;</span>: <span style="color:#e6db74">&#34;&#34;</span>, <span style="color:#e6db74">&#34;tool_calls&#34;</span>:
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">18</span>             [{<span style="color:#e6db74">&#34;id&#34;</span>: <span style="color:#e6db74">&#34;1&#34;</span>, <span style="color:#e6db74">&#34;name&#34;</span>: <span style="color:#e6db74">&#34;retrieve_context&#34;</span>, <span style="color:#e6db74">&#34;args&#34;</span>: {<span style="color:#e6db74">&#34;query&#34;</span>: <span style="color:#e6db74">&#34;郭靖&#34;</span>}, }], },
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">19</span>         {<span style="color:#e6db74">&#34;role&#34;</span>: <span style="color:#e6db74">&#34;tool&#34;</span>,
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">20</span>          <span style="color:#e6db74">&#34;content&#34;</span>: <span style="color:#e6db74">&#34;郭靖是《射雕英雄传》中的主人公。他的母亲李萍是浙江临安人，父亲是山东好汉。郭靖出生于临安府牛家村，幼年时因战乱随母亲流落蒙古大漠。&#34;</span>,
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">21</span>                <span style="color:#e6db74">&#34;tool_call_id&#34;</span>: <span style="color:#e6db74">&#34;1&#34;</span>}])}
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">22</span>     print(grade_documents(input))</span></span></code></pre></div><p>上述代码运行结束以后就会看到类似如下结果：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span>rewrite_question
+</span></span><span style="display:flex;"><span>generate_answer</span></span></code></pre></div><p>以上完整示例代码可参见 <code>Code/Chapter04/C14_custom_rag_grade.py</code> 文件。</p>
+<h2 id="4105-问题重写">4.10.5 问题重写<a class="anchor" href="#4105-%e9%97%ae%e9%a2%98%e9%87%8d%e5%86%99">#</a></h2>
+<p>当检索结果不相关时，说明用户的原始问题可能表述不够清晰，需要让模型对原问题进行改写，以便下一轮检索能找到更相关的内容。</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#ae81ff">1</span> REWRITE_PROMPT <span style="color:#f92672">=</span> (<span style="color:#e6db74">&#34;请理解下面这个问题，并将其改写成一个更清晰、更有利于语义检索的问题。</span><span style="color:#ae81ff">\n</span><span style="color:#e6db74">&#34;</span>
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">2</span>                   <span style="color:#e6db74">&#34;原始问题：</span><span style="color:#ae81ff">\n</span><span style="color:#e6db74">---</span><span style="color:#ae81ff">\n</span><span style="color:#e6db74">{question}</span><span style="color:#ae81ff">\n</span><span style="color:#e6db74">---</span><span style="color:#ae81ff">\n</span><span style="color:#e6db74">&#34;</span>
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">3</span>                   <span style="color:#e6db74">&#34;改写后的问题：&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">4</span> 
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">5</span> <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">rewrite_question</span>(state: MessagesState) <span style="color:#f92672">-&gt;</span> MessagesState:
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">6</span>     question <span style="color:#f92672">=</span> state[<span style="color:#e6db74">&#34;messages&#34;</span>][<span style="color:#ae81ff">0</span>]<span style="color:#f92672">.</span>content
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">7</span>     prompt <span style="color:#f92672">=</span> REWRITE_PROMPT<span style="color:#f92672">.</span>format(question<span style="color:#f92672">=</span>question)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">8</span>     response <span style="color:#f92672">=</span> get_llm_model()<span style="color:#f92672">.</span>invoke([{<span style="color:#e6db74">&#34;role&#34;</span>: <span style="color:#e6db74">&#34;user&#34;</span>, <span style="color:#e6db74">&#34;content&#34;</span>: prompt}])
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">9</span>     <span style="color:#66d9ef">return</span> {<span style="color:#e6db74">&#34;messages&#34;</span>: [HumanMessage(content<span style="color:#f92672">=</span>response<span style="color:#f92672">.</span>content)]}</span></span></code></pre></div><p>在上述代码中，第6行是取用户的原始问题。第7行是填充 prompt 模板。第8行是得到大模型改写后的结果，返回类型为 <code>AIMessage</code>。第9行是将改写后的问题追加到全局消息列表中，后续会回到 <code>generate_query_or_respond</code> 节点重新发起检索。</p>
+<p>这里值得注意的是，在第9行中强制将 <code>AIMessage</code> 构造成了 <code>HumanMessage</code> 进行返回是因为在 LangChain 中每种消息类型尤其特定的语义。例如 <code>ToolMessage</code> 在 LangChain 代表&quot;某个工具调用的返回结果&rdquo;，必须配合一个 <code>tool_call_id</code> 使用，用来告诉模型&quot;这是你之前调用某个工具得到的结果&quot;。</p>
+<p>LangChain 中几种 Message 类型的语义分工如下所示：</p>
+<table>
+	<thead>
+			<tr>
+					<th>类型</th>
+					<th>对应角色</th>
+					<th>使用场景</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>HumanMessage</code></td>
+					<td><code>user</code></td>
+					<td>用户的输入或提问</td>
+			</tr>
+			<tr>
+					<td><code>AIMessage</code></td>
+					<td><code>assistant</code></td>
+					<td>模型的回答或工具调用决策</td>
+			</tr>
+			<tr>
+					<td><code>ToolMessage</code></td>
+					<td><code>tool</code></td>
+					<td>工具调用的返回结果，必须有 <code>tool_call_id</code></td>
+			</tr>
+			<tr>
+					<td><code>SystemMessage</code></td>
+					<td><code>system</code></td>
+					<td>系统提示词，控制模型行为</td>
+			</tr>
+	</tbody>
+</table>
+<p>这里 <code>rewrite_question</code> 的目的是把改写后的问题当作新的用户输入重新发起检索，所以用 <code>HumanMessage</code> 是唯一正确的选择。</p>
+<p>进一步，可以通过如下用例来测试：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#ae81ff">1</span> <span style="color:#66d9ef">if</span> __name__ <span style="color:#f92672">==</span> <span style="color:#e6db74">&#39;__main__&#39;</span>:
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">2</span>     input <span style="color:#f92672">=</span> {<span style="color:#e6db74">&#34;messages&#34;</span>: convert_to_messages([{<span style="color:#e6db74">&#34;role&#34;</span>: <span style="color:#e6db74">&#34;user&#34;</span>, <span style="color:#e6db74">&#34;content&#34;</span>: <span style="color:#e6db74">&#34;郭靖是谁？&#34;</span>},
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">3</span>             {<span style="color:#e6db74">&#34;role&#34;</span>: <span style="color:#e6db74">&#34;assistant&#34;</span>, <span style="color:#e6db74">&#34;content&#34;</span>: <span style="color:#e6db74">&#34;&#34;</span>, <span style="color:#e6db74">&#34;tool_calls&#34;</span>:
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">4</span>                 [{<span style="color:#e6db74">&#34;id&#34;</span>: <span style="color:#e6db74">&#34;1&#34;</span>, <span style="color:#e6db74">&#34;name&#34;</span>: <span style="color:#e6db74">&#34;retrieve_context&#34;</span>, <span style="color:#e6db74">&#34;args&#34;</span>: {<span style="color:#e6db74">&#34;query&#34;</span>: <span style="color:#e6db74">&#34;郭靖&#34;</span>}, }], },
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">5</span>             {<span style="color:#e6db74">&#34;role&#34;</span>: <span style="color:#e6db74">&#34;tool&#34;</span>,
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">6</span>              <span style="color:#e6db74">&#34;content&#34;</span>: <span style="color:#e6db74">&#34;李萍瞧着儿子憨憨的模样，说着什么“羊儿、马儿”，全带着自...&#34;</span>,<span style="color:#e6db74">&#34;tool_call_id&#34;</span>: <span style="color:#e6db74">&#34;1&#34;</span>}])}
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">7</span>     response <span style="color:#f92672">=</span> rewrite_question(input)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">8</span>     print(response[<span style="color:#e6db74">&#34;messages&#34;</span>][<span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>]<span style="color:#f92672">.</span>content)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">9</span>     <span style="color:#75715e"># 郭靖是金庸武侠小说《射雕英雄传》中的核心男主角，其身份背景、主要经历和人物形象是怎样的？</span></span></span></code></pre></div><p>在上述代码中，第2行 <code>convert_to_messages</code> 是将整个消息列表转换成 LangChain 中的消息格式，即 <code>input</code> 的内容如下：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span>{<span style="color:#e6db74">&#39;messages&#39;</span>: [HumanMessage(content<span style="color:#f92672">=</span><span style="color:#e6db74">&#39;郭靖是谁？&#39;</span>, additional_kwargs<span style="color:#f92672">=</span>{}, response_metadata<span style="color:#f92672">=</span>{}), AIMessage(content<span style="color:#f92672">=</span><span style="color:#e6db74">&#39;&#39;</span>, additional_kwargs<span style="color:#f92672">=</span>{}, response_metadata<span style="color:#f92672">=</span>{}, tool_calls<span style="color:#f92672">=</span>[{<span style="color:#e6db74">&#39;name&#39;</span>: <span style="color:#e6db74">&#39;retrieve_context&#39;</span>, <span style="color:#e6db74">&#39;args&#39;</span>: {<span style="color:#e6db74">&#39;query&#39;</span>: <span style="color:#e6db74">&#39;郭靖&#39;</span>}, <span style="color:#e6db74">&#39;id&#39;</span>: <span style="color:#e6db74">&#39;1&#39;</span>, <span style="color:#e6db74">&#39;type&#39;</span>: <span style="color:#e6db74">&#39;tool_call&#39;</span>}], invalid_tool_calls<span style="color:#f92672">=</span>[]), ToolMessage(content<span style="color:#f92672">=</span><span style="color:#e6db74">&#39;李萍瞧着儿子憨憨的模样，说着什么“羊儿、马儿”，全带着自...&#39;</span>, tool_call_id<span style="color:#f92672">=</span><span style="color:#e6db74">&#39;1&#39;</span>)]}</span></span></code></pre></div><p>最终，问题重写以后 LangGraph 中的全局 MessagesState 类似如下：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span>{<span style="color:#e6db74">&#39;messages&#39;</span>: [HumanMessage(content<span style="color:#f92672">=</span><span style="color:#e6db74">&#39;郭靖是谁？&#39;</span>, additional_kwargs<span style="color:#f92672">=</span>{}, response_metadata<span style="color:#f92672">=</span>{}), AIMessage(content<span style="color:#f92672">=</span><span style="color:#e6db74">&#39;&#39;</span>, additional_kwargs<span style="color:#f92672">=</span>{}, response_metadata<span style="color:#f92672">=</span>{}, tool_calls<span style="color:#f92672">=</span>[{<span style="color:#e6db74">&#39;name&#39;</span>: <span style="color:#e6db74">&#39;retrieve_context&#39;</span>, <span style="color:#e6db74">&#39;args&#39;</span>: {<span style="color:#e6db74">&#39;query&#39;</span>: <span style="color:#e6db74">&#39;郭靖&#39;</span>}, <span style="color:#e6db74">&#39;id&#39;</span>: <span style="color:#e6db74">&#39;1&#39;</span>, <span style="color:#e6db74">&#39;type&#39;</span>: <span style="color:#e6db74">&#39;tool_call&#39;</span>}], invalid_tool_calls<span style="color:#f92672">=</span>[]), ToolMessage(content<span style="color:#f92672">=</span><span style="color:#e6db74">&#39;李萍瞧着儿子憨憨的模样，说着什么“羊儿、马儿”，全带着自...&#39;</span>, tool_call_id<span style="color:#f92672">=</span><span style="color:#e6db74">&#39;1&#39;</span>),HumanMessage(content<span style="color:#f92672">=</span><span style="color:#e6db74">&#39;郭靖是金庸武侠小说《射雕英雄传》中的核心男主角，其身份背景、主要经历和人物形象是怎样的？&#39;</span>, additional_kwargs<span style="color:#f92672">=</span>{}, response_metadata<span style="color:#f92672">=</span>{})]}</span></span></code></pre></div><h2 id="4106-生成最终回答">4.10.6 生成最终回答<a class="anchor" href="#4106-%e7%94%9f%e6%88%90%e6%9c%80%e7%bb%88%e5%9b%9e%e7%ad%94">#</a></h2>
+<p>在通过质量评估后，最后一步便是基于检索到的内容和用户提问生成简洁的回答，实现代码如下</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#ae81ff">1</span> GENERATE_PROMPT <span style="color:#f92672">=</span> (
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">2</span>     <span style="color:#e6db74">&#34;你是一个RAG问答助手，严格遵守以下规则：</span><span style="color:#ae81ff">\n</span><span style="color:#e6db74">&#34;</span>
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">3</span>     <span style="color:#e6db74">&#34;1. 你的回答必须且只能基于提供的参考内容，禁止回答与问题无关的内容。&#34;</span>
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">4</span>     <span style="color:#e6db74">&#34;2. 禁止调用任何第三方工具、MCP 服务或外部 API。</span><span style="color:#ae81ff">\n</span><span style="color:#e6db74">&#34;</span>
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">5</span>     <span style="color:#e6db74">&#34;3. 如果某条信息在参考内容中没有明确原文支撑，直接略去，不得在回答中提及&#39;该信息未出现&#39;、&#39;无法作答&#39;、&#39;检索结果未包含&#39;等任何说明。</span><span style="color:#ae81ff">\n</span><span style="color:#e6db74">&#34;</span>
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">6</span>     <span style="color:#e6db74">&#34;4. 如果参考内容完全与问题无关，才回答&#39;根据现有文档无法回答该问题&#39;。</span><span style="color:#ae81ff">\n</span><span style="color:#e6db74">&#34;</span>
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">7</span>     <span style="color:#e6db74">&#34;5. 最后的输出结果请格式化、严肃、正式输出，不要随意分段。</span><span style="color:#ae81ff">\n</span><span style="color:#e6db74">&#34;</span>
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">8</span>     <span style="color:#e6db74">&#34;问题：</span><span style="color:#e6db74">{question}</span><span style="color:#ae81ff">\n\n</span><span style="color:#e6db74">&#34;</span>
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">9</span>     <span style="color:#e6db74">&#34;参考内容：</span><span style="color:#e6db74">{context}</span><span style="color:#e6db74">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">10</span> 
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">11</span> <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">generate_answer</span>(state: MessagesState) <span style="color:#f92672">-&gt;</span> MessagesState:
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">12</span>     question <span style="color:#f92672">=</span> state[<span style="color:#e6db74">&#34;messages&#34;</span>][<span style="color:#f92672">-</span><span style="color:#ae81ff">3</span>]<span style="color:#f92672">.</span>content
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">13</span>     context <span style="color:#f92672">=</span> state[<span style="color:#e6db74">&#34;messages&#34;</span>][<span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>]<span style="color:#f92672">.</span>content
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">14</span>     prompt <span style="color:#f92672">=</span> GENERATE_PROMPT<span style="color:#f92672">.</span>format(question<span style="color:#f92672">=</span>question, context<span style="color:#f92672">=</span>context)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">15</span>     response <span style="color:#f92672">=</span> get_llm_model()<span style="color:#f92672">.</span>invoke([{<span style="color:#e6db74">&#34;role&#34;</span>: <span style="color:#e6db74">&#34;user&#34;</span>, <span style="color:#e6db74">&#34;content&#34;</span>: prompt}])
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">16</span>     <span style="color:#66d9ef">return</span> {<span style="color:#e6db74">&#34;messages&#34;</span>: [response]}</span></span></code></pre></div><p>在上述代码中，第12、13行分别是从全局状态中取用户问题和检索内容，其对应的索引序号请根据实际情况获取。同时，这里 <code>state[&quot;messages&quot;][-3].content</code> 表示最后一次的用户问题，因为用户问题可能会被改写；而如果是<code>state[&quot;messages&quot;][0].content</code> 则表示原始问题。</p>
+<p>进一步，可以通过如下用例来测试：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#ae81ff">1</span> <span style="color:#66d9ef">if</span> __name__ <span style="color:#f92672">==</span> <span style="color:#e6db74">&#39;__main__&#39;</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">2</span>     input <span style="color:#f92672">=</span> {<span style="color:#e6db74">&#34;messages&#34;</span>: convert_to_messages(
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">3</span>             [{<span style="color:#e6db74">&#34;role&#34;</span>: <span style="color:#e6db74">&#34;user&#34;</span>, <span style="color:#e6db74">&#34;content&#34;</span>: <span style="color:#e6db74">&#34;郭靖是谁？它的出生背景是什么？&#34;</span>},
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">4</span>              {<span style="color:#e6db74">&#34;role&#34;</span>: <span style="color:#e6db74">&#34;assistant&#34;</span>,<span style="color:#e6db74">&#34;content&#34;</span>: <span style="color:#e6db74">&#34;&#34;</span>,<span style="color:#e6db74">&#34;tool_calls&#34;</span>: [
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">5</span>                   {<span style="color:#e6db74">&#34;id&#34;</span>: <span style="color:#e6db74">&#34;1&#34;</span>,<span style="color:#e6db74">&#34;name&#34;</span>: <span style="color:#e6db74">&#34;retrieve_context&#34;</span>,<span style="color:#e6db74">&#34;args&#34;</span>: {<span style="color:#e6db74">&#34;query&#34;</span>: <span style="color:#e6db74">&#34;郭靖 出生背景&#34;</span>}}]},
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">6</span>              {<span style="color:#e6db74">&#34;role&#34;</span>: <span style="color:#e6db74">&#34;tool&#34;</span>,<span style="color:#e6db74">&#34;content&#34;</span>: <span style="color:#e6db74">&#34;郭靖之母是浙江临安人，江南六怪都是嘉兴左近人氏，他从小听惯了江南口音，...&#34;</span>,
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">7</span>               <span style="color:#e6db74">&#34;tool_call_id&#34;</span>: <span style="color:#e6db74">&#34;1&#34;</span>}])}
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">8</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">9</span>     response <span style="color:#f92672">=</span> generate_answer(input)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">10</span>     response[<span style="color:#e6db74">&#34;messages&#34;</span>][<span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>]<span style="color:#f92672">.</span>pretty_print() 
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">11</span> 		 <span style="color:#75715e"># 郭靖之母是浙江临安人，江南六怪都是嘉兴左近人氏，郭靖从小听惯了江南口音。</span></span></span></code></pre></div><h2 id="4107-搭建完整流程">4.10.7 搭建完整流程<a class="anchor" href="#4107-%e6%90%ad%e5%bb%ba%e5%ae%8c%e6%95%b4%e6%b5%81%e7%a8%8b">#</a></h2>
+<p>在完成上述所有过程以后，我们再将其按照图4-12中的流程构造成一个完整的图，实现代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#ae81ff">1</span> <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">get_workflow</span>():
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">2</span>     workflow <span style="color:#f92672">=</span> StateGraph(MessagesState)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">3</span>     workflow<span style="color:#f92672">.</span>add_node(<span style="color:#e6db74">&#34;decide&#34;</span>, generate_query_or_respond)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">4</span>     workflow<span style="color:#f92672">.</span>add_node(<span style="color:#e6db74">&#34;my_retrieve&#34;</span>, ToolNode([retrieve_context]))
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">5</span>     workflow<span style="color:#f92672">.</span>add_node(<span style="color:#e6db74">&#34;rewrite_question&#34;</span>, rewrite_question)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">6</span>     workflow<span style="color:#f92672">.</span>add_node(<span style="color:#e6db74">&#34;generate_answer&#34;</span>, generate_answer)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">7</span>     workflow<span style="color:#f92672">.</span>add_edge(START, <span style="color:#e6db74">&#34;decide&#34;</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">8</span>     workflow<span style="color:#f92672">.</span>add_conditional_edges( <span style="color:#e6db74">&#34;decide&#34;</span>, tools_condition, 
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">9</span>         {<span style="color:#e6db74">&#34;tools&#34;</span>: <span style="color:#e6db74">&#34;my_retrieve&#34;</span>, END: END})  
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">10</span>     workflow<span style="color:#f92672">.</span>add_conditional_edges(<span style="color:#e6db74">&#34;my_retrieve&#34;</span>, grade_documents)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">11</span>     workflow<span style="color:#f92672">.</span>add_edge(<span style="color:#e6db74">&#34;generate_answer&#34;</span>, END)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">12</span>     workflow<span style="color:#f92672">.</span>add_edge(<span style="color:#e6db74">&#34;rewrite_question&#34;</span>, <span style="color:#e6db74">&#34;decide&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">13</span>     graph <span style="color:#f92672">=</span> workflow<span style="color:#f92672">.</span>compile()
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">14</span>     <span style="color:#66d9ef">return</span> graph</span></span></code></pre></div><p>在上述代码中，第3~6行是注册所有的节点。第8~9行是添加 &ldquo;decide&rdquo; 节点到到工具调用的条件边，其中  <code>tools_condition</code> 是LangGraph 内置的一个条件判断函数，它的返回值只有<code>&quot;tools&quot;</code>（表示继续走 <code>ToolNode</code>）和<code>&quot;__end__&quot;</code>（表示结束），作用是检测上一个节点的输出中是否包含 <code>tool_calls</code> 字段，有则路由到工具节点，没有则直接结束，这样就省去了我们自己写这个判断逻辑。</p>
+<p>在完成 <code>get_workflow()</code> 函数实现以后，我们依旧可以得到其对应的可视化图结构，如图4-13所示。</p>
+<div align=center><img width="300" src="/images/agent/202605061931.jpg"/> </div><center>图 4-15 RAG Agent 图结构可视化</center>
+<p>从图4-13可以清晰地看到整个推理链路，模型先判断是否需要检索，然后发起检索 、检索结果通过质量评估、直接生成最终回答，每一步都有明确的节点标识，排查问题时也比黑盒的 <code>create_agent</code> 直观很多。</p>
+<p>进一步，可以通过如下方式来运行整个工程，代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#ae81ff">1</span> <span style="color:#66d9ef">if</span> __name__ <span style="color:#f92672">==</span> <span style="color:#e6db74">&#39;__main__&#39;</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">2</span>     agent <span style="color:#f92672">=</span> get_workflow()
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">3</span>     vector_store <span style="color:#f92672">=</span> get_vector_store()
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">4</span>     config <span style="color:#f92672">=</span> RunnableConfig(configurable<span style="color:#f92672">=</span>{<span style="color:#e6db74">&#34;vector_store&#34;</span>: vector_store, <span style="color:#e6db74">&#34;k&#34;</span>: <span style="color:#ae81ff">20</span>, <span style="color:#e6db74">&#34;top_n&#34;</span>: <span style="color:#ae81ff">3</span>})
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">5</span>     input <span style="color:#f92672">=</span> {<span style="color:#e6db74">&#34;messages&#34;</span>: convert_to_messages([{<span style="color:#e6db74">&#34;role&#34;</span>: <span style="color:#e6db74">&#34;user&#34;</span>,<span style="color:#e6db74">&#34;</span>
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">6</span>             content<span style="color:#e6db74">&#34;: &#34;</span>郭靖和杨康是什么关系<span style="color:#960050;background-color:#1e0010">？</span><span style="color:#e6db74">&#34;,}])}</span>
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">7</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">8</span>     <span style="color:#66d9ef">for</span> event <span style="color:#f92672">in</span> agent<span style="color:#f92672">.</span>stream(input, config<span style="color:#f92672">=</span>config):
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">9</span>         <span style="color:#66d9ef">for</span> node, update <span style="color:#f92672">in</span> event<span style="color:#f92672">.</span>items():
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">10</span>             print(<span style="color:#e6db74">f</span><span style="color:#e6db74">&#34;#### 节点 </span><span style="color:#e6db74">{</span>node<span style="color:#e6db74">}</span><span style="color:#e6db74"> 处理完毕&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">11</span>             update[<span style="color:#e6db74">&#34;messages&#34;</span>][<span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>]<span style="color:#f92672">.</span>pretty_print()
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">12</span>             print(<span style="color:#e6db74">&#34;</span><span style="color:#ae81ff">\n\n</span><span style="color:#e6db74">&#34;</span>)</span></span></code></pre></div><p>上述代码运行结束以后，将会看到类似如下结果：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#75715e">#### 节点 decide 处理完毕</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">==================================</span> Ai Message <span style="color:#f92672">==================================</span>
+</span></span><span style="display:flex;"><span>Tool Calls:
+</span></span><span style="display:flex;"><span>  retrieve_context (call_d695fdcdbf324d13bf2336)
+</span></span><span style="display:flex;"><span> Call ID: call_d695fdcdbf324d13bf2336
+</span></span><span style="display:flex;"><span>  Args:
+</span></span><span style="display:flex;"><span>    query: 郭靖和杨康的关系
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e">#### 节点 my_retrieve 处理完毕</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">=================================</span> Tool Message <span style="color:#f92672">=================================</span>
+</span></span><span style="display:flex;"><span>Name: retrieve_context
+</span></span><span style="display:flex;"><span>杨康边哭边说<span style="color:#960050;background-color:#1e0010">，</span>涕泪滂沱<span style="color:#960050;background-color:#1e0010">，</span>断断续续地道<span style="color:#960050;background-color:#1e0010">：“</span>我是郭靖的结义兄弟<span style="color:#f92672">...</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e">#### 节点 generate_answer 处理完毕</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">==================================</span> Ai Message <span style="color:#f92672">==================================</span>
+</span></span><span style="display:flex;"><span>郭靖和杨康是结义兄弟<span style="color:#960050;background-color:#1e0010">。</span>两人在郭啸天的灵前对拜八拜<span style="color:#960050;background-color:#1e0010">，</span>正式结为兄弟<span style="color:#960050;background-color:#1e0010">，</span>郭靖先出世一个月<span style="color:#960050;background-color:#1e0010">，</span>为兄<span style="color:#960050;background-color:#1e0010">，</span>杨康为弟<span style="color:#960050;background-color:#1e0010">。</span></span></span></code></pre></div><p>同时，还可以通过如下方式来输出每经过一个节点时的全局状态 <code>MessagesState</code>，代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#ae81ff">1</span> <span style="color:#66d9ef">if</span> __name__ <span style="color:#f92672">==</span> <span style="color:#e6db74">&#39;__main__&#39;</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">2</span>     <span style="color:#f92672">...</span>  
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">3</span>     <span style="color:#66d9ef">for</span> chunk <span style="color:#f92672">in</span> agent<span style="color:#f92672">.</span>stream(
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">4</span>             input,
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">5</span>             stream_mode<span style="color:#f92672">=</span>[<span style="color:#e6db74">&#34;updates&#34;</span>, <span style="color:#e6db74">&#34;values&#34;</span>], config<span style="color:#f92672">=</span>config):  <span style="color:#75715e"># 同时获取节点名称和完整状态</span>
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">6</span>         mode, data <span style="color:#f92672">=</span> chunk
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">7</span>         <span style="color:#66d9ef">if</span> mode <span style="color:#f92672">==</span> <span style="color:#e6db74">&#34;updates&#34;</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">8</span>             node_name <span style="color:#f92672">=</span> list(data<span style="color:#f92672">.</span>keys())[<span style="color:#ae81ff">0</span>]  <span style="color:#75715e"># 当前执行的节点名称</span>
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">9</span>             print(<span style="color:#e6db74">&#34;=&#34;</span> <span style="color:#f92672">*</span> <span style="color:#ae81ff">50</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">10</span>             print(<span style="color:#e6db74">f</span><span style="color:#e6db74">&#34;当前节点：</span><span style="color:#e6db74">{</span>node_name<span style="color:#e6db74">}</span><span style="color:#e6db74">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">11</span>         <span style="color:#66d9ef">elif</span> mode <span style="color:#f92672">==</span> <span style="color:#e6db74">&#34;values&#34;</span>:
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">12</span>             print(<span style="color:#e6db74">f</span><span style="color:#e6db74">&#34;当前消息数量：</span><span style="color:#e6db74">{</span>len(data[<span style="color:#e6db74">&#39;messages&#39;</span>])<span style="color:#e6db74">}</span><span style="color:#e6db74">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">13</span>             print(<span style="color:#e6db74">&#34;当前全局消息：&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">14</span>             print(data)</span></span></code></pre></div><p>上述代码运行结束以后，将会看到类似如下结果：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span>  当前消息数量<span style="color:#960050;background-color:#1e0010">：</span><span style="color:#ae81ff">1</span>
+</span></span><span style="display:flex;"><span>  当前全局消息<span style="color:#960050;background-color:#1e0010">：</span>
+</span></span><span style="display:flex;"><span>  {<span style="color:#e6db74">&#39;messages&#39;</span>: [HumanMessage(content<span style="color:#f92672">=</span><span style="color:#e6db74">&#39;郭靖和杨康是什么关系？&#39;</span><span style="color:#f92672">...</span>)]}
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">==================================================</span>
+</span></span><span style="display:flex;"><span>  当前节点<span style="color:#960050;background-color:#1e0010">：</span>decide
+</span></span><span style="display:flex;"><span>  当前消息数量<span style="color:#960050;background-color:#1e0010">：</span><span style="color:#ae81ff">2</span>
+</span></span><span style="display:flex;"><span>  当前全局消息<span style="color:#960050;background-color:#1e0010">：</span>
+</span></span><span style="display:flex;"><span>  {<span style="color:#e6db74">&#39;messages&#39;</span>: [HumanMessage(content<span style="color:#f92672">=</span><span style="color:#e6db74">&#39;郭靖和杨康是什么关系？&#39;</span>, <span style="color:#f92672">...</span>),
+</span></span><span style="display:flex;"><span>                AIMessage(content<span style="color:#f92672">=</span><span style="color:#e6db74">&#39;&#39;</span>, <span style="color:#f92672">...</span> tool_calls<span style="color:#f92672">=</span>[{<span style="color:#e6db74">&#39;args&#39;</span>: {<span style="color:#e6db74">&#39;query&#39;</span>: <span style="color:#e6db74">&#39;郭靖和杨康的关系&#39;</span>},<span style="color:#f92672">...</span>)
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">==================================================</span>
+</span></span><span style="display:flex;"><span>  当前节点<span style="color:#960050;background-color:#1e0010">：</span>my_retrieve
+</span></span><span style="display:flex;"><span>  当前消息数量<span style="color:#960050;background-color:#1e0010">：</span><span style="color:#ae81ff">3</span>
+</span></span><span style="display:flex;"><span>  当前全局消息<span style="color:#960050;background-color:#1e0010">：</span>
+</span></span><span style="display:flex;"><span>  {<span style="color:#e6db74">&#39;messages&#39;</span>: [HumanMessage(content<span style="color:#f92672">=</span><span style="color:#e6db74">&#39;郭靖和杨康是什么关系？&#39;</span><span style="color:#f92672">...</span>),
+</span></span><span style="display:flex;"><span>                AIMessage(content<span style="color:#f92672">=</span><span style="color:#e6db74">&#39;&#39;</span>,<span style="color:#f92672">...</span> tool_calls<span style="color:#f92672">=</span>[{<span style="color:#e6db74">&#39;args&#39;</span>: {<span style="color:#e6db74">&#39;query&#39;</span>: <span style="color:#e6db74">&#39;郭靖和杨康的关系&#39;</span>},<span style="color:#f92672">...</span>),
+</span></span><span style="display:flex;"><span>                ToolMessage(content<span style="color:#f92672">=</span><span style="color:#e6db74">&#39;杨康边哭边说，涕泪滂沱，断断..., artifact=...)]}</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">==================================================</span>
+</span></span><span style="display:flex;"><span>  当前节点<span style="color:#960050;background-color:#1e0010">：</span>generate_answer
+</span></span><span style="display:flex;"><span>  当前消息数量<span style="color:#960050;background-color:#1e0010">：</span><span style="color:#ae81ff">4</span>
+</span></span><span style="display:flex;"><span>  当前全局消息<span style="color:#960050;background-color:#1e0010">：</span>
+</span></span><span style="display:flex;"><span>  {
+</span></span><span style="display:flex;"><span>  <span style="color:#e6db74">&#39;messages&#39;</span>: [HumanMessage(content<span style="color:#f92672">=</span><span style="color:#e6db74">&#39;郭靖和杨康是什么关系？&#39;</span><span style="color:#f92672">...</span>),
+</span></span><span style="display:flex;"><span>               AIMessage(content<span style="color:#f92672">=</span><span style="color:#e6db74">&#39;&#39;</span>,<span style="color:#f92672">...</span> tool_calls<span style="color:#f92672">=</span>[{<span style="color:#e6db74">&#39;args&#39;</span>: {<span style="color:#e6db74">&#39;query&#39;</span>: <span style="color:#e6db74">&#39;郭靖和杨康的关系&#39;</span>},<span style="color:#f92672">...</span>),
+</span></span><span style="display:flex;"><span>               ToolMessage(content<span style="color:#f92672">=</span><span style="color:#e6db74">&#39;杨康边哭边说，涕泪滂沱，断断..., artifact=...),</span>
+</span></span><span style="display:flex;"><span>               AIMessage(content<span style="color:#f92672">=</span><span style="color:#e6db74">&#39;郭靖和杨康是结义兄弟。两人在郭啸天的灵前对拜八拜，正式结为..}</span></span></span></code></pre></div><p>根据以上输出结果便能够清晰地看到每经过一个节点处理以后，全局状态  <code>MessagesState</code> 到底是如何改变的。</p>
+<p>同时，这里还有一个值得思考的问题：如果用户问的是&quot;孙悟空是谁&quot;，而知识库里完全没有相关内容，这个系统会陷入&quot;检索、评估不相关、改写、再检索、评估不相关……&ldquo;的无限循环吗？大家可以想一想该如何给这个循环加一个退出条件，欢迎在评论区聊聊。</p>
+<p>在下一章内容中，我们将介绍如何给 RAG 加上记忆机制，让它能够跨对话保留上下文。</p>
+<h1 id="参考">参考<a class="anchor" href="#%e5%8f%82%e8%80%83">#</a></h1>
+<p>[1] <a href="https://docs.langchain.com/oss/python/langgraph/agentic-rag.md">https://docs.langchain.com/oss/python/langgraph/agentic-rag.md</a></p>
+<p>[2] <a href="https://python.langchain.com/docs/concepts/messages/">https://python.langchain.com/docs/concepts/messages/</a></p>
+</article>
+ 
+      
+
+      <footer class="book-footer">
+        
+  <div class="flex flex-wrap justify-between">
+
+<div>
+
+</div>
+
+<div>
+
+</div>
+
+</div>
+
+<div class="flex flex-wrap justify-between">
+    <span>
+    
+      <a href="/agent/chapter04/43af483460574e48/" class="flex align-center">
+        <img src="/icons/backward.svg" class="book-icon" alt="Backward" />
+        <span>4.9 LangGraph 基本概念介绍</span>
+      </a>
+    
+    </span>
+    <span>
+    
+      <a href="/dl/70e5f9cdbedc4b2c/" class="flex align-center">
+        <span>学习思维导图</span>
+        <img src="/icons/forward.svg" class="book-icon" alt="Forward" />
+      </a>
+    
+    </span>
+  </div>
+
+ 
+        
+  
+  <div class="book-comments">
+
+</div>
+  
+ 
+        
+  <link rel="stylesheet" href="/katex/katex.min.css" />
+  <script defer src="/katex/katex.min.js"></script>
+  <script defer src="/katex/auto-render.min.js"></script>
+  
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        if (window.renderMathInElement) {
+          renderMathInElement(
+            document.querySelector(".book-page"),
+            Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
+          );
+        }
+      });
+    </script>
+  
+
+
+        
+  
+ 
+        
+  
+    <script>(function(){document.querySelectorAll("pre:has(code)").forEach(e=>{e.addEventListener("click",e.focus),e.addEventListener("copy",function(t){if(t.preventDefault(),navigator.clipboard){const t=window.getSelection().toString()||e.textContent;navigator.clipboard.writeText(t)}})})})()</script>
+  
+
+      </footer>
+
+      <label for="menu-control" class="hidden book-menu-overlay"></label>
+    </div>
+
+    
+  
+  <aside class="book-toc">
+    <div class="book-toc-content">
+      
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#4101-流程构建思路">4.10.1 流程构建思路</a></li>
+    <li><a href="#4102-检索工具改造">4.10.2 检索工具改造</a></li>
+    <li><a href="#4103-决策节点实现">4.10.3 决策节点实现</a></li>
+    <li><a href="#4104-检索文档质量评估">4.10.4 检索文档质量评估</a></li>
+    <li><a href="#4105-问题重写">4.10.5 问题重写</a></li>
+    <li><a href="#4106-生成最终回答">4.10.6 生成最终回答</a></li>
+    <li><a href="#4107-搭建完整流程">4.10.7 搭建完整流程</a></li>
+  </ul>
+</nav>
+
+
+
+    </div>
+  </aside>
+  
+ 
+  </main>
+
+  
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

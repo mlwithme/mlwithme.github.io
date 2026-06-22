@@ -1,0 +1,3805 @@
+<!DOCTYPE html>
+<html lang="zh_CN" dir="ltr">
+<head>
+  <!--
+Made with Book Theme
+https://github.com/alex-shpak/hugo-book
+-->
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="4.5 复杂问题拆解与ReAct框架# 在上一小节的内容中，我们直接使用了 LangChain 中的 create_agent() 来创建智能体，并让它能够在一次请求中多次调用工具，所以即便是一个用户请求中包含有多个子问题，它也能够持续迭代，直到得到最终的答案。站在使用者的角度来看，这一切似乎合情合理也应该如此，但如果继续追问其内部机制就会发现，这背后对应的正是 Agent 领域中最重要的一类思想。
+4.5.1 ReAct 出现的动机# 在不借助工具的情况下，大模型处理问题的方式通常可以概括为“一次输入，一次输出”。用户给出问题后，模型基于参数中已经学到的知识直接生成答案，其流程如图4-6所示。
+图 4-6 大模型处理问题流程 根据图4-6可知，虽然这种方式在简单问答中已经足够有效，但它有两个明显的局限：
+第一，模型无法主动接触外部世界。如果问题依赖最新信息、私有知识库或运行时环境，模型即使具备较强的语言能力，也只能依赖训练阶段形成的内部记忆进行猜测。当然，这一点我们已经可以通过外部工具来解决。
+第二，模型虽然可以在一次回答中表现出一定的推理能力，但这种推理是“封闭的”。一旦中间某一步判断错误，后续答案往往会沿着错误方向继续展开，从而产生事实性幻觉或不可靠的结论。
+例如，在上一节内容的示例中，当用户提出“本书主角是谁？找到主角后，再继续说明他的出生背景”这类问题时，模型实际上需要完成多个连续动作：先判断是否需要检索，再提炼一个更适合搜索的查询词，然后读取检索结果，最后根据新得到的信息决定下一步还要不要继续查找。显然，这已经不是一次性生成答案能够稳定完成的任务，而是一个需要多轮中间决策的过程。
+为了解决这一问题，研究员姚顺雨[1] 在2022年10月提出了推理与行动（Reasoning and Acting, ReAct）决策框架，它的核心出发点是不要强迫模型一次性给出最终答案，而是允许模型在推理过程中主动采取行动，并根据行动得到的观察结果继续推进后续推理，直到得到最终答案。
+4.5.2 ReAct 决策原理# 在推理与行动中，“推理”表示模型围绕当前任务形成的中间思考，“行动”则表示模型基于当前判断采取的动作，例如搜索、查询数据库、调用函数或访问工具。如果只看定义，ReAct 很容易被误解为让模型先想一想再调工具，但它真正重要的地方不在于“先想后做”这4个字，而在于它把复杂任务拆成了一个可以反复循环的过程，如图4-7所示。
+图 4-7 ReAct 决策原理 在图4-7中，思考（Thought）表示模型的中间推理，它的作用是分解目标、规划下一步或解释为什么要调用某个工具；行动（Action）表示模型决定执行的动作，通常对应一次工具调用；观察（Observation）表示工具执行后的结果，它会重新进入上下文，成为下一轮推理的依据。
+进一步，根据图4-7可知，在整个循环中模型并不会立即产生最终答案，而是首先会根据当前任务形成一个中间判断，决定是否需要调用某个工具，即思考过程；然后调用工具并返回结果，即行动过程；其次根据工具返回的结果修正后续判断，即观察过程；最后在条件满足时再输出最终答案。也正因为如此，我们在第4.4节看到的 RAG Agent 才能够先拆问题、再检索、再继续检索，最后组合出完整答案。
+从这个角度看，ReAct 并不是一个单独的工具调用技巧，而是一种围绕推理驱动行动、行动反哺推理而组织起来的任务求解范式。
+4.5.3 ReAct 的基本执行流程# 为了更直观地理解这一点，我们来看一个简单的例子。假设用户的问题是：“《哈利波特》的作者出生在哪个国家？” 此时模型如果直接回答，完全可能因为模型能力或记忆偏差或知识不完整而出错，但是在 ReAct 框架下，更合理的过程应当是：
+Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要先确认《哈利波特》的作者是谁。 Action: Search(&#34;哈利波特 作者&#34;) Observation: J.K. Rowling Thought: 现在我已经知道作者，需要继续查询她的出生国家。 Action: Search(&#34;J.K. Rowling 出生国家&#34;) Observation: United Kingdom Final Answer: 《哈利波特》的作者是 J.K. Rowling，出生于英国。从上述过程可以看出，ReAct 并不要求模型一开始就具备完整答案，而是允许它在中途通过行动补充信息。这样模型的推理不再完全依赖内部记忆，而是可以在关键节点引入外部证据；其次，整个求解过程具有更强的可解释性，我们不仅看到最终答案，也能看到模型为何进行了某一步操作，以及这一步操作返回了什么信息。
+">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
+<meta name="color-scheme" content="light dark"><meta property="og:url" content="https://mlwithme.github.io/agent/chapter04/b7e49268357a4bca/">
+	<meta property="og:site_name" content="《从零学AI指南手册》">
+	<meta property="og:title" content="4.5 复杂问题拆解与ReAct框架">
+	<meta property="og:description" content="4.5 复杂问题拆解与ReAct框架# 在上一小节的内容中，我们直接使用了 LangChain 中的 create_agent() 来创建智能体，并让它能够在一次请求中多次调用工具，所以即便是一个用户请求中包含有多个子问题，它也能够持续迭代，直到得到最终的答案。站在使用者的角度来看，这一切似乎合情合理也应该如此，但如果继续追问其内部机制就会发现，这背后对应的正是 Agent 领域中最重要的一类思想。
+4.5.1 ReAct 出现的动机# 在不借助工具的情况下，大模型处理问题的方式通常可以概括为“一次输入，一次输出”。用户给出问题后，模型基于参数中已经学到的知识直接生成答案，其流程如图4-6所示。
+图 4-6 大模型处理问题流程 根据图4-6可知，虽然这种方式在简单问答中已经足够有效，但它有两个明显的局限：
+第一，模型无法主动接触外部世界。如果问题依赖最新信息、私有知识库或运行时环境，模型即使具备较强的语言能力，也只能依赖训练阶段形成的内部记忆进行猜测。当然，这一点我们已经可以通过外部工具来解决。
+第二，模型虽然可以在一次回答中表现出一定的推理能力，但这种推理是“封闭的”。一旦中间某一步判断错误，后续答案往往会沿着错误方向继续展开，从而产生事实性幻觉或不可靠的结论。
+例如，在上一节内容的示例中，当用户提出“本书主角是谁？找到主角后，再继续说明他的出生背景”这类问题时，模型实际上需要完成多个连续动作：先判断是否需要检索，再提炼一个更适合搜索的查询词，然后读取检索结果，最后根据新得到的信息决定下一步还要不要继续查找。显然，这已经不是一次性生成答案能够稳定完成的任务，而是一个需要多轮中间决策的过程。
+为了解决这一问题，研究员姚顺雨[1] 在2022年10月提出了推理与行动（Reasoning and Acting, ReAct）决策框架，它的核心出发点是不要强迫模型一次性给出最终答案，而是允许模型在推理过程中主动采取行动，并根据行动得到的观察结果继续推进后续推理，直到得到最终答案。
+4.5.2 ReAct 决策原理# 在推理与行动中，“推理”表示模型围绕当前任务形成的中间思考，“行动”则表示模型基于当前判断采取的动作，例如搜索、查询数据库、调用函数或访问工具。如果只看定义，ReAct 很容易被误解为让模型先想一想再调工具，但它真正重要的地方不在于“先想后做”这4个字，而在于它把复杂任务拆成了一个可以反复循环的过程，如图4-7所示。
+图 4-7 ReAct 决策原理 在图4-7中，思考（Thought）表示模型的中间推理，它的作用是分解目标、规划下一步或解释为什么要调用某个工具；行动（Action）表示模型决定执行的动作，通常对应一次工具调用；观察（Observation）表示工具执行后的结果，它会重新进入上下文，成为下一轮推理的依据。
+进一步，根据图4-7可知，在整个循环中模型并不会立即产生最终答案，而是首先会根据当前任务形成一个中间判断，决定是否需要调用某个工具，即思考过程；然后调用工具并返回结果，即行动过程；其次根据工具返回的结果修正后续判断，即观察过程；最后在条件满足时再输出最终答案。也正因为如此，我们在第4.4节看到的 RAG Agent 才能够先拆问题、再检索、再继续检索，最后组合出完整答案。
+从这个角度看，ReAct 并不是一个单独的工具调用技巧，而是一种围绕推理驱动行动、行动反哺推理而组织起来的任务求解范式。
+4.5.3 ReAct 的基本执行流程# 为了更直观地理解这一点，我们来看一个简单的例子。假设用户的问题是：“《哈利波特》的作者出生在哪个国家？” 此时模型如果直接回答，完全可能因为模型能力或记忆偏差或知识不完整而出错，但是在 ReAct 框架下，更合理的过程应当是：
+Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要先确认《哈利波特》的作者是谁。 Action: Search(&#34;哈利波特 作者&#34;) Observation: J.K. Rowling Thought: 现在我已经知道作者，需要继续查询她的出生国家。 Action: Search(&#34;J.K. Rowling 出生国家&#34;) Observation: United Kingdom Final Answer: 《哈利波特》的作者是 J.K. Rowling，出生于英国。从上述过程可以看出，ReAct 并不要求模型一开始就具备完整答案，而是允许它在中途通过行动补充信息。这样模型的推理不再完全依赖内部记忆，而是可以在关键节点引入外部证据；其次，整个求解过程具有更强的可解释性，我们不仅看到最终答案，也能看到模型为何进行了某一步操作，以及这一步操作返回了什么信息。">
+	<meta property="og:locale" content="zh_CN">
+	<meta property="og:type" content="article">
+		<meta property="article:section" content="agent">
+
+
+	<meta itemprop="name" content="4.5 复杂问题拆解与ReAct框架">
+	<meta itemprop="description" content="4.5 复杂问题拆解与ReAct框架# 在上一小节的内容中，我们直接使用了 LangChain 中的 create_agent() 来创建智能体，并让它能够在一次请求中多次调用工具，所以即便是一个用户请求中包含有多个子问题，它也能够持续迭代，直到得到最终的答案。站在使用者的角度来看，这一切似乎合情合理也应该如此，但如果继续追问其内部机制就会发现，这背后对应的正是 Agent 领域中最重要的一类思想。
+4.5.1 ReAct 出现的动机# 在不借助工具的情况下，大模型处理问题的方式通常可以概括为“一次输入，一次输出”。用户给出问题后，模型基于参数中已经学到的知识直接生成答案，其流程如图4-6所示。
+图 4-6 大模型处理问题流程 根据图4-6可知，虽然这种方式在简单问答中已经足够有效，但它有两个明显的局限：
+第一，模型无法主动接触外部世界。如果问题依赖最新信息、私有知识库或运行时环境，模型即使具备较强的语言能力，也只能依赖训练阶段形成的内部记忆进行猜测。当然，这一点我们已经可以通过外部工具来解决。
+第二，模型虽然可以在一次回答中表现出一定的推理能力，但这种推理是“封闭的”。一旦中间某一步判断错误，后续答案往往会沿着错误方向继续展开，从而产生事实性幻觉或不可靠的结论。
+例如，在上一节内容的示例中，当用户提出“本书主角是谁？找到主角后，再继续说明他的出生背景”这类问题时，模型实际上需要完成多个连续动作：先判断是否需要检索，再提炼一个更适合搜索的查询词，然后读取检索结果，最后根据新得到的信息决定下一步还要不要继续查找。显然，这已经不是一次性生成答案能够稳定完成的任务，而是一个需要多轮中间决策的过程。
+为了解决这一问题，研究员姚顺雨[1] 在2022年10月提出了推理与行动（Reasoning and Acting, ReAct）决策框架，它的核心出发点是不要强迫模型一次性给出最终答案，而是允许模型在推理过程中主动采取行动，并根据行动得到的观察结果继续推进后续推理，直到得到最终答案。
+4.5.2 ReAct 决策原理# 在推理与行动中，“推理”表示模型围绕当前任务形成的中间思考，“行动”则表示模型基于当前判断采取的动作，例如搜索、查询数据库、调用函数或访问工具。如果只看定义，ReAct 很容易被误解为让模型先想一想再调工具，但它真正重要的地方不在于“先想后做”这4个字，而在于它把复杂任务拆成了一个可以反复循环的过程，如图4-7所示。
+图 4-7 ReAct 决策原理 在图4-7中，思考（Thought）表示模型的中间推理，它的作用是分解目标、规划下一步或解释为什么要调用某个工具；行动（Action）表示模型决定执行的动作，通常对应一次工具调用；观察（Observation）表示工具执行后的结果，它会重新进入上下文，成为下一轮推理的依据。
+进一步，根据图4-7可知，在整个循环中模型并不会立即产生最终答案，而是首先会根据当前任务形成一个中间判断，决定是否需要调用某个工具，即思考过程；然后调用工具并返回结果，即行动过程；其次根据工具返回的结果修正后续判断，即观察过程；最后在条件满足时再输出最终答案。也正因为如此，我们在第4.4节看到的 RAG Agent 才能够先拆问题、再检索、再继续检索，最后组合出完整答案。
+从这个角度看，ReAct 并不是一个单独的工具调用技巧，而是一种围绕推理驱动行动、行动反哺推理而组织起来的任务求解范式。
+4.5.3 ReAct 的基本执行流程# 为了更直观地理解这一点，我们来看一个简单的例子。假设用户的问题是：“《哈利波特》的作者出生在哪个国家？” 此时模型如果直接回答，完全可能因为模型能力或记忆偏差或知识不完整而出错，但是在 ReAct 框架下，更合理的过程应当是：
+Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要先确认《哈利波特》的作者是谁。 Action: Search(&#34;哈利波特 作者&#34;) Observation: J.K. Rowling Thought: 现在我已经知道作者，需要继续查询她的出生国家。 Action: Search(&#34;J.K. Rowling 出生国家&#34;) Observation: United Kingdom Final Answer: 《哈利波特》的作者是 J.K. Rowling，出生于英国。从上述过程可以看出，ReAct 并不要求模型一开始就具备完整答案，而是允许它在中途通过行动补充信息。这样模型的推理不再完全依赖内部记忆，而是可以在关键节点引入外部证据；其次，整个求解过程具有更强的可解释性，我们不仅看到最终答案，也能看到模型为何进行了某一步操作，以及这一步操作返回了什么信息。">
+	<meta itemprop="wordCount" content="245">
+
+<title>4.5 复杂问题拆解与ReAct框架 • 《从零学AI指南手册》</title>
+<link rel="icon" href="/favicon.png" >
+<link rel="manifest" href="/manifest.json">
+<link rel="canonical" href="https://mlwithme.github.io/agent/chapter04/b7e49268357a4bca/">
+<link rel="stylesheet" href="/book.min.6097ccf1d338ddfaa037d2f96478059a71fa573d0f917d128bab595efea338ca.css" integrity="sha256-YJfM8dM43fqgN9L5ZHgFmnH6Vz0PkX0Si6tZXv6jOMo=" crossorigin="anonymous">
+
+
+  <script defer type="module" src="/en.search.min.ffaad769e546b38d39820301bb9e5c193822f7bf0f46a855602e4e14707802e0.js" integrity="sha256-/6rXaeVGs405ggMBu55cGTgi978PRqhVYC5OFHB4AuA=" crossorigin="anonymous"></script>
+
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-23SZ6E8VY7"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-23SZ6E8VY7');
+</script>
+<script async src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
+
+</head>
+<body dir="ltr" class="book-kind-page book-type-agent">
+  <input type="checkbox" class="hidden toggle" id="menu-control" />
+  <input type="checkbox" class="hidden toggle" id="toc-control" />
+  <main class="container flex">
+    
+<aside class="book-menu">
+  <div class="book-menu-content">
+    
+  <nav>
+<h2 class="book-brand">
+  <a class="flex align-center" href="/"><span>《从零学AI指南手册》</span>
+  </a>
+</h2>
+
+
+<div class="book-search hidden">
+  <input id="book-search-input" type="text" 
+    placeholder="Search"
+    aria-label="Search"
+    maxlength="64" />
+  <div class="book-search-spinner hidden"></div>
+  <ul id="book-search-results"></ul>
+</div>
+<script>document.querySelector(".book-search").classList.remove("hidden")</script>
+
+
+
+
+
+
+
+
+
+
+  
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a>
+      大模型Agent开发</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-253e26e732e57a78f635dcf47df3d0a3" class="toggle"  />
+    <label for="section-253e26e732e57a78f635dcf47df3d0a3" class="flex">
+      <a role="button" class="">
+        第 1 章 RAG 基础概念</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/454f0942222e471e/" class="">
+      1.1 RAG 提出背景</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/d7623d619f884b25/" class="">
+      1.2 RAG 流程概览</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-810ee5a2a3a24c9b7c25ab5324ae7db7" class="toggle"  />
+    <label for="section-810ee5a2a3a24c9b7c25ab5324ae7db7" class="flex">
+      <a role="button" class="">
+        第 2 章 大模型接入与使用</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/d43adfc00df54515/" class="">
+      2.1 SDK 介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/8b9059fde1d644a4/" class="">
+      2.2 现代大模型中的 SDK</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/95d3214ab80b4769/" class="">
+      2.3 DashScope 接口体系</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/b9843c089d654494/" class="">
+      2.4 千问大模型接入与使用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ed1727f01d0e40dc9b7961b72e42160e" class="toggle"  />
+    <label for="section-ed1727f01d0e40dc9b7961b72e42160e" class="flex">
+      <a role="button" class="">
+        第 3 章 文档标准化与语义检索</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/7f4af6d48c5b425c/" class="">
+      3.1 文档加载与标准化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/572ba4c9cb114677/" class="">
+      3.2 常见文本切分策略</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/06e588cd33fa4454/" class="">
+      3.3 向量数据库选择</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/ff27306c0d7b4387/" class="">
+      3.4 Qwen3 Embedding 模型介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/303035851c5e42f2/" class="">
+      3.5 语义搜索引擎构建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/e1328cb23e8c412b/" class="">
+      3.6  Milvus 模块解析</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-caaf9d8eb5e5559f7ca8bb11c41da71a" class="toggle" checked />
+    <label for="section-caaf9d8eb5e5559f7ca8bb11c41da71a" class="flex">
+      <a role="button" class="">
+        第 4 章 RAG 与 Agent</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/4c646aa07f3b4b74/" class="">
+      4.1 两步式 RAG 搭建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/5c35e934bab24ac3/" class="">
+      4.2 Function Calling 概念介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/88ff352fc22e4cd6/" class="">
+      4.3 LangChain 中的 Tool 修饰器</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/83fe26536a5d4b6e/" class="">
+      4.4 RAG Agent 原理与搭建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/b7e49268357a4bca/" class="active">
+      4.5 复杂问题拆解与ReAct框架</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/469b5963f2ca4799/" class="">
+      4.6 RAG 中的两阶段索引</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/10fb92a6c5484039/" class="">
+      4.7 Qwen3 Reranking 原理与使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/45d286aec1bc4d66/" class="">
+      4.8 基于两阶段索引的 RAG Agent 搭建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/43af483460574e48/" class="">
+      4.9 LangGraph 基本概念介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/0def4564f3aa455d/" class="">
+      4.10  基于 LangGraph 构建自定义 RAG Agent</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a>
+      深度学习</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/70e5f9cdbedc4b2c/" class="">
+      学习思维导图</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-a9b664bcf9e1dab8add449268565f466" class="toggle"  />
+    <label for="section-a9b664bcf9e1dab8add449268565f466" class="flex">
+      <a role="button" class="">
+        第 1 章 深度学习简介</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/647eb9c607874e3a/" class="">
+      1.1 深度学习的发展阶段</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/f31da36a6f444afe/" class="">
+      1.2 深度学习中的关键人物</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/da9fa13021e64f3c/" class="">
+      1.3 深度学习框架介绍</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-e6e0db5d4bc28bd97dfe8d5210249e63" class="toggle"  />
+    <label for="section-e6e0db5d4bc28bd97dfe8d5210249e63" class="flex">
+      <a role="button" class="">
+        第 2 章 环境配置</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/a0c5d1e0de0140cb/" class="">
+      2.1 体系结构介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/04f07b9246984577/" class="">
+      2.2 深度学习环境安装</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/5bf6454673194c67/" class="">
+      2.3 开发环境安装配置</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-0a2ca47f15332c8b06ae83247328edb4" class="toggle"  />
+    <label for="section-0a2ca47f15332c8b06ae83247328edb4" class="flex">
+      <a role="button" class="">
+        第 3 章 深度学习基础</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/75c5fa7839174c16/" class="">
+      3.1 线性回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/ca16f8cb6df444a6/" class="">
+      3.2 线性回归简洁实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/97e1da1143cd4554/" class="">
+      3.3 梯度下降与反向传播</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/7b865de988ea422c/" class="">
+      3.4 从零实现回归模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/18fdd1deff424a16/" class="">
+      3.5 从逻辑回归到Softmax回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/55967b0f642b4509/" class="">
+      3.6 Softmax回归简洁实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/381bbd56509e4a6f/" class="">
+      3.7 从零实现分类模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/2c061df4435d4928/" class="">
+      3.8 回归模型评估指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/e3442eff254e473c/" class="">
+      3.9 分类模型评估指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/307f927c8a1245c5/" class="">
+      3.10 过拟合与正则化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/bcb64de5aa404f18/" class="">
+      3.11 超参数与交叉验证</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/66dd7425cdd04565/" class="">
+      3.12 激活函数</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/0d3dacfff4c04794/" class="">
+      3.13 多标签分类</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-95b7e7417bf2b821a1b760975d3acc22" class="toggle"  />
+    <label for="section-95b7e7417bf2b821a1b760975d3acc22" class="flex">
+      <a role="button" class="">
+        第 4 章 卷积神经网络</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/102e183e8be94f46/" class="">
+      4.1 卷积的概念</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/5b3e3152e9e54f4f/" class="">
+      4.2 卷积的计算过程</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/762f60de801a4ccd/" class="">
+      4.3 填充和池化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/c8af5d84174b4420/" class="">
+      4.4 LeNet5网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/de007462967e4701/" class="">
+      4.5 AlexNet网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/f084f181c3554082/" class="">
+      4.6 VGG网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/911b961cc5d949b6/" class="">
+      4.7 NIN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/47da186baf3e4a0b/" class="">
+      4.8 GoogLeNet网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/da16c61397454b2c/" class="">
+      4.9 ResNet网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/1c24468824274650/" class="">
+      4.10 DenseNet网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-17076fe90a2d84e207bbd0c829983325" class="toggle"  />
+    <label for="section-17076fe90a2d84e207bbd0c829983325" class="flex">
+      <a role="button" class="">
+        第 5 章 模型训练与复用</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/4557a6f03dec4475/" class="">
+      5.1 参数及日志管理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/e7c4c6da085148d0/" class="">
+      5.2 Tensorboard可视化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/27387966672c45ed/" class="">
+      5.3 模型的保存与复用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/211b26bdd8f248ac/" class="">
+      5.4 模型的迁移学习</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/345c1b72253043cb/" class="">
+      5.5 开源模型复用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/c912dda030c946d9/" class="">
+      5.6 多GPU训练</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/f065af80f3844b0b/" class="">
+      5.7 数据预处理与缓存</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-2d091d454d5c3f03f5e0a202c37cc226" class="toggle"  />
+    <label for="section-2d091d454d5c3f03f5e0a202c37cc226" class="flex">
+      <a role="button" class="">
+        第 6 章 模型优化方法</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/cc35bb112783410e/" class="">
+      6.1 学习率调度器</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/fc024c283f164849/" class="">
+      6.2 梯度裁剪</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/27ed3ed136e24092/" class="">
+      6.3 批归一化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/fdd5ba4b41f74a0e/" class="">
+      6.4 层归一化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/9246afed14eb436c/" class="">
+      6.5 组归一化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/fcbc66ad051a4336/" class="">
+      6.6 动量法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/8b83d654898c40a2/" class="">
+      6.7 AdaGrad算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/078f2394980d41d2/" class="">
+      6.8 AdaDelta算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/28ad7fb39987447e/" class="">
+      6.9 Adam算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/4b81b8d39721434d/" class="">
+      6.10 初始化方法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f2f78ba4851131558fc284d927542d28" class="toggle"  />
+    <label for="section-f2f78ba4851131558fc284d927542d28" class="flex">
+      <a role="button" class="">
+        第 7 章 循环神经网络</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/88ba4e03337b4233/" class="">
+      7.1 RNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/ec8ff069aadc49b9/" class="">
+      7.2 时序数据</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/b4c5ddcc9e904238/" class="">
+      7.3 LSTM网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/4112672112224dc1/" class="">
+      7.4 GRU网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/b6e5ccb6cd064f74/" class="">
+      7.5 BiRNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/4bf3ecf7b21e45fb/" class="">
+      7.6 CharRNN网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-49992cff6143e64ae5d7f2209dcfb054" class="toggle"  />
+    <label for="section-49992cff6143e64ae5d7f2209dcfb054" class="flex">
+      <a role="button" class="">
+        第 8 章 时序与模型融合</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/2be88fbc08a5418f/" class="">
+      8.1 TextCNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/9023d1f822a54226/" class="">
+      8.2 TextRNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/9edd7db2d439402f/" class="">
+      8.3 CNN-RNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/19c2b86e85f2461e/" class="">
+      8.4 ConvLSTM网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/1e6da79bf7b44c20/" class="">
+      8.5 3DCNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/5f426a9190e7454b/" class="">
+      8.6 STResNet网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ca07c572acb4d7fd40854f5b367c247b" class="toggle"  />
+    <label for="section-ca07c572acb4d7fd40854f5b367c247b" class="flex">
+      <a role="button" class="">
+        第 9 章 自然语言处理</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/e0cb9a7aae814045/" class="">
+      9.1 自然语言处理介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/d4703d990f8d4fed/" class="">
+      9.2 Word2Vec词向量</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/1bb6351b01a2479b/" class="">
+      9.3 Word2Vec训练与使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/40a8a1146d934c55/" class="">
+      9.4 GloVe词向量</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/c6aa1405b8cf46d8/" class="">
+      9.5 词向量的微调使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/48c26d04b342452d/" class="">
+      9.6 fastText网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/03a0166e195f443f/" class="">
+      9.7 Seq2Seq网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/271bda16904544af/" class="">
+      9.8 序列模型评价指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/fefa60e0bc854a17/" class="">
+      9.9 NMT网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/5bcd8b0920414f34/" class="">
+      9.10 注意力机制</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/8a78e8213ee04aac/" class="">
+      9.11 含注意力的NMT网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/474ac7a1867d4b5e/" class="">
+      9.12 含注意力的RNN网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-8cdec04c2fd8683c5c7373c78d943528" class="toggle"  />
+    <label for="section-8cdec04c2fd8683c5c7373c78d943528" class="flex">
+      <a role="button" class="">
+        第10章 现代神经网络</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/7523731afc0241c0/" class="">
+      10.1 ELMo网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/4987d1044939480d/" class="">
+      10.2 Transformer网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/a469ed1a25e1498f/" class="">
+      10.3 Transformer结构</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/d50c490eef3b4565/" class="">
+      10.4 Transformer实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/f6c507b3d2d74f03/" class="">
+      10.5 Transformer对联模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/3aedea1d3f3e48dd/" class="">
+      10.6 BERT网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/82a1cd0def084620/" class="">
+      10.7 从零实现BERT</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/e736d3974ed0484c/" class="">
+      10.8 BERT文本分类模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/f5076cbadda84d4e/" class="">
+      10.9 BERT问题选择模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/25d9ef3d9b34472a/" class="">
+      10.10 BERT问题回答模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/64d3ec5593ec4b94/" class="">
+      10.11 BERT命名体识别模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/90ea8d3e090d48b4/" class="">
+      10.12 BERT从零训练</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/e36878dad7a647d8/" class="">
+      10.13 GPT-1模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/94dda9bbbc994913/" class="">
+      10.14 GPT-2与GPT-3模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/4af57a29308840de/" class="">
+      10.15 基于GPT-2的中文预训练模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/9f5c00cadde14d31/" class="">
+      10.16 InstructGPT与ChatGPT</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/050b54fd34ca480a/" class="">
+      10.17 ChatGPT与提示词工程</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/a90b0d71389b4d69/" class="">
+      10.18 百川大模型使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/40c1c9ade70c4ce7/" class="">
+      10.19 百川大模型实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/ea1b4cf8b40c4b05/" class="">
+      10.20 GPT-4与GPTs使用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a>
+      机器学习</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/43fc00b3809d4be6/" class="">
+      学习思维导图</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-0a3254d1ca9963fd6975aa5bc0b3edcc" class="toggle"  />
+    <label for="section-0a3254d1ca9963fd6975aa5bc0b3edcc" class="flex">
+      <a role="button" class="">
+        第 1 章 环境配置</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/baafb91f0af14a84/" class="">
+      1.1 安装使用Conda</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/7a01c403acd6488a/" class="">
+      1.2 开发环境安装配置</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-4569258198323c16bc8a634ea44fd5db" class="toggle"  />
+    <label for="section-4569258198323c16bc8a634ea44fd5db" class="flex">
+      <a role="button" class="">
+        第 2 章 线性回归</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/2414d4b6648d405a/" class="">
+      2.1 模型的建立与求解</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/3e9ba14da71f4fd3/" class="">
+      2.2 多变量线性回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/4a16c0dc82a84e78/" class="">
+      2.3 多项式回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/f8dea699983c48c6/" class="">
+      2.4 回归模型评估</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/df41c2e97f554e68/" class="">
+      2.5 梯度下降</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/71ef816e0005492d/" class="">
+      2.6 正态分布</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/803bee4f70be4dca/" class="">
+      2.7 目标函数推导</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-a6ca5e2f846ebd900d1a868e6718dc82" class="toggle"  />
+    <label for="section-a6ca5e2f846ebd900d1a868e6718dc82" class="flex">
+      <a role="button" class="">
+        第 3 章 逻辑回归</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/96d46b53aee14c3b/" class="">
+      3.1 模型的建立与求解</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/fac70083dd764141/" class="">
+      3.2 多分类任务</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/6d7cfd79ef304cbd/" class="">
+      3.3 常见的分类评估指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/2fdc655d00c74548/" class="">
+      3.4 目标函数推导</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/a4b61c5bbadd43a6/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-9f462f716bd0e46ef79984b356eeb5a2" class="toggle"  />
+    <label for="section-9f462f716bd0e46ef79984b356eeb5a2" class="flex">
+      <a role="button" class="">
+        第 4 章 模型的改善与泛化</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/2089400b28f54dd9/" class="">
+      4.1 基本概念</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/56b788b624cd4971/" class="">
+      4.2 特征标准化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/ca091dc393a84518/" class="">
+      4.3过拟合</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/5097d3b8c1144427/" class="">
+      4.4 正则化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/3c7eee1621d4480b/" class="">
+      4.5 偏差、方差与交叉验证</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/c5957e0753d04746/" class="">
+      4.6 实例分析手写体识别</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/a915e49586eb4426/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-327db48e4f4df6236855078634147679" class="toggle"  />
+    <label for="section-327db48e4f4df6236855078634147679" class="flex">
+      <a role="button" class="">
+        第 5 章 K近邻</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/7c610e923e754259/" class="">
+      5.1 K近邻思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/1a97571e0a6447ef/" class="">
+      5.2 K近邻原理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/d245bda107034e65/" class="">
+      5.3 sklearn接口与示例代码</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/24378571ce404d9c/" class="">
+      5.4 kd树构建与搜索</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/40f253b916f24038/" class="">
+      5.5 从零实现K近邻</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/76818d9e48944f8c/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-94d0a5f5555d92c51e0903b148e34993" class="toggle"  />
+    <label for="section-94d0a5f5555d92c51e0903b148e34993" class="flex">
+      <a role="button" class="">
+        第 6 章 文本特征与模型复用</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/e05b5928c41d4841/" class="">
+      6.1 词袋模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/de59bf74d753457e/" class="">
+      6 .2 基于K近邻算法的垃圾邮件分类</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/c6fdc78b49d44453/" class="">
+      6.3 考虑权重的词袋模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/825fde8589654b16/" class="">
+      6.4 词云图</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/8451cffe49f5477c/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-544be5d1e48c4fd8b33ba2f91964c6dd" class="toggle"  />
+    <label for="section-544be5d1e48c4fd8b33ba2f91964c6dd" class="flex">
+      <a role="button" class="">
+        第 7 章 朴素贝叶斯</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/faf303eb93a241d1/" class="">
+      7.1 朴素贝叶斯算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/842c7b8684c747d2/" class="">
+      7.2 贝叶斯估计</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/724bf42b09bb440e/" class="">
+      7.3 朴素贝叶斯实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/1a9deee1d5f042b5/" class="">
+      7.4 多项式朴素贝叶斯原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/5c27cdd8b3264f50/" class="">
+      7.5 高斯朴素贝叶斯原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/715b8eaf245f45f1/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-d1884c6b3e8f1260019220c57d615371" class="toggle"  />
+    <label for="section-d1884c6b3e8f1260019220c57d615371" class="flex">
+      <a role="button" class="">
+        第 8 章 决策树</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/690fe2be21834c2a/" class="">
+      8.1 决策树的基本思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/ee9ada9729124049/" class="">
+      8.2 决策树建模与可视化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/5887cf1408dd4c7f/" class="">
+      8.3 决策树生成之ID3与C4.5</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/87ba589d6c17434d/" class="">
+      8.4 决策树剪枝过程</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/34bc962c974646f4/" class="">
+      8.5 从零实现ID3与C4.5算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/c44682dbb3364be4/" class="">
+      8.6 连续型特征变量下决策树实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/4eead717a84a4dbf/" class="">
+      8.7 CART生成与剪枝算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/1c72d67dffc64dc9/" class="">
+      8.8 从零实现CART算法及剪枝示例</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/ae452792b2604e84/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-1f0a2178f0a580ba251c7da2649aa52f" class="toggle"  />
+    <label for="section-1f0a2178f0a580ba251c7da2649aa52f" class="flex">
+      <a role="button" class="">
+        第 9 章 集成学习与提升算法</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/9eff4004fd6c437d/" class="">
+      9.1 集成学习算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/18980c9f757e42c8/" class="">
+      9.2 随机森林</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/8a91b358b2f74d56/" class="">
+      9.3 泰坦尼克号生还预测</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/73f6914844f549f1/" class="">
+      9.4 AdaBoost原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/71fd0e44294e4abb/" class="">
+      9.5 MultiAdaBoost原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/f3c2341ce7d64f70/" class="">
+      9.6 Gradient Boost 原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/4f9b26d5b65541f5/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f63defd924ef7373144c8643a39fd7b2" class="toggle"  />
+    <label for="section-f63defd924ef7373144c8643a39fd7b2" class="flex">
+      <a role="button" class="">
+        第 10 章 支持向量机</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/dce7180d4eb047d7/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/515b54e2307a4c8a/" class="">
+      10.1 SVM思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/9c3862bc843c4179/" class="">
+      10.2 SVM线性不可分</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/fbdb6f8adace457d/" class="">
+      10.3 SVM原理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/1a3ffa363b1d4f83/" class="">
+      10.4 SVM中的软间隔</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/8b7a06412a9f4267/" class="">
+      10.5 拉格朗日乘数法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/40e977f0a2f84ac0/" class="">
+      10.6 对偶性与KKT条件</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/b18d45a772574ddb/" class="">
+      10.7 SVM优化问题</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/c53ed12f7bc04405/" class="">
+      10.8 SVM核函数原理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/26d9b2b328a849c2/" class="">
+      10.9 SMO算法求解SVM</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/215a1e15c0f2470d/" class="">
+      10.10 从零实现SVM分类算法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bdcc54d1c295c5cc69c9c851c02886ea" class="toggle"  />
+    <label for="section-bdcc54d1c295c5cc69c9c851c02886ea" class="flex">
+      <a role="button" class="">
+        第 11 章 聚类分析</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/f9d9305a55a548a1/" class="">
+      11.1 聚类算法的思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/e635df24de32487a/" class="">
+      11.2 Kmeans聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/e75b8efa232249ab/" class="">
+      11.3 Kmeans算法求解</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/60e49a33d1aa4f50/" class="">
+      11.4 从零实现Kmeans聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/c8b45d8a3d8c4cf4/" class="">
+      11.5 Kmeans&#43;&#43;聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/1ede2f3557d0438f/" class="">
+      11.6 聚类外部评价指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/e6a75df19f85498c/" class="">
+      11.7 加权Kmeans聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/c52cf7920f1d4636/" class="">
+      11.8 聚类内部评价指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/f95259c359b146ba/" class="">
+      11.9 聚类K值选取与分析</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/b85c1a858f7c4686/" class="">
+      11.10 基于密度的聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/2f01ba751d914336/" class="">
+      11.11 基于层次的聚类算法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bafa8c48214ccf62d333a6d0457c5f72" class="toggle"  />
+    <label for="section-bafa8c48214ccf62d333a6d0457c5f72" class="flex">
+      <a role="button" class="">
+        第 12 章 降维算法</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/9478de824edd44c6/" class="">
+      12.1 主成分分析</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/909356aa90fe456a/" class="">
+      12.2 基于核函数的主成分分析</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-d5f143889a719ce66d602e75b72bffb9" class="toggle"  />
+    <label for="section-d5f143889a719ce66d602e75b72bffb9" class="flex">
+      <a role="button" class="">
+        第 13 章 自训练与标签传播</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/8d71301c2e414efe/" class="">
+      13.1 Self-Training 自训练算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/87fdcf0be1c34644/" class="">
+      13.2 Label Propagation算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/7fc8b0fc47d2427c/" class="">
+      13.3 Label Spreading 算法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+
+
+
+
+
+
+
+
+
+
+
+
+</nav>
+
+
+
+
+  <script>(function(){var e=document.querySelector("aside .book-menu-content");addEventListener("beforeunload",function(){localStorage.setItem("menu.scrollTop",e.scrollTop)}),e.scrollTop=localStorage.getItem("menu.scrollTop")})()</script>
+
+
+
+  </div>
+</aside>
+ 
+
+    <div class="book-page">
+      <header class="book-header hidden">
+        
+  <div class="flex align-center justify-between">
+  <label for="menu-control">
+    <img src="/icons/menu.svg" class="book-icon" alt="Menu" />
+  </label>
+
+  <h3>4.5 复杂问题拆解与ReAct框架</h3>
+
+  <label for="toc-control">
+    
+    <img src="/icons/toc.svg" class="book-icon" alt="Table of Contents" />
+    
+  </label>
+</div>
+
+
+  
+  <aside class="hidden">
+    
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#451-react-出现的动机">4.5.1 ReAct 出现的动机</a></li>
+    <li><a href="#452-react-决策原理">4.5.2 ReAct 决策原理</a></li>
+    <li><a href="#453-react-的基本执行流程">4.5.3 ReAct 的基本执行流程</a></li>
+    <li><a href="#454-react-的实现方法">4.5.4 ReAct 的实现方法</a></li>
+    <li><a href="#455-langchain-中的-agent-与-react">4.5.5 LangChain 中的 Agent 与 ReAct</a></li>
+    <li><a href="#456-小结">4.5.6 小结</a></li>
+    <li><a href="#引用">引用</a></li>
+  </ul>
+</nav>
+
+
+
+  </aside>
+  
+ 
+      </header>
+
+      
+      
+  <article class="markdown book-article"><h1 id="45-复杂问题拆解与react框架">4.5 复杂问题拆解与ReAct框架<a class="anchor" href="#45-%e5%a4%8d%e6%9d%82%e9%97%ae%e9%a2%98%e6%8b%86%e8%a7%a3%e4%b8%8ereact%e6%a1%86%e6%9e%b6">#</a></h1>
+<p>在上一小节的内容中，我们直接使用了 LangChain 中的 <code>create_agent()</code> 来创建智能体，并让它能够在一次请求中多次调用工具，所以即便是一个用户请求中包含有多个子问题，它也能够持续迭代，直到得到最终的答案。站在使用者的角度来看，这一切似乎合情合理也应该如此，但如果继续追问其内部机制就会发现，这背后对应的正是 Agent 领域中最重要的一类思想。</p>
+<h2 id="451-react-出现的动机">4.5.1 ReAct 出现的动机<a class="anchor" href="#451-react-%e5%87%ba%e7%8e%b0%e7%9a%84%e5%8a%a8%e6%9c%ba">#</a></h2>
+<p>在不借助工具的情况下，大模型处理问题的方式通常可以概括为“一次输入，一次输出”。用户给出问题后，模型基于参数中已经学到的知识直接生成答案，其流程如图4-6所示。</p>
+<div align=center><img width="500" src="/images/agent/202606171929.jpg"/> </div><center>图 4-6 大模型处理问题流程</center>
+<p>根据图4-6可知，虽然这种方式在简单问答中已经足够有效，但它有两个明显的局限：</p>
+<p>第一，模型无法主动接触外部世界。如果问题依赖最新信息、私有知识库或运行时环境，模型即使具备较强的语言能力，也只能依赖训练阶段形成的内部记忆进行猜测。当然，这一点我们已经可以通过外部工具来解决。</p>
+<p>第二，模型虽然可以在一次回答中表现出一定的推理能力，但这种推理是“封闭的”。一旦中间某一步判断错误，后续答案往往会沿着错误方向继续展开，从而产生事实性幻觉或不可靠的结论。</p>
+<p>例如，在上一节内容的示例中，当用户提出“本书主角是谁？找到主角后，再继续说明他的出生背景”这类问题时，模型实际上需要完成多个连续动作：先判断是否需要检索，再提炼一个更适合搜索的查询词，然后读取检索结果，最后根据新得到的信息决定下一步还要不要继续查找。显然，这已经不是一次性生成答案能够稳定完成的任务，而是一个需要多轮中间决策的过程。</p>
+<p>为了解决这一问题，研究员姚顺雨[1] 在2022年10月提出了推理与行动（Reasoning and Acting, ReAct）决策框架，它的核心出发点是不要强迫模型一次性给出最终答案，而是允许模型在推理过程中主动采取行动，并根据行动得到的观察结果继续推进后续推理，直到得到最终答案。</p>
+<h2 id="452-react-决策原理">4.5.2 ReAct 决策原理<a class="anchor" href="#452-react-%e5%86%b3%e7%ad%96%e5%8e%9f%e7%90%86">#</a></h2>
+<p>在推理与行动中，“推理”表示模型围绕当前任务形成的中间思考，“行动”则表示模型基于当前判断采取的动作，例如搜索、查询数据库、调用函数或访问工具。如果只看定义，ReAct 很容易被误解为让模型先想一想再调工具，但它真正重要的地方不在于“先想后做”这4个字，而在于它把复杂任务拆成了一个可以反复循环的过程，如图4-7所示。</p>
+<div align=center><img width="500" src="/images/agent/202606171959.jpg"/> </div><center>图 4-7 ReAct 决策原理</center>
+<p>在图4-7中，思考（Thought）表示模型的中间推理，它的作用是分解目标、规划下一步或解释为什么要调用某个工具；行动（Action）表示模型决定执行的动作，通常对应一次工具调用；观察（Observation）表示工具执行后的结果，它会重新进入上下文，成为下一轮推理的依据。</p>
+<p>进一步，根据图4-7可知，在整个循环中模型并不会立即产生最终答案，而是首先会根据当前任务形成一个中间判断，决定是否需要调用某个工具，即思考过程；然后调用工具并返回结果，即行动过程；其次根据工具返回的结果修正后续判断，即观察过程；最后在条件满足时再输出最终答案。也正因为如此，我们在第4.4节看到的 RAG Agent 才能够先拆问题、再检索、再继续检索，最后组合出完整答案。</p>
+<p>从这个角度看，ReAct 并不是一个单独的工具调用技巧，而是一种围绕推理驱动行动、行动反哺推理而组织起来的任务求解范式。</p>
+<h2 id="453-react-的基本执行流程">4.5.3 ReAct 的基本执行流程<a class="anchor" href="#453-react-%e7%9a%84%e5%9f%ba%e6%9c%ac%e6%89%a7%e8%a1%8c%e6%b5%81%e7%a8%8b">#</a></h2>
+<p>为了更直观地理解这一点，我们来看一个简单的例子。假设用户的问题是：“《哈利波特》的作者出生在哪个国家？” 此时模型如果直接回答，完全可能因为模型能力或记忆偏差或知识不完整而出错，但是在 ReAct 框架下，更合理的过程应当是：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-text" data-lang="text"><span style="display:flex;"><span>Question: 《哈利波特》的作者出生在哪个国家？
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>Thought: 我需要先确认《哈利波特》的作者是谁。
+</span></span><span style="display:flex;"><span>Action: Search(&#34;哈利波特 作者&#34;)
+</span></span><span style="display:flex;"><span>Observation: J.K. Rowling
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>Thought: 现在我已经知道作者，需要继续查询她的出生国家。
+</span></span><span style="display:flex;"><span>Action: Search(&#34;J.K. Rowling 出生国家&#34;)
+</span></span><span style="display:flex;"><span>Observation: United Kingdom
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>Final Answer: 《哈利波特》的作者是 J.K. Rowling，出生于英国。</span></span></code></pre></div><p>从上述过程可以看出，ReAct 并不要求模型一开始就具备完整答案，而是允许它在中途通过行动补充信息。这样模型的推理不再完全依赖内部记忆，而是可以在关键节点引入外部证据；其次，整个求解过程具有更强的可解释性，我们不仅看到最终答案，也能看到模型为何进行了某一步操作，以及这一步操作返回了什么信息。</p>
+<p>进一步，需要注意的是 ReAct 与只强调连续思考的思维链（Chain of Thought, CoT） 存在明显差别。思维链的核心是把复杂问题拆解为多个推理步骤，但它依然停留在模型内部；而 ReAct 在推理链中加入了“行动”和“观察”，使得模型能够真正与外部环境交互。因此，前者更像是“在脑中推演”，后者则更像是“边推演边查证”。</p>
+<h2 id="454-react-的实现方法">4.5.4 ReAct 的实现方法<a class="anchor" href="#454-react-%e7%9a%84%e5%ae%9e%e7%8e%b0%e6%96%b9%e6%b3%95">#</a></h2>
+<p>从方法发展的角度看，最初的 ReAct 并不是一个复杂框架，而是一种提示词组织方式。也就是说并不用修改大模型本身，而是告诉模型遇到复杂任务时不要直接给答案，而要按照图4-7中的节奏输出。</p>
+<p>如下所示便是一个典型的 ReAct 提示词组织方式：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-shell" data-lang="shell"><span style="display:flex;"><span>请尽可能好地回答以下问题。同时，你可以使用以下工具：
+</span></span><span style="display:flex;"><span><span style="color:#f92672">{</span>tools<span style="color:#f92672">}</span>
+</span></span><span style="display:flex;"><span>请使用以下格式：
+</span></span><span style="display:flex;"><span>问题：用户输入的问题你必须回答
+</span></span><span style="display:flex;"><span>思考：你始终需要思考接下来应该做什么
+</span></span><span style="display:flex;"><span>行动：要采取的动作，但应当是 <span style="color:#f92672">[{</span>tool_names<span style="color:#f92672">}]</span> 中的一个
+</span></span><span style="display:flex;"><span>行动输入：该动作对应的输入
+</span></span><span style="display:flex;"><span>观察：该动作返回的结果
+</span></span><span style="display:flex;"><span>……（上述“思考/行动/行动输入/观察”可以重复 N 次）
+</span></span><span style="display:flex;"><span>思考：我现在知道最终答案了
+</span></span><span style="display:flex;"><span>最终答案：对原始输入问题的最终回答
+</span></span><span style="display:flex;"><span>开始！
+</span></span><span style="display:flex;"><span>问题：<span style="color:#f92672">{</span>input<span style="color:#f92672">}</span>
+</span></span><span style="display:flex;"><span>思考：<span style="color:#f92672">{</span>intermediate_state<span style="color:#f92672">}</span></span></span></code></pre></div><p>其中 <code>tools</code> 表示当前所有可用工具的定义信息，<code>tool_names</code> 表示每个工具对应的名称， <code>intermediate_state</code> 表示中间状态，记录模型已经思考过什么、调用过什么工具、工具返回了什么结果。</p>
+<p>在这种实现中，大模型真正输出的仍然只是文本。例如用户提问“上海今天的冷吗？”，模型根据上面的提示词先生成：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-text" data-lang="text"><span style="display:flex;"><span>Thought: 我需要查询天气
+</span></span><span style="display:flex;"><span>Action: get_weather(&#34;上海&#34;)</span></span></code></pre></div><p>随后，外部程序解析 <code>Action</code> 这一段文本，识别出要调用哪个工具，再由程序实际执行工具，拿到结果后补上一段新的上下文：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-text" data-lang="text"><span style="display:flex;"><span>Observation: 上海今天晴天，25 度</span></span></code></pre></div><p>然后把这段 <code>Observation</code> 连同之前的上下文拼接好再次送回模型，让模型继续生成下一步，即</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-shell" data-lang="shell"><span style="display:flex;"><span>请尽可能好地回答以下问题。同时，你可以使用以下工具：
+</span></span><span style="display:flex;"><span><span style="color:#f92672">{</span>tools<span style="color:#f92672">}</span>
+</span></span><span style="display:flex;"><span>请使用以下格式：
+</span></span><span style="display:flex;"><span>问题：用户输入的问题你必须回答
+</span></span><span style="display:flex;"><span>思考：你始终需要思考接下来应该做什么
+</span></span><span style="display:flex;"><span>行动：要采取的动作，但应当是 <span style="color:#f92672">[{</span>tool_names<span style="color:#f92672">}]</span> 中的一个
+</span></span><span style="display:flex;"><span>行动输入：该动作对应的输入
+</span></span><span style="display:flex;"><span>观察：该动作返回的结果
+</span></span><span style="display:flex;"><span>……（上述“思考/行动/行动输入/观察”可以重复 N 次）
+</span></span><span style="display:flex;"><span>思考：我现在知道最终答案了
+</span></span><span style="display:flex;"><span>最终答案：对原始输入问题的最终回答
+</span></span><span style="display:flex;"><span>开始！
+</span></span><span style="display:flex;"><span>问题：上海今天的冷吗？
+</span></span><span style="display:flex;"><span>思考：
+</span></span><span style="display:flex;"><span>Question: 上海今天的冷吗？
+</span></span><span style="display:flex;"><span>Thought: 我需要查询天气
+</span></span><span style="display:flex;"><span>Action: get_weather<span style="color:#f92672">(</span><span style="color:#e6db74">&#34;上海&#34;</span><span style="color:#f92672">)</span>
+</span></span><span style="display:flex;"><span>Observation: 上海今天晴天，25 度</span></span></code></pre></div><p>这种方式的意义在于，它第1次系统性地证明了即便不改动模型参数，只要设计好提示词与循环体也能让大模型表现出较稳定的多步推理与工具使用能力。</p>
+<p>当然，它也有明显的缺点，最突出的问题是格式脆弱。因为程序依赖对模型输出文本的解析，只要模型把 <code>Action:</code> 少写一个冒号，或者把参数格式写乱，整个执行流程就可能失败。也正因如此，后来的 Agent 框架开始逐步转向结构化的函数调用（Function Calling）机制。这里需要注意的一点是，ReAct 的提出早于函数调用，而函数调用的出现也正是为了解决上面这一问题。</p>
+<h2 id="455-langchain-中的-agent-与-react">4.5.5 LangChain 中的 Agent 与 ReAct<a class="anchor" href="#455-langchain-%e4%b8%ad%e7%9a%84-agent-%e4%b8%8e-react">#</a></h2>
+<p>理解了经典的 ReAct 之后，再回头来看我们前面已经使用过的 <code>create_agent()</code>，很多现象就会变得清晰起来。在今天的 LangChain 体系中通常不会再手工编写完整的&quot;思考-行动-观察&quot;提示词流程，然后再手动解析字符串并调用工具，更常见的做法是先把工具与模型绑定，再把它们交给 Agent 运行时统一调度。例如：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#ae81ff">1</span> <span style="color:#f92672">from</span> langchain.agents <span style="color:#f92672">import</span> create_agent
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">2</span> tools <span style="color:#f92672">=</span> [retrieve_context]
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">3</span> agent <span style="color:#f92672">=</span> create_agent(model<span style="color:#f92672">=</span>model, tools<span style="color:#f92672">=</span>tools, system_prompt<span style="color:#f92672">=</span>prompt)</span></span></code></pre></div><p>表面上看，这段代码只是创建了一个可以调用工具的智能体，但从执行机制上看它延续的仍然是 ReAct 的核心循环，只不过现代框架把行动和观察的表达形式做了工程化改造。因此如果去看 LangGraph 的运行图，会发现它和上面的 ReAct 流程图几乎是一一对应，只是思考过程被隐藏在模型内部推理中，行动被结构化函调调用替代了。这部分内容将在第4.10节内容中进行介绍，同时在第5.10节内容中我们也将基于 <code>create_agent</code> 来构建一个迷你版的 ChatGPT 个人助手。</p>
+<p>同时，这里需要注意的一点是，由于 <code>create_agent</code> 遵循了 ReAct 的求解范式，所以理论上整个过程可能会无限循环下去。如果提示词约束不够明确、模型能力不够稳定，或者工具定义不够清晰就可能出现反复调用、错误拆解或过度检索等问题，从而导致算力成本激增。因此我们在定义的时候可以显示指定最大循环步数，即</p>
+<pre tabindex="0"><code>1 create_agent(model).with_config(recursion_limit=100)</code></pre><p>在上述代码中，<code>recursion_limit=100</code> 表示最大循环步数为100次，如果不指定则默认允许的最大循环步数是 9999 步。</p>
+<h2 id="456-小结">4.5.6 小结<a class="anchor" href="#456-%e5%b0%8f%e7%bb%93">#</a></h2>
+<p>本节中，我们从前面已经使用过的 <code>create_agent()</code> 出发，回过头解释了它背后的方法论基础。可以看到，ReAct 的核心并不只是一个论文中的术语，而是一种非常具体的任务求解方式——让模型在推理过程中主动采取行动，再根据行动结果继续推理，直到得到最终答案。</p>
+<p>从发展历程上看，最初的 ReAct 主要依赖显式提示词和文本解析来完成循环，而在现代 LangChain 等框架中这一思想则被进一步工程化，表现为结构化函数调用、消息状态管理以及自动迭代执行。理解这一点以后，后续再去阅读后续更复杂的 LangGraph 流程编排、节点控制与自定义 Agent 设计，就会更加自然。</p>
+<h2 id="引用">引用<a class="anchor" href="#%e5%bc%95%e7%94%a8">#</a></h2>
+<p>[1] Yao S, Zhao J, Yu D, et al. ReAct: Synergizing Reasoning and Acting in Language Models. 2022.</p>
+<p>[2] <a href="https://reference.langchain.com/python/langchain-classic/agents/react/agent/create_react_agent">https://reference.langchain.com/python/langchain-classic/agents/react/agent/create_react_agent</a></p>
+</article>
+ 
+      
+
+      <footer class="book-footer">
+        
+  <div class="flex flex-wrap justify-between">
+
+<div>
+
+</div>
+
+<div>
+
+</div>
+
+</div>
+
+<div class="flex flex-wrap justify-between">
+    <span>
+    
+      <a href="/agent/chapter04/83fe26536a5d4b6e/" class="flex align-center">
+        <img src="/icons/backward.svg" class="book-icon" alt="Backward" />
+        <span>4.4 RAG Agent 原理与搭建</span>
+      </a>
+    
+    </span>
+    <span>
+    
+      <a href="/agent/chapter04/469b5963f2ca4799/" class="flex align-center">
+        <span>4.6 RAG 中的两阶段索引</span>
+        <img src="/icons/forward.svg" class="book-icon" alt="Forward" />
+      </a>
+    
+    </span>
+  </div>
+
+ 
+        
+  
+  <div class="book-comments">
+
+</div>
+  
+ 
+        
+  <link rel="stylesheet" href="/katex/katex.min.css" />
+  <script defer src="/katex/katex.min.js"></script>
+  <script defer src="/katex/auto-render.min.js"></script>
+  
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        if (window.renderMathInElement) {
+          renderMathInElement(
+            document.querySelector(".book-page"),
+            Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
+          );
+        }
+      });
+    </script>
+  
+
+
+        
+  
+ 
+        
+  
+    <script>(function(){document.querySelectorAll("pre:has(code)").forEach(e=>{e.addEventListener("click",e.focus),e.addEventListener("copy",function(t){if(t.preventDefault(),navigator.clipboard){const t=window.getSelection().toString()||e.textContent;navigator.clipboard.writeText(t)}})})})()</script>
+  
+
+      </footer>
+
+      <label for="menu-control" class="hidden book-menu-overlay"></label>
+    </div>
+
+    
+  
+  <aside class="book-toc">
+    <div class="book-toc-content">
+      
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#451-react-出现的动机">4.5.1 ReAct 出现的动机</a></li>
+    <li><a href="#452-react-决策原理">4.5.2 ReAct 决策原理</a></li>
+    <li><a href="#453-react-的基本执行流程">4.5.3 ReAct 的基本执行流程</a></li>
+    <li><a href="#454-react-的实现方法">4.5.4 ReAct 的实现方法</a></li>
+    <li><a href="#455-langchain-中的-agent-与-react">4.5.5 LangChain 中的 Agent 与 ReAct</a></li>
+    <li><a href="#456-小结">4.5.6 小结</a></li>
+    <li><a href="#引用">引用</a></li>
+  </ul>
+</nav>
+
+
+
+    </div>
+  </aside>
+  
+ 
+  </main>
+
+  
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

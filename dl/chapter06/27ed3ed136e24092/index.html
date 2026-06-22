@@ -1,0 +1,3937 @@
+<!DOCTYPE html>
+<html lang="zh_CN" dir="ltr">
+<head>
+  <!--
+Made with Book Theme
+https://github.com/alex-shpak/hugo-book
+-->
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="6.3 批归一化# 在前面两节内容中，我们详细介绍了如何通过学习率动态调整以及梯度裁剪策略来提高模型的效果，在接下来的几节内容中我们将开始陆续介绍一些能够加速模型收敛速度的优化方法。我们知道，在机器学习中一种常见的提高模型收敛速度的方法就是对输入特征进行标准化，例如将每一列特征维度的方差和均值分别标准化为0和1。虽然在深度学习中我们也能够采用这一策略，但这还远远不够。在本节内容中，我们将会介绍深度学习中使用最为广泛的，由谷歌于2015年发表在ICML上所介绍的一种标准化方法——批归一化（Batch Normalization, BN）[1]。
+6.3.1 批归一化动机# 在深度学习中，随着网络层数的加深越是越靠近输入层的权重参数其对应的梯度也将会越小（这是由反向传播的性质所决定，可见3.3节内容），所以这就导致靠近输出层的权重参数能够更容易的得到训练，而靠近输入层的权重参数则更新缓慢。也正是由于两端的权重参数在更新节奏上相差太大网络底部的参数更新不及时，使得顶部的参数每次都要根据底部的前向传播结果来重新适应数据的分布，从而加大了网络的训练难度。
+假设现在有式(6-10)所示这么一个网络 $$ \mathcal{L}=F_2(F_1(u,\Theta_1),\Theta_2)\tag{6-10} $$ 其中$F_1,F_2$为任意的两个非线性变换，$u$为原始的网络输入，$\Theta_1,\Theta_2$分别为两个网络层的参数。
+现在的目的是通过最小化$\mathcal{L}$来求得参数$\Theta_1,\Theta_2$的取值。此时，我们也可以将$F_2$的输入看成是$x=F_1(u,\Theta_1)$，那么根据式(6-10)有 $$ \mathcal{L}=F_2(x,\Theta_2)\tag{6-11} $$ 接着根据式(6-12)就可以完成参数$\Theta_2$的迭代求解 $$ \Theta_2\leftarrow\Theta_2-\alpha\frac{\partial F_2(x,\Theta_2)}{\partial \Theta_2}\tag{6-12} $$ 由式(6-12)可知，由于输入$u$的分布每次在经过网络层$F_1$之后都会发生改变，这意味着网络层$F_2$中的参数$\Theta_2$每次都需要重新来学习适应输入值$x$的分布。也就是说，尽管一开始对原始的输入$u$进行了标准化，但经历过一个网络层后它的分布就发生了改变，那么下一层又需要重新学习另外一种分布，这就意味着每一层其实都是在学习不同的分布。Batch Normalization的思想便是在神经网络中添加一层归一化操作，使得网络中每一层输入的分布都尽可能地接近标准高斯分布，从而减轻这种问题。
+6.3.2 批归一化原理# 1. 归一化原理
+假设现在有一个$d$维的网络层，其输出为$x=(x^{(1)},x^{(2)},...,x^{(d)})$，那么对于每一个维度都可以通过式(6-13)中的方法进行标准化 $$ \hat{x}^{(k)}=\frac{x^{(k)}-E[x^{(k)}]}{\sqrt{Var[x^{(k)}]}}\tag{6-13} $$其中，$E[x^{(k)}]$和$Var[x^{(k)}]$分别是第$k$个维度在所有样本上计算得到的期望和方差。
+但如果仅仅只是简单通过式(6-13)中的计算方法来对每个维度进行标准化，那么在某些情况下将会改变该维度原有的表示信息。例如在对Sigmoid激活函数的输入值进行标准化时，通过公式(6-13)标准化后的输入值可能只会趋于0附近，从而把Sigmoid变成了一个线性激活函数。为了解决这一问题，可以加入了一组学习的参数$\gamma^{(k)}$和$\beta^{(k)}$来对$\hat{x}^{(k)}$进行了一次线性变换，即 $$ y^{(k)}=\gamma^{(k)}\hat{x}^{(k)}&#43;\beta^{(k)}\tag{6-14} $$ 其中$y^{(k)}$就是最后得到的标准化结果，而$\gamma^{(k)}$和$\beta^{(k)}$也会随着网络中的权重参数一起训练，当且仅当$\gamma^{(k)}=\sqrt{Var[x^{(k)}]}$，$\beta^{(k)}=E[x^{(k)}]$时，公式(6-14)就变成了恒等变换，也就相当于没有进行标准化（如果网络确实需要的话）。
+2. 小批量归一化
+由于计算机硬件条件的限制等，我们不可能同时将所有的数据一次性输入到网络中进行训练，因此通常情况下都是输入小批量的样本到网络中进行训练，而这也是小批量归一化这个名字的由来。
+现假设现有一个样本数量为$m$的小批量数据$\mathcal{B}=\{x_1,x_2,\cdots, x_m\}$，同时由于BN是独立地对每个神经元的输出值进行标准化，这意味着每个神经元都有自己独立的参数，这里以对第$k$个神经元标准化为例进行介绍。具体的，对于整个BN的详细过程为
+①在小批量数据样本上根据式(6-15)计算第$k$个神经元输出结果的均值 $$ \mu_{\mathcal{B}}\leftarrow\frac{1}{m}\sum_{i=1}^mx_i\tag{6-15} $$ ②在小批量数据样本上根据式(6-16)计算第$k$个神经元输出结果的方差 $$ \sigma^2_{\mathcal{B}}\leftarrow\frac{1}{m}\sum_{i=1}^m(x_i-\mu_{\mathcal{B}})^2\tag{6-16} $$ ③根据式(6-17)以及$\mu_{\mathcal{B}}$和$\sigma^2_{\mathcal{B}}$对$x_i$进行标准化 $$ \hat{x}_i\leftarrow\frac{x_i-\mu_{\mathcal{B}}}{\sqrt{\sigma^2_{\mathcal{B}}&#43;\epsilon}}\tag{6-17} $$ ④根据式(6-18)对$\hat{x}_i$进行缩放和平移 $$ y_i\leftarrow \gamma\hat{x}_{i}&#43;\beta\equiv \text{BN}_{\gamma,\beta}(x_i)\tag{6-18} $$ 其中$\mu_{\mathcal{B}}$为在小批量样本$\mathcal{B}$上对$x_i$期望的估计，$\sigma^2_{\mathcal{B}}$为对$x_i$方差的估计，而$\hat{x}_i$则表示标准化后的结果，$y_i$表示线性变换后的结果，也就是最后真正需要的结果。同时，为了防止方差为0的情况在进行标准化时分母额外的加了一个很小的常数$\epsilon$。这里需要说明的是，$\mu_{\mathcal{B}}$和$\sigma^2_{\mathcal{B}}$并不是整个数据集真实的期望与方差，而仅仅只是根据采样的小批量样本估计得到。
+Batch Normalization在计算时的最后一步进行平移和缩放的原因如下：
+**恢复表示能力：**批归一化的过程中，输入数据会被标准化为均值为0、方差为1的分布。这种标准化虽然有助于加快训练速度和稳定性，但也可能改变网络层的表示能力。通过引入可学习的平移参数和缩放参数，网络可以在保持标准化效果的同时，恢复其表示能力。
+**适应不同数据分布：**每一层神经网络对数据的分布有特定的需求或偏好。通过平移和缩放，网络可以更灵活地调整和适应不同的数据分布，从而提高模型的表现能力。
+**避免对称性破坏：**如果没有平移和缩放参数，所有层的输出都会集中在同一个范围内，这可能会导致对称性问题，使得网络难以学习到复杂的特征。平移和缩放能够帮助网络打破这种对称性，提高学习效果。
+">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
+<meta name="color-scheme" content="light dark"><meta property="og:url" content="https://mlwithme.github.io/dl/chapter06/27ed3ed136e24092/">
+	<meta property="og:site_name" content="《从零学AI指南手册》">
+	<meta property="og:title" content="6.3 批归一化">
+	<meta property="og:description" content="6.3 批归一化# 在前面两节内容中，我们详细介绍了如何通过学习率动态调整以及梯度裁剪策略来提高模型的效果，在接下来的几节内容中我们将开始陆续介绍一些能够加速模型收敛速度的优化方法。我们知道，在机器学习中一种常见的提高模型收敛速度的方法就是对输入特征进行标准化，例如将每一列特征维度的方差和均值分别标准化为0和1。虽然在深度学习中我们也能够采用这一策略，但这还远远不够。在本节内容中，我们将会介绍深度学习中使用最为广泛的，由谷歌于2015年发表在ICML上所介绍的一种标准化方法——批归一化（Batch Normalization, BN）[1]。
+6.3.1 批归一化动机# 在深度学习中，随着网络层数的加深越是越靠近输入层的权重参数其对应的梯度也将会越小（这是由反向传播的性质所决定，可见3.3节内容），所以这就导致靠近输出层的权重参数能够更容易的得到训练，而靠近输入层的权重参数则更新缓慢。也正是由于两端的权重参数在更新节奏上相差太大网络底部的参数更新不及时，使得顶部的参数每次都要根据底部的前向传播结果来重新适应数据的分布，从而加大了网络的训练难度。
+假设现在有式(6-10)所示这么一个网络 $$ \mathcal{L}=F_2(F_1(u,\Theta_1),\Theta_2)\tag{6-10} $$ 其中$F_1,F_2$为任意的两个非线性变换，$u$为原始的网络输入，$\Theta_1,\Theta_2$分别为两个网络层的参数。
+现在的目的是通过最小化$\mathcal{L}$来求得参数$\Theta_1,\Theta_2$的取值。此时，我们也可以将$F_2$的输入看成是$x=F_1(u,\Theta_1)$，那么根据式(6-10)有 $$ \mathcal{L}=F_2(x,\Theta_2)\tag{6-11} $$ 接着根据式(6-12)就可以完成参数$\Theta_2$的迭代求解 $$ \Theta_2\leftarrow\Theta_2-\alpha\frac{\partial F_2(x,\Theta_2)}{\partial \Theta_2}\tag{6-12} $$ 由式(6-12)可知，由于输入$u$的分布每次在经过网络层$F_1$之后都会发生改变，这意味着网络层$F_2$中的参数$\Theta_2$每次都需要重新来学习适应输入值$x$的分布。也就是说，尽管一开始对原始的输入$u$进行了标准化，但经历过一个网络层后它的分布就发生了改变，那么下一层又需要重新学习另外一种分布，这就意味着每一层其实都是在学习不同的分布。Batch Normalization的思想便是在神经网络中添加一层归一化操作，使得网络中每一层输入的分布都尽可能地接近标准高斯分布，从而减轻这种问题。
+6.3.2 批归一化原理# 1. 归一化原理
+假设现在有一个$d$维的网络层，其输出为$x=(x^{(1)},x^{(2)},...,x^{(d)})$，那么对于每一个维度都可以通过式(6-13)中的方法进行标准化 $$ \hat{x}^{(k)}=\frac{x^{(k)}-E[x^{(k)}]}{\sqrt{Var[x^{(k)}]}}\tag{6-13} $$其中，$E[x^{(k)}]$和$Var[x^{(k)}]$分别是第$k$个维度在所有样本上计算得到的期望和方差。
+但如果仅仅只是简单通过式(6-13)中的计算方法来对每个维度进行标准化，那么在某些情况下将会改变该维度原有的表示信息。例如在对Sigmoid激活函数的输入值进行标准化时，通过公式(6-13)标准化后的输入值可能只会趋于0附近，从而把Sigmoid变成了一个线性激活函数。为了解决这一问题，可以加入了一组学习的参数$\gamma^{(k)}$和$\beta^{(k)}$来对$\hat{x}^{(k)}$进行了一次线性变换，即 $$ y^{(k)}=\gamma^{(k)}\hat{x}^{(k)}&#43;\beta^{(k)}\tag{6-14} $$ 其中$y^{(k)}$就是最后得到的标准化结果，而$\gamma^{(k)}$和$\beta^{(k)}$也会随着网络中的权重参数一起训练，当且仅当$\gamma^{(k)}=\sqrt{Var[x^{(k)}]}$，$\beta^{(k)}=E[x^{(k)}]$时，公式(6-14)就变成了恒等变换，也就相当于没有进行标准化（如果网络确实需要的话）。
+2. 小批量归一化
+由于计算机硬件条件的限制等，我们不可能同时将所有的数据一次性输入到网络中进行训练，因此通常情况下都是输入小批量的样本到网络中进行训练，而这也是小批量归一化这个名字的由来。
+现假设现有一个样本数量为$m$的小批量数据$\mathcal{B}=\{x_1,x_2,\cdots, x_m\}$，同时由于BN是独立地对每个神经元的输出值进行标准化，这意味着每个神经元都有自己独立的参数，这里以对第$k$个神经元标准化为例进行介绍。具体的，对于整个BN的详细过程为
+①在小批量数据样本上根据式(6-15)计算第$k$个神经元输出结果的均值 $$ \mu_{\mathcal{B}}\leftarrow\frac{1}{m}\sum_{i=1}^mx_i\tag{6-15} $$ ②在小批量数据样本上根据式(6-16)计算第$k$个神经元输出结果的方差 $$ \sigma^2_{\mathcal{B}}\leftarrow\frac{1}{m}\sum_{i=1}^m(x_i-\mu_{\mathcal{B}})^2\tag{6-16} $$ ③根据式(6-17)以及$\mu_{\mathcal{B}}$和$\sigma^2_{\mathcal{B}}$对$x_i$进行标准化 $$ \hat{x}_i\leftarrow\frac{x_i-\mu_{\mathcal{B}}}{\sqrt{\sigma^2_{\mathcal{B}}&#43;\epsilon}}\tag{6-17} $$ ④根据式(6-18)对$\hat{x}_i$进行缩放和平移 $$ y_i\leftarrow \gamma\hat{x}_{i}&#43;\beta\equiv \text{BN}_{\gamma,\beta}(x_i)\tag{6-18} $$ 其中$\mu_{\mathcal{B}}$为在小批量样本$\mathcal{B}$上对$x_i$期望的估计，$\sigma^2_{\mathcal{B}}$为对$x_i$方差的估计，而$\hat{x}_i$则表示标准化后的结果，$y_i$表示线性变换后的结果，也就是最后真正需要的结果。同时，为了防止方差为0的情况在进行标准化时分母额外的加了一个很小的常数$\epsilon$。这里需要说明的是，$\mu_{\mathcal{B}}$和$\sigma^2_{\mathcal{B}}$并不是整个数据集真实的期望与方差，而仅仅只是根据采样的小批量样本估计得到。
+Batch Normalization在计算时的最后一步进行平移和缩放的原因如下：
+**恢复表示能力：**批归一化的过程中，输入数据会被标准化为均值为0、方差为1的分布。这种标准化虽然有助于加快训练速度和稳定性，但也可能改变网络层的表示能力。通过引入可学习的平移参数和缩放参数，网络可以在保持标准化效果的同时，恢复其表示能力。
+**适应不同数据分布：**每一层神经网络对数据的分布有特定的需求或偏好。通过平移和缩放，网络可以更灵活地调整和适应不同的数据分布，从而提高模型的表现能力。
+**避免对称性破坏：**如果没有平移和缩放参数，所有层的输出都会集中在同一个范围内，这可能会导致对称性问题，使得网络难以学习到复杂的特征。平移和缩放能够帮助网络打破这种对称性，提高学习效果。">
+	<meta property="og:locale" content="zh_CN">
+	<meta property="og:type" content="article">
+		<meta property="article:section" content="dl">
+
+
+	<meta itemprop="name" content="6.3 批归一化">
+	<meta itemprop="description" content="6.3 批归一化# 在前面两节内容中，我们详细介绍了如何通过学习率动态调整以及梯度裁剪策略来提高模型的效果，在接下来的几节内容中我们将开始陆续介绍一些能够加速模型收敛速度的优化方法。我们知道，在机器学习中一种常见的提高模型收敛速度的方法就是对输入特征进行标准化，例如将每一列特征维度的方差和均值分别标准化为0和1。虽然在深度学习中我们也能够采用这一策略，但这还远远不够。在本节内容中，我们将会介绍深度学习中使用最为广泛的，由谷歌于2015年发表在ICML上所介绍的一种标准化方法——批归一化（Batch Normalization, BN）[1]。
+6.3.1 批归一化动机# 在深度学习中，随着网络层数的加深越是越靠近输入层的权重参数其对应的梯度也将会越小（这是由反向传播的性质所决定，可见3.3节内容），所以这就导致靠近输出层的权重参数能够更容易的得到训练，而靠近输入层的权重参数则更新缓慢。也正是由于两端的权重参数在更新节奏上相差太大网络底部的参数更新不及时，使得顶部的参数每次都要根据底部的前向传播结果来重新适应数据的分布，从而加大了网络的训练难度。
+假设现在有式(6-10)所示这么一个网络 $$ \mathcal{L}=F_2(F_1(u,\Theta_1),\Theta_2)\tag{6-10} $$ 其中$F_1,F_2$为任意的两个非线性变换，$u$为原始的网络输入，$\Theta_1,\Theta_2$分别为两个网络层的参数。
+现在的目的是通过最小化$\mathcal{L}$来求得参数$\Theta_1,\Theta_2$的取值。此时，我们也可以将$F_2$的输入看成是$x=F_1(u,\Theta_1)$，那么根据式(6-10)有 $$ \mathcal{L}=F_2(x,\Theta_2)\tag{6-11} $$ 接着根据式(6-12)就可以完成参数$\Theta_2$的迭代求解 $$ \Theta_2\leftarrow\Theta_2-\alpha\frac{\partial F_2(x,\Theta_2)}{\partial \Theta_2}\tag{6-12} $$ 由式(6-12)可知，由于输入$u$的分布每次在经过网络层$F_1$之后都会发生改变，这意味着网络层$F_2$中的参数$\Theta_2$每次都需要重新来学习适应输入值$x$的分布。也就是说，尽管一开始对原始的输入$u$进行了标准化，但经历过一个网络层后它的分布就发生了改变，那么下一层又需要重新学习另外一种分布，这就意味着每一层其实都是在学习不同的分布。Batch Normalization的思想便是在神经网络中添加一层归一化操作，使得网络中每一层输入的分布都尽可能地接近标准高斯分布，从而减轻这种问题。
+6.3.2 批归一化原理# 1. 归一化原理
+假设现在有一个$d$维的网络层，其输出为$x=(x^{(1)},x^{(2)},...,x^{(d)})$，那么对于每一个维度都可以通过式(6-13)中的方法进行标准化 $$ \hat{x}^{(k)}=\frac{x^{(k)}-E[x^{(k)}]}{\sqrt{Var[x^{(k)}]}}\tag{6-13} $$其中，$E[x^{(k)}]$和$Var[x^{(k)}]$分别是第$k$个维度在所有样本上计算得到的期望和方差。
+但如果仅仅只是简单通过式(6-13)中的计算方法来对每个维度进行标准化，那么在某些情况下将会改变该维度原有的表示信息。例如在对Sigmoid激活函数的输入值进行标准化时，通过公式(6-13)标准化后的输入值可能只会趋于0附近，从而把Sigmoid变成了一个线性激活函数。为了解决这一问题，可以加入了一组学习的参数$\gamma^{(k)}$和$\beta^{(k)}$来对$\hat{x}^{(k)}$进行了一次线性变换，即 $$ y^{(k)}=\gamma^{(k)}\hat{x}^{(k)}&#43;\beta^{(k)}\tag{6-14} $$ 其中$y^{(k)}$就是最后得到的标准化结果，而$\gamma^{(k)}$和$\beta^{(k)}$也会随着网络中的权重参数一起训练，当且仅当$\gamma^{(k)}=\sqrt{Var[x^{(k)}]}$，$\beta^{(k)}=E[x^{(k)}]$时，公式(6-14)就变成了恒等变换，也就相当于没有进行标准化（如果网络确实需要的话）。
+2. 小批量归一化
+由于计算机硬件条件的限制等，我们不可能同时将所有的数据一次性输入到网络中进行训练，因此通常情况下都是输入小批量的样本到网络中进行训练，而这也是小批量归一化这个名字的由来。
+现假设现有一个样本数量为$m$的小批量数据$\mathcal{B}=\{x_1,x_2,\cdots, x_m\}$，同时由于BN是独立地对每个神经元的输出值进行标准化，这意味着每个神经元都有自己独立的参数，这里以对第$k$个神经元标准化为例进行介绍。具体的，对于整个BN的详细过程为
+①在小批量数据样本上根据式(6-15)计算第$k$个神经元输出结果的均值 $$ \mu_{\mathcal{B}}\leftarrow\frac{1}{m}\sum_{i=1}^mx_i\tag{6-15} $$ ②在小批量数据样本上根据式(6-16)计算第$k$个神经元输出结果的方差 $$ \sigma^2_{\mathcal{B}}\leftarrow\frac{1}{m}\sum_{i=1}^m(x_i-\mu_{\mathcal{B}})^2\tag{6-16} $$ ③根据式(6-17)以及$\mu_{\mathcal{B}}$和$\sigma^2_{\mathcal{B}}$对$x_i$进行标准化 $$ \hat{x}_i\leftarrow\frac{x_i-\mu_{\mathcal{B}}}{\sqrt{\sigma^2_{\mathcal{B}}&#43;\epsilon}}\tag{6-17} $$ ④根据式(6-18)对$\hat{x}_i$进行缩放和平移 $$ y_i\leftarrow \gamma\hat{x}_{i}&#43;\beta\equiv \text{BN}_{\gamma,\beta}(x_i)\tag{6-18} $$ 其中$\mu_{\mathcal{B}}$为在小批量样本$\mathcal{B}$上对$x_i$期望的估计，$\sigma^2_{\mathcal{B}}$为对$x_i$方差的估计，而$\hat{x}_i$则表示标准化后的结果，$y_i$表示线性变换后的结果，也就是最后真正需要的结果。同时，为了防止方差为0的情况在进行标准化时分母额外的加了一个很小的常数$\epsilon$。这里需要说明的是，$\mu_{\mathcal{B}}$和$\sigma^2_{\mathcal{B}}$并不是整个数据集真实的期望与方差，而仅仅只是根据采样的小批量样本估计得到。
+Batch Normalization在计算时的最后一步进行平移和缩放的原因如下：
+**恢复表示能力：**批归一化的过程中，输入数据会被标准化为均值为0、方差为1的分布。这种标准化虽然有助于加快训练速度和稳定性，但也可能改变网络层的表示能力。通过引入可学习的平移参数和缩放参数，网络可以在保持标准化效果的同时，恢复其表示能力。
+**适应不同数据分布：**每一层神经网络对数据的分布有特定的需求或偏好。通过平移和缩放，网络可以更灵活地调整和适应不同的数据分布，从而提高模型的表现能力。
+**避免对称性破坏：**如果没有平移和缩放参数，所有层的输出都会集中在同一个范围内，这可能会导致对称性问题，使得网络难以学习到复杂的特征。平移和缩放能够帮助网络打破这种对称性，提高学习效果。">
+	<meta itemprop="wordCount" content="575">
+
+<title>6.3 批归一化 • 《从零学AI指南手册》</title>
+<link rel="icon" href="/favicon.png" >
+<link rel="manifest" href="/manifest.json">
+<link rel="canonical" href="https://mlwithme.github.io/dl/chapter06/27ed3ed136e24092/">
+<link rel="stylesheet" href="/book.min.6097ccf1d338ddfaa037d2f96478059a71fa573d0f917d128bab595efea338ca.css" integrity="sha256-YJfM8dM43fqgN9L5ZHgFmnH6Vz0PkX0Si6tZXv6jOMo=" crossorigin="anonymous">
+
+
+  <script defer type="module" src="/en.search.min.ffaad769e546b38d39820301bb9e5c193822f7bf0f46a855602e4e14707802e0.js" integrity="sha256-/6rXaeVGs405ggMBu55cGTgi978PRqhVYC5OFHB4AuA=" crossorigin="anonymous"></script>
+
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-23SZ6E8VY7"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-23SZ6E8VY7');
+</script>
+<script async src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
+
+</head>
+<body dir="ltr" class="book-kind-page book-type-dl">
+  <input type="checkbox" class="hidden toggle" id="menu-control" />
+  <input type="checkbox" class="hidden toggle" id="toc-control" />
+  <main class="container flex">
+    
+<aside class="book-menu">
+  <div class="book-menu-content">
+    
+  <nav>
+<h2 class="book-brand">
+  <a class="flex align-center" href="/"><span>《从零学AI指南手册》</span>
+  </a>
+</h2>
+
+
+<div class="book-search hidden">
+  <input id="book-search-input" type="text" 
+    placeholder="Search"
+    aria-label="Search"
+    maxlength="64" />
+  <div class="book-search-spinner hidden"></div>
+  <ul id="book-search-results"></ul>
+</div>
+<script>document.querySelector(".book-search").classList.remove("hidden")</script>
+
+
+
+
+
+
+
+
+
+
+  
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a>
+      大模型Agent开发</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-253e26e732e57a78f635dcf47df3d0a3" class="toggle"  />
+    <label for="section-253e26e732e57a78f635dcf47df3d0a3" class="flex">
+      <a role="button" class="">
+        第 1 章 RAG 基础概念</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/454f0942222e471e/" class="">
+      1.1 RAG 提出背景</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/d7623d619f884b25/" class="">
+      1.2 RAG 流程概览</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-810ee5a2a3a24c9b7c25ab5324ae7db7" class="toggle"  />
+    <label for="section-810ee5a2a3a24c9b7c25ab5324ae7db7" class="flex">
+      <a role="button" class="">
+        第 2 章 大模型接入与使用</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/d43adfc00df54515/" class="">
+      2.1 SDK 介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/8b9059fde1d644a4/" class="">
+      2.2 现代大模型中的 SDK</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/95d3214ab80b4769/" class="">
+      2.3 DashScope 接口体系</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/b9843c089d654494/" class="">
+      2.4 千问大模型接入与使用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ed1727f01d0e40dc9b7961b72e42160e" class="toggle"  />
+    <label for="section-ed1727f01d0e40dc9b7961b72e42160e" class="flex">
+      <a role="button" class="">
+        第 3 章 文档标准化与语义检索</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/7f4af6d48c5b425c/" class="">
+      3.1 文档加载与标准化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/572ba4c9cb114677/" class="">
+      3.2 常见文本切分策略</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/06e588cd33fa4454/" class="">
+      3.3 向量数据库选择</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/ff27306c0d7b4387/" class="">
+      3.4 Qwen3 Embedding 模型介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/303035851c5e42f2/" class="">
+      3.5 语义搜索引擎构建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/e1328cb23e8c412b/" class="">
+      3.6  Milvus 模块解析</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-caaf9d8eb5e5559f7ca8bb11c41da71a" class="toggle"  />
+    <label for="section-caaf9d8eb5e5559f7ca8bb11c41da71a" class="flex">
+      <a role="button" class="">
+        第 4 章 RAG 与 Agent</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/4c646aa07f3b4b74/" class="">
+      4.1 两步式 RAG 搭建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/5c35e934bab24ac3/" class="">
+      4.2 Function Calling 概念介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/88ff352fc22e4cd6/" class="">
+      4.3 LangChain 中的 Tool 修饰器</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/83fe26536a5d4b6e/" class="">
+      4.4 RAG Agent 原理与搭建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/b7e49268357a4bca/" class="">
+      4.5 复杂问题拆解与ReAct框架</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/469b5963f2ca4799/" class="">
+      4.6 RAG 中的两阶段索引</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/10fb92a6c5484039/" class="">
+      4.7 Qwen3 Reranking 原理与使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/45d286aec1bc4d66/" class="">
+      4.8 基于两阶段索引的 RAG Agent 搭建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/43af483460574e48/" class="">
+      4.9 LangGraph 基本概念介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/0def4564f3aa455d/" class="">
+      4.10  基于 LangGraph 构建自定义 RAG Agent</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a>
+      深度学习</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/70e5f9cdbedc4b2c/" class="">
+      学习思维导图</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-a9b664bcf9e1dab8add449268565f466" class="toggle"  />
+    <label for="section-a9b664bcf9e1dab8add449268565f466" class="flex">
+      <a role="button" class="">
+        第 1 章 深度学习简介</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/647eb9c607874e3a/" class="">
+      1.1 深度学习的发展阶段</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/f31da36a6f444afe/" class="">
+      1.2 深度学习中的关键人物</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/da9fa13021e64f3c/" class="">
+      1.3 深度学习框架介绍</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-e6e0db5d4bc28bd97dfe8d5210249e63" class="toggle"  />
+    <label for="section-e6e0db5d4bc28bd97dfe8d5210249e63" class="flex">
+      <a role="button" class="">
+        第 2 章 环境配置</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/a0c5d1e0de0140cb/" class="">
+      2.1 体系结构介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/04f07b9246984577/" class="">
+      2.2 深度学习环境安装</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/5bf6454673194c67/" class="">
+      2.3 开发环境安装配置</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-0a2ca47f15332c8b06ae83247328edb4" class="toggle"  />
+    <label for="section-0a2ca47f15332c8b06ae83247328edb4" class="flex">
+      <a role="button" class="">
+        第 3 章 深度学习基础</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/75c5fa7839174c16/" class="">
+      3.1 线性回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/ca16f8cb6df444a6/" class="">
+      3.2 线性回归简洁实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/97e1da1143cd4554/" class="">
+      3.3 梯度下降与反向传播</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/7b865de988ea422c/" class="">
+      3.4 从零实现回归模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/18fdd1deff424a16/" class="">
+      3.5 从逻辑回归到Softmax回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/55967b0f642b4509/" class="">
+      3.6 Softmax回归简洁实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/381bbd56509e4a6f/" class="">
+      3.7 从零实现分类模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/2c061df4435d4928/" class="">
+      3.8 回归模型评估指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/e3442eff254e473c/" class="">
+      3.9 分类模型评估指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/307f927c8a1245c5/" class="">
+      3.10 过拟合与正则化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/bcb64de5aa404f18/" class="">
+      3.11 超参数与交叉验证</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/66dd7425cdd04565/" class="">
+      3.12 激活函数</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/0d3dacfff4c04794/" class="">
+      3.13 多标签分类</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-95b7e7417bf2b821a1b760975d3acc22" class="toggle"  />
+    <label for="section-95b7e7417bf2b821a1b760975d3acc22" class="flex">
+      <a role="button" class="">
+        第 4 章 卷积神经网络</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/102e183e8be94f46/" class="">
+      4.1 卷积的概念</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/5b3e3152e9e54f4f/" class="">
+      4.2 卷积的计算过程</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/762f60de801a4ccd/" class="">
+      4.3 填充和池化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/c8af5d84174b4420/" class="">
+      4.4 LeNet5网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/de007462967e4701/" class="">
+      4.5 AlexNet网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/f084f181c3554082/" class="">
+      4.6 VGG网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/911b961cc5d949b6/" class="">
+      4.7 NIN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/47da186baf3e4a0b/" class="">
+      4.8 GoogLeNet网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/da16c61397454b2c/" class="">
+      4.9 ResNet网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/1c24468824274650/" class="">
+      4.10 DenseNet网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-17076fe90a2d84e207bbd0c829983325" class="toggle"  />
+    <label for="section-17076fe90a2d84e207bbd0c829983325" class="flex">
+      <a role="button" class="">
+        第 5 章 模型训练与复用</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/4557a6f03dec4475/" class="">
+      5.1 参数及日志管理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/e7c4c6da085148d0/" class="">
+      5.2 Tensorboard可视化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/27387966672c45ed/" class="">
+      5.3 模型的保存与复用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/211b26bdd8f248ac/" class="">
+      5.4 模型的迁移学习</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/345c1b72253043cb/" class="">
+      5.5 开源模型复用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/c912dda030c946d9/" class="">
+      5.6 多GPU训练</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/f065af80f3844b0b/" class="">
+      5.7 数据预处理与缓存</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-2d091d454d5c3f03f5e0a202c37cc226" class="toggle" checked />
+    <label for="section-2d091d454d5c3f03f5e0a202c37cc226" class="flex">
+      <a role="button" class="">
+        第 6 章 模型优化方法</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/cc35bb112783410e/" class="">
+      6.1 学习率调度器</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/fc024c283f164849/" class="">
+      6.2 梯度裁剪</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/27ed3ed136e24092/" class="active">
+      6.3 批归一化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/fdd5ba4b41f74a0e/" class="">
+      6.4 层归一化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/9246afed14eb436c/" class="">
+      6.5 组归一化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/fcbc66ad051a4336/" class="">
+      6.6 动量法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/8b83d654898c40a2/" class="">
+      6.7 AdaGrad算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/078f2394980d41d2/" class="">
+      6.8 AdaDelta算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/28ad7fb39987447e/" class="">
+      6.9 Adam算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/4b81b8d39721434d/" class="">
+      6.10 初始化方法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f2f78ba4851131558fc284d927542d28" class="toggle"  />
+    <label for="section-f2f78ba4851131558fc284d927542d28" class="flex">
+      <a role="button" class="">
+        第 7 章 循环神经网络</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/88ba4e03337b4233/" class="">
+      7.1 RNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/ec8ff069aadc49b9/" class="">
+      7.2 时序数据</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/b4c5ddcc9e904238/" class="">
+      7.3 LSTM网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/4112672112224dc1/" class="">
+      7.4 GRU网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/b6e5ccb6cd064f74/" class="">
+      7.5 BiRNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/4bf3ecf7b21e45fb/" class="">
+      7.6 CharRNN网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-49992cff6143e64ae5d7f2209dcfb054" class="toggle"  />
+    <label for="section-49992cff6143e64ae5d7f2209dcfb054" class="flex">
+      <a role="button" class="">
+        第 8 章 时序与模型融合</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/2be88fbc08a5418f/" class="">
+      8.1 TextCNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/9023d1f822a54226/" class="">
+      8.2 TextRNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/9edd7db2d439402f/" class="">
+      8.3 CNN-RNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/19c2b86e85f2461e/" class="">
+      8.4 ConvLSTM网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/1e6da79bf7b44c20/" class="">
+      8.5 3DCNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/5f426a9190e7454b/" class="">
+      8.6 STResNet网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ca07c572acb4d7fd40854f5b367c247b" class="toggle"  />
+    <label for="section-ca07c572acb4d7fd40854f5b367c247b" class="flex">
+      <a role="button" class="">
+        第 9 章 自然语言处理</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/e0cb9a7aae814045/" class="">
+      9.1 自然语言处理介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/d4703d990f8d4fed/" class="">
+      9.2 Word2Vec词向量</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/1bb6351b01a2479b/" class="">
+      9.3 Word2Vec训练与使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/40a8a1146d934c55/" class="">
+      9.4 GloVe词向量</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/c6aa1405b8cf46d8/" class="">
+      9.5 词向量的微调使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/48c26d04b342452d/" class="">
+      9.6 fastText网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/03a0166e195f443f/" class="">
+      9.7 Seq2Seq网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/271bda16904544af/" class="">
+      9.8 序列模型评价指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/fefa60e0bc854a17/" class="">
+      9.9 NMT网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/5bcd8b0920414f34/" class="">
+      9.10 注意力机制</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/8a78e8213ee04aac/" class="">
+      9.11 含注意力的NMT网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/474ac7a1867d4b5e/" class="">
+      9.12 含注意力的RNN网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-8cdec04c2fd8683c5c7373c78d943528" class="toggle"  />
+    <label for="section-8cdec04c2fd8683c5c7373c78d943528" class="flex">
+      <a role="button" class="">
+        第10章 现代神经网络</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/7523731afc0241c0/" class="">
+      10.1 ELMo网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/4987d1044939480d/" class="">
+      10.2 Transformer网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/a469ed1a25e1498f/" class="">
+      10.3 Transformer结构</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/d50c490eef3b4565/" class="">
+      10.4 Transformer实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/f6c507b3d2d74f03/" class="">
+      10.5 Transformer对联模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/3aedea1d3f3e48dd/" class="">
+      10.6 BERT网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/82a1cd0def084620/" class="">
+      10.7 从零实现BERT</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/e736d3974ed0484c/" class="">
+      10.8 BERT文本分类模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/f5076cbadda84d4e/" class="">
+      10.9 BERT问题选择模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/25d9ef3d9b34472a/" class="">
+      10.10 BERT问题回答模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/64d3ec5593ec4b94/" class="">
+      10.11 BERT命名体识别模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/90ea8d3e090d48b4/" class="">
+      10.12 BERT从零训练</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/e36878dad7a647d8/" class="">
+      10.13 GPT-1模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/94dda9bbbc994913/" class="">
+      10.14 GPT-2与GPT-3模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/4af57a29308840de/" class="">
+      10.15 基于GPT-2的中文预训练模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/9f5c00cadde14d31/" class="">
+      10.16 InstructGPT与ChatGPT</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/050b54fd34ca480a/" class="">
+      10.17 ChatGPT与提示词工程</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/a90b0d71389b4d69/" class="">
+      10.18 百川大模型使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/40c1c9ade70c4ce7/" class="">
+      10.19 百川大模型实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/ea1b4cf8b40c4b05/" class="">
+      10.20 GPT-4与GPTs使用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a>
+      机器学习</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/43fc00b3809d4be6/" class="">
+      学习思维导图</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-0a3254d1ca9963fd6975aa5bc0b3edcc" class="toggle"  />
+    <label for="section-0a3254d1ca9963fd6975aa5bc0b3edcc" class="flex">
+      <a role="button" class="">
+        第 1 章 环境配置</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/baafb91f0af14a84/" class="">
+      1.1 安装使用Conda</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/7a01c403acd6488a/" class="">
+      1.2 开发环境安装配置</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-4569258198323c16bc8a634ea44fd5db" class="toggle"  />
+    <label for="section-4569258198323c16bc8a634ea44fd5db" class="flex">
+      <a role="button" class="">
+        第 2 章 线性回归</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/2414d4b6648d405a/" class="">
+      2.1 模型的建立与求解</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/3e9ba14da71f4fd3/" class="">
+      2.2 多变量线性回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/4a16c0dc82a84e78/" class="">
+      2.3 多项式回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/f8dea699983c48c6/" class="">
+      2.4 回归模型评估</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/df41c2e97f554e68/" class="">
+      2.5 梯度下降</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/71ef816e0005492d/" class="">
+      2.6 正态分布</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/803bee4f70be4dca/" class="">
+      2.7 目标函数推导</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-a6ca5e2f846ebd900d1a868e6718dc82" class="toggle"  />
+    <label for="section-a6ca5e2f846ebd900d1a868e6718dc82" class="flex">
+      <a role="button" class="">
+        第 3 章 逻辑回归</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/96d46b53aee14c3b/" class="">
+      3.1 模型的建立与求解</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/fac70083dd764141/" class="">
+      3.2 多分类任务</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/6d7cfd79ef304cbd/" class="">
+      3.3 常见的分类评估指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/2fdc655d00c74548/" class="">
+      3.4 目标函数推导</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/a4b61c5bbadd43a6/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-9f462f716bd0e46ef79984b356eeb5a2" class="toggle"  />
+    <label for="section-9f462f716bd0e46ef79984b356eeb5a2" class="flex">
+      <a role="button" class="">
+        第 4 章 模型的改善与泛化</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/2089400b28f54dd9/" class="">
+      4.1 基本概念</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/56b788b624cd4971/" class="">
+      4.2 特征标准化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/ca091dc393a84518/" class="">
+      4.3过拟合</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/5097d3b8c1144427/" class="">
+      4.4 正则化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/3c7eee1621d4480b/" class="">
+      4.5 偏差、方差与交叉验证</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/c5957e0753d04746/" class="">
+      4.6 实例分析手写体识别</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/a915e49586eb4426/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-327db48e4f4df6236855078634147679" class="toggle"  />
+    <label for="section-327db48e4f4df6236855078634147679" class="flex">
+      <a role="button" class="">
+        第 5 章 K近邻</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/7c610e923e754259/" class="">
+      5.1 K近邻思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/1a97571e0a6447ef/" class="">
+      5.2 K近邻原理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/d245bda107034e65/" class="">
+      5.3 sklearn接口与示例代码</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/24378571ce404d9c/" class="">
+      5.4 kd树构建与搜索</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/40f253b916f24038/" class="">
+      5.5 从零实现K近邻</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/76818d9e48944f8c/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-94d0a5f5555d92c51e0903b148e34993" class="toggle"  />
+    <label for="section-94d0a5f5555d92c51e0903b148e34993" class="flex">
+      <a role="button" class="">
+        第 6 章 文本特征与模型复用</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/e05b5928c41d4841/" class="">
+      6.1 词袋模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/de59bf74d753457e/" class="">
+      6 .2 基于K近邻算法的垃圾邮件分类</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/c6fdc78b49d44453/" class="">
+      6.3 考虑权重的词袋模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/825fde8589654b16/" class="">
+      6.4 词云图</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/8451cffe49f5477c/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-544be5d1e48c4fd8b33ba2f91964c6dd" class="toggle"  />
+    <label for="section-544be5d1e48c4fd8b33ba2f91964c6dd" class="flex">
+      <a role="button" class="">
+        第 7 章 朴素贝叶斯</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/faf303eb93a241d1/" class="">
+      7.1 朴素贝叶斯算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/842c7b8684c747d2/" class="">
+      7.2 贝叶斯估计</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/724bf42b09bb440e/" class="">
+      7.3 朴素贝叶斯实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/1a9deee1d5f042b5/" class="">
+      7.4 多项式朴素贝叶斯原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/5c27cdd8b3264f50/" class="">
+      7.5 高斯朴素贝叶斯原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/715b8eaf245f45f1/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-d1884c6b3e8f1260019220c57d615371" class="toggle"  />
+    <label for="section-d1884c6b3e8f1260019220c57d615371" class="flex">
+      <a role="button" class="">
+        第 8 章 决策树</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/690fe2be21834c2a/" class="">
+      8.1 决策树的基本思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/ee9ada9729124049/" class="">
+      8.2 决策树建模与可视化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/5887cf1408dd4c7f/" class="">
+      8.3 决策树生成之ID3与C4.5</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/87ba589d6c17434d/" class="">
+      8.4 决策树剪枝过程</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/34bc962c974646f4/" class="">
+      8.5 从零实现ID3与C4.5算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/c44682dbb3364be4/" class="">
+      8.6 连续型特征变量下决策树实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/4eead717a84a4dbf/" class="">
+      8.7 CART生成与剪枝算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/1c72d67dffc64dc9/" class="">
+      8.8 从零实现CART算法及剪枝示例</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/ae452792b2604e84/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-1f0a2178f0a580ba251c7da2649aa52f" class="toggle"  />
+    <label for="section-1f0a2178f0a580ba251c7da2649aa52f" class="flex">
+      <a role="button" class="">
+        第 9 章 集成学习与提升算法</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/9eff4004fd6c437d/" class="">
+      9.1 集成学习算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/18980c9f757e42c8/" class="">
+      9.2 随机森林</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/8a91b358b2f74d56/" class="">
+      9.3 泰坦尼克号生还预测</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/73f6914844f549f1/" class="">
+      9.4 AdaBoost原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/71fd0e44294e4abb/" class="">
+      9.5 MultiAdaBoost原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/f3c2341ce7d64f70/" class="">
+      9.6 Gradient Boost 原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/4f9b26d5b65541f5/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f63defd924ef7373144c8643a39fd7b2" class="toggle"  />
+    <label for="section-f63defd924ef7373144c8643a39fd7b2" class="flex">
+      <a role="button" class="">
+        第 10 章 支持向量机</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/dce7180d4eb047d7/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/515b54e2307a4c8a/" class="">
+      10.1 SVM思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/9c3862bc843c4179/" class="">
+      10.2 SVM线性不可分</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/fbdb6f8adace457d/" class="">
+      10.3 SVM原理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/1a3ffa363b1d4f83/" class="">
+      10.4 SVM中的软间隔</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/8b7a06412a9f4267/" class="">
+      10.5 拉格朗日乘数法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/40e977f0a2f84ac0/" class="">
+      10.6 对偶性与KKT条件</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/b18d45a772574ddb/" class="">
+      10.7 SVM优化问题</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/c53ed12f7bc04405/" class="">
+      10.8 SVM核函数原理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/26d9b2b328a849c2/" class="">
+      10.9 SMO算法求解SVM</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/215a1e15c0f2470d/" class="">
+      10.10 从零实现SVM分类算法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bdcc54d1c295c5cc69c9c851c02886ea" class="toggle"  />
+    <label for="section-bdcc54d1c295c5cc69c9c851c02886ea" class="flex">
+      <a role="button" class="">
+        第 11 章 聚类分析</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/f9d9305a55a548a1/" class="">
+      11.1 聚类算法的思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/e635df24de32487a/" class="">
+      11.2 Kmeans聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/e75b8efa232249ab/" class="">
+      11.3 Kmeans算法求解</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/60e49a33d1aa4f50/" class="">
+      11.4 从零实现Kmeans聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/c8b45d8a3d8c4cf4/" class="">
+      11.5 Kmeans&#43;&#43;聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/1ede2f3557d0438f/" class="">
+      11.6 聚类外部评价指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/e6a75df19f85498c/" class="">
+      11.7 加权Kmeans聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/c52cf7920f1d4636/" class="">
+      11.8 聚类内部评价指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/f95259c359b146ba/" class="">
+      11.9 聚类K值选取与分析</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/b85c1a858f7c4686/" class="">
+      11.10 基于密度的聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/2f01ba751d914336/" class="">
+      11.11 基于层次的聚类算法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bafa8c48214ccf62d333a6d0457c5f72" class="toggle"  />
+    <label for="section-bafa8c48214ccf62d333a6d0457c5f72" class="flex">
+      <a role="button" class="">
+        第 12 章 降维算法</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/9478de824edd44c6/" class="">
+      12.1 主成分分析</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/909356aa90fe456a/" class="">
+      12.2 基于核函数的主成分分析</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-d5f143889a719ce66d602e75b72bffb9" class="toggle"  />
+    <label for="section-d5f143889a719ce66d602e75b72bffb9" class="flex">
+      <a role="button" class="">
+        第 13 章 自训练与标签传播</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/8d71301c2e414efe/" class="">
+      13.1 Self-Training 自训练算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/87fdcf0be1c34644/" class="">
+      13.2 Label Propagation算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/7fc8b0fc47d2427c/" class="">
+      13.3 Label Spreading 算法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+
+
+
+
+
+
+
+
+
+
+
+
+</nav>
+
+
+
+
+  <script>(function(){var e=document.querySelector("aside .book-menu-content");addEventListener("beforeunload",function(){localStorage.setItem("menu.scrollTop",e.scrollTop)}),e.scrollTop=localStorage.getItem("menu.scrollTop")})()</script>
+
+
+
+  </div>
+</aside>
+ 
+
+    <div class="book-page">
+      <header class="book-header hidden">
+        
+  <div class="flex align-center justify-between">
+  <label for="menu-control">
+    <img src="/icons/menu.svg" class="book-icon" alt="Menu" />
+  </label>
+
+  <h3>6.3 批归一化</h3>
+
+  <label for="toc-control">
+    
+    <img src="/icons/toc.svg" class="book-icon" alt="Table of Contents" />
+    
+  </label>
+</div>
+
+
+  
+  <aside class="hidden">
+    
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#631-批归一化动机">6.3.1 批归一化动机</a></li>
+    <li><a href="#632-批归一化原理">6.3.2 批归一化原理</a></li>
+    <li><a href="#633-批归一化实现">6.3.3 批归一化实现</a></li>
+    <li><a href="#634-小结">6.3.4 小结</a>
+      <ul>
+        <li><a href="#引用">引用</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+
+
+
+  </aside>
+  
+ 
+      </header>
+
+      
+      
+  <article class="markdown book-article"><h1 id="63-批归一化">6.3 批归一化<a class="anchor" href="#63-%e6%89%b9%e5%bd%92%e4%b8%80%e5%8c%96">#</a></h1>
+<p>在前面两节内容中，我们详细介绍了如何通过学习率动态调整以及梯度裁剪策略来提高模型的效果，在接下来的几节内容中我们将开始陆续介绍一些能够加速模型收敛速度的优化方法。我们知道，在机器学习中一种常见的提高模型收敛速度的方法就是对输入特征进行标准化，例如将每一列特征维度的方差和均值分别标准化为0和1。虽然在深度学习中我们也能够采用这一策略，但这还远远不够。在本节内容中，我们将会介绍深度学习中使用最为广泛的，由谷歌于2015年发表在ICML上所介绍的一种标准化方法——批归一化（Batch Normalization, BN）[1]。</p>
+<h2 id="631-批归一化动机">6.3.1 批归一化动机<a class="anchor" href="#631-%e6%89%b9%e5%bd%92%e4%b8%80%e5%8c%96%e5%8a%a8%e6%9c%ba">#</a></h2>
+<p>在深度学习中，随着网络层数的加深越是越靠近输入层的权重参数其对应的梯度也将会越小（这是由反向传播的性质所决定，可见<a href="dl/Chapter03/97e1da1143cd4554">3.3节</a>内容），所以这就导致靠近输出层的权重参数能够更容易的得到训练，而靠近输入层的权重参数则更新缓慢。也正是由于两端的权重参数在更新节奏上相差太大网络底部的参数更新不及时，使得顶部的参数每次都要根据底部的前向传播结果来重新适应数据的分布，从而加大了网络的训练难度。</p>
+<p>假设现在有式(6-10)所示这么一个网络
+</p>
+$$
+\mathcal{L}=F_2(F_1(u,\Theta_1),\Theta_2)\tag{6-10}
+$$<p>
+其中$F_1,F_2$为任意的两个非线性变换，$u$为原始的网络输入，$\Theta_1,\Theta_2$分别为两个网络层的参数。</p>
+<p>现在的目的是通过最小化$\mathcal{L}$来求得参数$\Theta_1,\Theta_2$的取值。此时，我们也可以将$F_2$的输入看成是$x=F_1(u,\Theta_1)$，那么根据式(6-10)有
+</p>
+$$
+\mathcal{L}=F_2(x,\Theta_2)\tag{6-11}
+$$<p>
+接着根据式(6-12)就可以完成参数$\Theta_2$的迭代求解
+</p>
+$$
+\Theta_2\leftarrow\Theta_2-\alpha\frac{\partial F_2(x,\Theta_2)}{\partial \Theta_2}\tag{6-12}
+$$<p>
+由式(6-12)可知，由于输入$u$的分布每次在经过网络层$F_1$之后都会发生改变，这意味着网络层$F_2$中的参数$\Theta_2$每次都需要重新来学习适应输入值$x$的分布。也就是说，尽管一开始对原始的输入$u$进行了标准化，但经历过一个网络层后它的分布就发生了改变，那么下一层又需要重新学习另外一种分布，这就意味着每一层其实都是在学习不同的分布。Batch Normalization的思想便是在神经网络中添加一层归一化操作，使得网络中每一层输入的分布都尽可能地接近标准高斯分布，从而减轻这种问题。</p>
+<h2 id="632-批归一化原理">6.3.2 批归一化原理<a class="anchor" href="#632-%e6%89%b9%e5%bd%92%e4%b8%80%e5%8c%96%e5%8e%9f%e7%90%86">#</a></h2>
+<p><strong>1. 归一化原理</strong></p>
+<p>假设现在有一个$d$维的网络层，其输出为$x=(x^{(1)},x^{(2)},...,x^{(d)})$，那么对于每一个维度都可以通过式(6-13)中的方法进行标准化
+</p>
+$$
+\hat{x}^{(k)}=\frac{x^{(k)}-E[x^{(k)}]}{\sqrt{Var[x^{(k)}]}}\tag{6-13}
+$$<p>其中，$E[x^{(k)}]$和$Var[x^{(k)}]$分别是第$k$个维度在所有样本上计算得到的期望和方差。</p>
+<p>但如果仅仅只是简单通过式(6-13)中的计算方法来对每个维度进行标准化，那么在某些情况下将会改变该维度原有的表示信息。例如在对Sigmoid激活函数的输入值进行标准化时，通过公式(6-13)标准化后的输入值可能只会趋于0附近，从而把Sigmoid变成了一个线性激活函数。为了解决这一问题，可以加入了一组学习的参数$\gamma^{(k)}$和$\beta^{(k)}$来对$\hat{x}^{(k)}$进行了一次线性变换，即
+</p>
+$$
+y^{(k)}=\gamma^{(k)}\hat{x}^{(k)}+\beta^{(k)}\tag{6-14}
+$$<p>
+其中$y^{(k)}$就是最后得到的标准化结果，而$\gamma^{(k)}$和$\beta^{(k)}$也会随着网络中的权重参数一起训练，当且仅当$\gamma^{(k)}=\sqrt{Var[x^{(k)}]}$，$\beta^{(k)}=E[x^{(k)}]$时，公式(6-14)就变成了恒等变换，也就相当于没有进行标准化（如果网络确实需要的话）。</p>
+<p><strong>2. 小批量归一化</strong></p>
+<p>由于计算机硬件条件的限制等，我们不可能同时将所有的数据一次性输入到网络中进行训练，因此通常情况下都是输入小批量的样本到网络中进行训练，而这也是小批量归一化这个名字的由来。</p>
+<p>现假设现有一个样本数量为$m$的小批量数据$\mathcal{B}=\{x_1,x_2,\cdots, x_m\}$，同时由于BN是独立地对每个神经元的输出值进行标准化，这意味着每个神经元都有自己独立的参数，这里以对第$k$个神经元标准化为例进行介绍。具体的，对于整个BN的详细过程为</p>
+<p>①在小批量数据样本上根据式(6-15)计算第$k$个神经元输出结果的均值
+</p>
+$$
+\mu_{\mathcal{B}}\leftarrow\frac{1}{m}\sum_{i=1}^mx_i\tag{6-15}
+$$<p>
+②在小批量数据样本上根据式(6-16)计算第$k$个神经元输出结果的方差
+</p>
+$$
+\sigma^2_{\mathcal{B}}\leftarrow\frac{1}{m}\sum_{i=1}^m(x_i-\mu_{\mathcal{B}})^2\tag{6-16}
+$$<p>
+③根据式(6-17)以及$\mu_{\mathcal{B}}$和$\sigma^2_{\mathcal{B}}$对$x_i$进行标准化
+</p>
+$$
+\hat{x}_i\leftarrow\frac{x_i-\mu_{\mathcal{B}}}{\sqrt{\sigma^2_{\mathcal{B}}+\epsilon}}\tag{6-17}
+$$<p>
+④根据式(6-18)对$\hat{x}_i$进行缩放和平移
+</p>
+$$
+y_i\leftarrow \gamma\hat{x}_{i}+\beta\equiv 
+\text{BN}_{\gamma,\beta}(x_i)\tag{6-18}
+$$<p>
+其中$\mu_{\mathcal{B}}$为在小批量样本$\mathcal{B}$上对$x_i$期望的估计，$\sigma^2_{\mathcal{B}}$为对$x_i$方差的估计，而$\hat{x}_i$则表示标准化后的结果，$y_i$表示线性变换后的结果，也就是最后真正需要的结果。同时，为了防止方差为0的情况在进行标准化时分母额外的加了一个很小的常数$\epsilon$。这里需要说明的是，$\mu_{\mathcal{B}}$和$\sigma^2_{\mathcal{B}}$并不是整个数据集真实的期望与方差，而仅仅只是根据采样的小批量样本估计得到。</p>
+<hr>
+<p><font color = red>Batch Normalization在计算时的最后一步进行平移和缩放的原因如下：</font></p>
+<p>**恢复表示能力：**批归一化的过程中，输入数据会被标准化为均值为0、方差为1的分布。这种标准化虽然有助于加快训练速度和稳定性，但也可能改变网络层的表示能力。通过引入可学习的平移参数和缩放参数，网络可以在保持标准化效果的同时，恢复其表示能力。</p>
+<p>**适应不同数据分布：**每一层神经网络对数据的分布有特定的需求或偏好。通过平移和缩放，网络可以更灵活地调整和适应不同的数据分布，从而提高模型的表现能力。</p>
+<p>**避免对称性破坏：**如果没有平移和缩放参数，所有层的输出都会集中在同一个范围内，这可能会导致对称性问题，使得网络难以学习到复杂的特征。平移和缩放能够帮助网络打破这种对称性，提高学习效果。</p>
+<hr>
+<p><strong>3. 预测时的归一化</strong></p>
+<p>根据上面内容的介绍，我们已经清楚了批归一化在网络训练时的详细计算过程，同时根据式(6-15)~式(6-18)可知，批归一化中一共有5个参数，$\mu_{\mathcal{B}},\sigma^2_{\mathcal{B}},\epsilon,\gamma$和$\beta$。在这5个参数中，模型在训练阶段里前两个参数是在小批量样本中估计得到，第3个参数则是预先设定的常数（例如1e-5)，后面两个参数是随机初始化后随着网络一起训练得到。所以，现在的问题便是当模型在预测阶段时$\mu_{\mathcal{B}},\sigma^2_{\mathcal{B}}$应该如何得到？</p>
+<p>为了保证模型在整个测试阶段所使用到的均值$\mu_{\mathcal{B}}$和方差$\sigma^2_{\mathcal{B}}$都相同，一种常见的做法便是在训练过程中采用移动平均策略来估计整个训练集的均值和方差并用于测试阶段中，具体的计算方式为
+</p>
+$$
+\begin{aligned}
+        \text{moving_mean} &= \text{momentum} \times \text{moving_mean} + (1.0 - \text{momentum}) \times \text{mean}\\
+        \text{moving_var} &= \text{momentum} \times \text{moving_var} + (1.0 - \text{momentum}) \times \text{var}
+\end{aligned}\tag{6-19}
+$$<p>
+其中$\text{mean}$和$\text{var}$是指在每个小批量样本上通过式(6-15)和式(6-16)估计而来，并且通过调节系数$\text{momentum}$可以控制$\text{moving_mean}$和$\text{moving_var}$到底是更接近于真实的值还是训练时每个小批量上的估计值。</p>
+<div align=center><img width="500" src="/images/dl/image-20230407105824458-0836317-20230409201733554.png"/></div><center>图 6-12. 真实方差与移动平均方差对比图</center>
+<p>如图6-12所示为不同$\text{momentum}$取值下在小批量样本上计算得到的估计方差（虚折线）、移动平均方差（实折线）和真实方差（水平直线）的变化模拟图。从图6-12（左）可以发现，$\text{momentum}$越小移动平均计算得到的方差就会越靠近训练过程中的估计方差；而根据图6-12（右）可以发现，$\text{momentum}$越大则移动平均计算得到的方差便会更加靠近真实的方差。所以，一般情况下都可以通过调节$\text{momentum}$参数来平衡两者之间的关系。进一步，在通过移动平均的方法计算得到的均值和方差后，再结合训练得到$\gamma$和$\beta$便可以在预测过程中对每一层的输出值进行标准化了。</p>
+<p><strong>4. CNN中的归一化</strong></p>
+<p>对于卷积操作来说，为了能够使得批归一化遵循卷积特有的性质，所以需要将每个通道的所有神经元以同一个均值、方差、$\gamma$和$\beta$进行标准化。假设某个小批量有$m$个样本，特征图的长和宽分别是$p$和$q$，那么对于每个通道来说，都是用该通道对应的$m\times p \times q$个值来计算均值和方差，并对这$m\times p \times q$个值进行标准化。也就是说，在普通的前馈网络中批归一化是以每一个神经元为单位进行标准化，而在卷积中则是以每个通道为单位进行标准化。</p>
+<div align=center><img width="300" src="/images/dl/23042357121.jpg"/></div><center>图 6-13. 批归一化计算图</center>
+<p>如图6-13所示为两个样本在某卷积层的3个特征图输出结果，且使用批归一化在标准化时是以每个通道（图中虚线框部分）为单位进行，则此时对于最下面的通道来说均值和方差分别为
+</p>
+$$
+\begin{aligned}
+u_1=&\frac{1}{50}((1+1+0+0+0+,...,+0+1+0+0+0)\\[1ex]
+&+(0+1+1+0+0+,...,0+1+1+0+0))=0.5\\[2ex]
+\sigma_1^2=&\frac{1}{50}((1-0.5)^2+(1-0.5)^2+(0-0.5)^2+...)=0.33
+\end{aligned}
+\tag{6-20}
+$$<p>
+进一步根据式(6-17)，此时假定$\epsilon=0$，则有
+</p>
+$$
+\frac{1-0.5}{\sqrt{0.33+0}}\approx0.8704,\;\;\;\;\frac{0-0.5}{\sqrt{0.33+0}}\approx-0.8704,\;\;\frac{2-0.5}{\sqrt{0.33+0}}\approx 2.6111\tag{6-21}
+$$<p>
+根据式(6-18)，此时假定$\gamma=0.2,\beta=0$，则有
+</p>
+$$
+\begin{aligned}
+0.8704\times0.2+0&\approx0.1741\\[1ex]
+-0.8704\times0.2+0&\approx-0.1741\\[1ex]
+2.6111\times0.2+0&\approx0.5222
+\end{aligned}\tag{6-22}
+$$<p>
+最后，图6-13中最后两个通道批归一化后的结果为</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#ae81ff">1</span> [[ <span style="color:#ae81ff">0.1741</span>,  <span style="color:#ae81ff">0.1741</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.1741</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.1741</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.1741</span>],
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">2</span>  [<span style="color:#f92672">-</span><span style="color:#ae81ff">0.1741</span>,  <span style="color:#ae81ff">0.1741</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.1741</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.1741</span>,  <span style="color:#ae81ff">0.1741</span>],
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">3</span>  [<span style="color:#f92672">-</span><span style="color:#ae81ff">0.1741</span>,  <span style="color:#ae81ff">0.1741</span>,  <span style="color:#ae81ff">0.1741</span>,  <span style="color:#ae81ff">0.1741</span>,  <span style="color:#ae81ff">0.1741</span>],
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">4</span>  [<span style="color:#f92672">-</span><span style="color:#ae81ff">0.1741</span>,  <span style="color:#ae81ff">0.1741</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.1741</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.1741</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.1741</span>],
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">5</span>  [<span style="color:#f92672">-</span><span style="color:#ae81ff">0.1741</span>,  <span style="color:#ae81ff">0.1741</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.1741</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.1741</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.1741</span>]]
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">6</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">7</span>  [[<span style="color:#f92672">-</span><span style="color:#ae81ff">0.1741</span>,  <span style="color:#ae81ff">0.1741</span>,  <span style="color:#ae81ff">0.1741</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.1741</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.1741</span>],
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">8</span>   [<span style="color:#f92672">-</span><span style="color:#ae81ff">0.1741</span>,  <span style="color:#ae81ff">0.1741</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.1741</span>,  <span style="color:#ae81ff">0.5222</span>,  <span style="color:#ae81ff">0.1741</span>],
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">9</span>   [ <span style="color:#ae81ff">0.1741</span>,  <span style="color:#ae81ff">0.5222</span>,  <span style="color:#ae81ff">0.1741</span>,  <span style="color:#ae81ff">0.1741</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.1741</span>],
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">10</span>   [ <span style="color:#ae81ff">0.1741</span>,  <span style="color:#ae81ff">0.1741</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.1741</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.1741</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.1741</span>],
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">11</span>   [<span style="color:#f92672">-</span><span style="color:#ae81ff">0.1741</span>,  <span style="color:#ae81ff">0.1741</span>,  <span style="color:#ae81ff">0.1741</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.1741</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.1741</span>]]</span></span></code></pre></div><p>上述完整计算示例代码可参见<code>Code/Chapter06/C03_BN/bn_compute.py</code>文件</p>
+<p>到此为止对于批归一化的原理及计算过程就介绍完了。下面，我们再来进一步介绍如何从零实现归一化及其相关的特性。</p>
+<h2 id="633-批归一化实现">6.3.3 批归一化实现<a class="anchor" href="#633-%e6%89%b9%e5%bd%92%e4%b8%80%e5%8c%96%e5%ae%9e%e7%8e%b0">#</a></h2>
+<p>在介绍完整个批归一化操作的原理后，我们再来看如何通过PyTorch进行实现。以下完整示例代码可以参见<code>Code/Chapter06/C03_BN</code>文件。</p>
+<p><strong>1. 前向传播</strong></p>
+<p>根据<a href="dl/Chapter06/fc024c283f164849">6.3.2节</a>内容的介绍可知，首先需要定义整个批归一化中的相关参数及维度信息，示例代码如下所示：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#ae81ff">1</span> <span style="color:#66d9ef">class</span> <span style="color:#a6e22e">BatchNormalization</span>(nn<span style="color:#f92672">.</span>Module):
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">2</span>     <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">__init__</span>(self,num_features<span style="color:#f92672">=</span><span style="color:#66d9ef">None</span>,
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">3</span>                  num_dims<span style="color:#f92672">=</span><span style="color:#ae81ff">4</span>,momentum<span style="color:#f92672">=</span><span style="color:#ae81ff">0.1</span>,
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">4</span>                  eps<span style="color:#f92672">=</span><span style="color:#ae81ff">1e-5</span>):
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">5</span>         super(BatchNormalization, self)<span style="color:#f92672">.</span><span style="color:#a6e22e">__init__</span>()
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">6</span>         shape <span style="color:#f92672">=</span> [<span style="color:#ae81ff">1</span>, num_features]
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">7</span>         <span style="color:#66d9ef">if</span> num_dims <span style="color:#f92672">==</span> <span style="color:#ae81ff">4</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">8</span>             shape <span style="color:#f92672">=</span> [<span style="color:#ae81ff">1</span>, num_features, <span style="color:#ae81ff">1</span>, <span style="color:#ae81ff">1</span>]
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">9</span>         self<span style="color:#f92672">.</span>momentum <span style="color:#f92672">=</span> momentum
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">10</span>         self<span style="color:#f92672">.</span>num_features <span style="color:#f92672">=</span> num_features
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">11</span>         self<span style="color:#f92672">.</span>eps <span style="color:#f92672">=</span> eps
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">12</span>         self<span style="color:#f92672">.</span>gamma <span style="color:#f92672">=</span> nn<span style="color:#f92672">.</span>Parameter(torch<span style="color:#f92672">.</span>ones(shape))
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">13</span>         self<span style="color:#f92672">.</span>beta <span style="color:#f92672">=</span> nn<span style="color:#f92672">.</span>Parameter(torch<span style="color:#f92672">.</span>zeros(shape))
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">14</span>         self<span style="color:#f92672">.</span>register_buffer(<span style="color:#e6db74">&#39;moving_mean&#39;</span>, torch<span style="color:#f92672">.</span>zeros(shape))
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">15</span>         self<span style="color:#f92672">.</span>register_buffer(<span style="color:#e6db74">&#39;moving_var&#39;</span>, torch<span style="color:#f92672">.</span>zeros(shape))</span></span></code></pre></div><p>在上述代码中，第2行<code>num_features</code>用来指定特征的数量，对于全连接层来说便是当前层对应的神经元个数，对于卷积层来说便是当前层对应的通道数。第3行中<code>num_dims</code>用来判断当前层是全连接层（<code>num_dims</code>=2）还是卷积层（<code>num_dims</code>=4），<code>momentum</code>是用来指定移动平均中的控制参数。第6~8行用来设定$\gamma$和$\beta$等参数的形状。第9~13行则是初始化批归一化中的相关参数，其中<code>nn.Parameter()</code>表示定义一个模型参数，然后将其加入到该模型对应的参数列表中，同时它有一个重要的属性就是可训练，即<code>requires_grad=True</code>。第14~15行则是初始化移动平均中均值和方差，其中<code>register_buffer()</code>为从<code>nn.Module()</code>中继承的方法，用于注册一个不可训练但同属为模型一部分的参数，以便在保存模型权重参数时能将其一同保存。</p>
+<p>在完成上述初始化工作后便可以进一步实现批归一化的整个前向传播过程，示例代码如下所示：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#ae81ff">1</span>     <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">forward</span>(self, inputs):
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">2</span>         X <span style="color:#f92672">=</span> inputs
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">3</span>         <span style="color:#66d9ef">if</span> len(X<span style="color:#f92672">.</span>shape) <span style="color:#f92672">not</span> <span style="color:#f92672">in</span> (<span style="color:#ae81ff">2</span>, <span style="color:#ae81ff">4</span>):
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">4</span>             <span style="color:#66d9ef">raise</span> <span style="color:#a6e22e">ValueError</span>(<span style="color:#e6db74">&#34;仅支持全连接层或卷积层&#34;</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">5</span>         <span style="color:#66d9ef">if</span> self<span style="color:#f92672">.</span>training:
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">6</span>             <span style="color:#66d9ef">if</span> len(X<span style="color:#f92672">.</span>shape) <span style="color:#f92672">==</span> <span style="color:#ae81ff">2</span>: 
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">7</span>                 mean <span style="color:#f92672">=</span> torch<span style="color:#f92672">.</span>mean(X, dim<span style="color:#f92672">=</span><span style="color:#ae81ff">0</span>)  
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">8</span>                 var <span style="color:#f92672">=</span> torch<span style="color:#f92672">.</span>mean((X <span style="color:#f92672">-</span> mean) <span style="color:#f92672">**</span> <span style="color:#ae81ff">2</span>, dim<span style="color:#f92672">=</span><span style="color:#ae81ff">0</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">9</span>             <span style="color:#66d9ef">else</span>:  
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">10</span>                 mean <span style="color:#f92672">=</span> torch<span style="color:#f92672">.</span>mean(X, dim<span style="color:#f92672">=</span>[<span style="color:#ae81ff">0</span>, <span style="color:#ae81ff">2</span>, <span style="color:#ae81ff">3</span>], keepdim<span style="color:#f92672">=</span><span style="color:#66d9ef">True</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">11</span>                 var <span style="color:#f92672">=</span> torch<span style="color:#f92672">.</span>mean((X <span style="color:#f92672">-</span> mean) <span style="color:#f92672">**</span> <span style="color:#ae81ff">2</span>, dim<span style="color:#f92672">=</span>[<span style="color:#ae81ff">0</span>, <span style="color:#ae81ff">2</span>, <span style="color:#ae81ff">3</span>], keepdim<span style="color:#f92672">=</span><span style="color:#66d9ef">True</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">12</span>             X_hat <span style="color:#f92672">=</span> (X <span style="color:#f92672">-</span> mean) <span style="color:#f92672">/</span> torch<span style="color:#f92672">.</span>sqrt(var <span style="color:#f92672">+</span> self<span style="color:#f92672">.</span>eps)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">13</span>             self<span style="color:#f92672">.</span>moving_mean <span style="color:#f92672">=</span> self<span style="color:#f92672">.</span>momentum <span style="color:#f92672">*</span> self<span style="color:#f92672">.</span>moving_mean <span style="color:#f92672">+</span> (<span style="color:#ae81ff">1.0</span> <span style="color:#f92672">-</span> self<span style="color:#f92672">.</span>momentum) <span style="color:#f92672">*</span> mean
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">14</span>             self<span style="color:#f92672">.</span>moving_var <span style="color:#f92672">=</span> self<span style="color:#f92672">.</span>momentum <span style="color:#f92672">*</span> self<span style="color:#f92672">.</span>moving_var <span style="color:#f92672">+</span> (<span style="color:#ae81ff">1.0</span> <span style="color:#f92672">-</span> self<span style="color:#f92672">.</span>momentum) <span style="color:#f92672">*</span> var
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">15</span>         <span style="color:#66d9ef">else</span>:
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">16</span>             X_hat <span style="color:#f92672">=</span> (X <span style="color:#f92672">-</span> self<span style="color:#f92672">.</span>moving_mean) <span style="color:#f92672">/</span> torch<span style="color:#f92672">.</span>sqrt(self<span style="color:#f92672">.</span>moving_var <span style="color:#f92672">+</span> self<span style="color:#f92672">.</span>eps)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">17</span>         Y <span style="color:#f92672">=</span> self<span style="color:#f92672">.</span>gamma <span style="color:#f92672">*</span> X_hat <span style="color:#f92672">+</span> self<span style="color:#f92672">.</span>beta
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">18</span>         <span style="color:#66d9ef">return</span> Y</span></span></code></pre></div><p>在上述代码中，第3~4行用来判断是否为全连接层或是卷积层。第5~14行表示模型当前处于训练阶段，其中第6~8行分别是计算全连接层中每个神经元对应的均值和方差，第10~11行分别是计算卷积层中每个通道对应的均值和方差，同时由于下一步计算时需要利用到PyTorch中的广播机制，所以设定了<code>keepdim=True</code>，第12行则是进行初始的批归一化操作，第13~14行是在训练集上进行移动平均来估计整个数据集的均值和方差。第16行是在测试集上进行初始的归一化操作。第17~18行则是进行缩放与平移，并返回最后的结果。</p>
+<p>在实现完上述代码后还可以通过如下方式来进行检验，示例代码如下所示：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#ae81ff">1</span> <span style="color:#66d9ef">if</span> __name__ <span style="color:#f92672">==</span> <span style="color:#e6db74">&#39;__main__&#39;</span>:
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">2</span>     x <span style="color:#f92672">=</span> torch<span style="color:#f92672">.</span>randint(<span style="color:#ae81ff">0</span>, <span style="color:#ae81ff">10</span>, (<span style="color:#ae81ff">1</span>, <span style="color:#ae81ff">2</span>, <span style="color:#ae81ff">4</span>, <span style="color:#ae81ff">4</span>), dtype<span style="color:#f92672">=</span>torch<span style="color:#f92672">.</span>float32)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">3</span>     bn <span style="color:#f92672">=</span> BatchNormalization(num_features<span style="color:#f92672">=</span><span style="color:#ae81ff">2</span>, num_dims<span style="color:#f92672">=</span><span style="color:#ae81ff">4</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">4</span>     print(bn(x))
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">5</span>     bn <span style="color:#f92672">=</span> nn<span style="color:#f92672">.</span>BatchNorm2d(num_features<span style="color:#f92672">=</span><span style="color:#ae81ff">2</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">6</span>     print(bn(x))</span></span></code></pre></div><p>在上述代码中，第3、5行分别是上述实现的批归一化和PyTorch中的实现，最后的部分输出结果如下所示：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#ae81ff">1</span> tensor([[[[ <span style="color:#ae81ff">0.2560</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.4886</span>,  <span style="color:#ae81ff">0.6282</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">1.2332</span>],
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">2</span>           [<span style="color:#f92672">-</span><span style="color:#ae81ff">0.4886</span>,  <span style="color:#ae81ff">1.3728</span>,  <span style="color:#ae81ff">1.7451</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">1.6055</span>],
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">3</span>           <span style="color:#f92672">...</span>
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">4</span>           [ <span style="color:#ae81ff">1.2633</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.4792</span>,  <span style="color:#ae81ff">0.5663</span>,  <span style="color:#ae81ff">0.5663</span>]]]], grad_fn<span style="color:#f92672">=&lt;</span>AddBackward0<span style="color:#f92672">&gt;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">5</span> tensor([[[[ <span style="color:#ae81ff">0.2560</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.4886</span>,  <span style="color:#ae81ff">0.6282</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">1.2332</span>],
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">6</span>           [<span style="color:#f92672">-</span><span style="color:#ae81ff">0.4886</span>,  <span style="color:#ae81ff">1.3728</span>,  <span style="color:#ae81ff">1.7451</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">1.6055</span>],
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">7</span>           <span style="color:#f92672">...</span>
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">8</span>           [ <span style="color:#ae81ff">1.2633</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.4792</span>,  <span style="color:#ae81ff">0.5663</span>,  <span style="color:#ae81ff">0.5663</span>]]]], grad_fn<span style="color:#f92672">=&lt;</span>NativeBatchNormBackward0<span style="color:#f92672">&gt;</span>)</span></span></code></pre></div><p><strong>2. 使用示例</strong></p>
+<p>由于<code>BatchNormalization</code>同样是继承自类<code>nn.Module</code>，因此对于它的使用也同其它网络层一样。这里以<a href="dl/Chapter04/c8af5d84174b4420">4.4节</a>中介绍的LeNet5网络模型为例，批归一化的使用方法如下所示：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#ae81ff">1</span> <span style="color:#66d9ef">class</span> <span style="color:#a6e22e">LeNet5</span>(nn<span style="color:#f92672">.</span>Module):
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">2</span>     <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">__init__</span>(self, ):
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">3</span>         super(LeNet5, self)<span style="color:#f92672">.</span><span style="color:#a6e22e">__init__</span>()
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">4</span>         self<span style="color:#f92672">.</span>conv <span style="color:#f92672">=</span> nn<span style="color:#f92672">.</span>Sequential(
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">5</span>             nn<span style="color:#f92672">.</span>Conv2d(in_channels<span style="color:#f92672">=</span><span style="color:#ae81ff">1</span>, out_channels<span style="color:#f92672">=</span><span style="color:#ae81ff">6</span>, kernel_size<span style="color:#f92672">=</span><span style="color:#ae81ff">5</span>, padding<span style="color:#f92672">=</span><span style="color:#ae81ff">2</span>),
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">6</span>             BatchNormalization(num_features<span style="color:#f92672">=</span><span style="color:#ae81ff">6</span>, num_dims<span style="color:#f92672">=</span><span style="color:#ae81ff">4</span>),
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">7</span>             nn<span style="color:#f92672">.</span>ReLU(inplace<span style="color:#f92672">=</span><span style="color:#66d9ef">True</span>),nn<span style="color:#f92672">.</span>MaxPool2d(<span style="color:#ae81ff">2</span>, <span style="color:#ae81ff">2</span>),
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">8</span>             nn<span style="color:#f92672">.</span>Conv2d(in_channels<span style="color:#f92672">=</span><span style="color:#ae81ff">6</span>, out_channels<span style="color:#f92672">=</span><span style="color:#ae81ff">16</span>, kernel_size<span style="color:#f92672">=</span><span style="color:#ae81ff">5</span>),
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">9</span>             BatchNormalization(num_features<span style="color:#f92672">=</span><span style="color:#ae81ff">16</span>, num_dims<span style="color:#f92672">=</span><span style="color:#ae81ff">4</span>),
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">10</span>             nn<span style="color:#f92672">.</span>ReLU(inplace<span style="color:#f92672">=</span><span style="color:#66d9ef">True</span>),nn<span style="color:#f92672">.</span>MaxPool2d(<span style="color:#ae81ff">2</span>, <span style="color:#ae81ff">2</span>))  
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">11</span>         self<span style="color:#f92672">.</span>fc <span style="color:#f92672">=</span> nn<span style="color:#f92672">.</span>Sequential(
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">12</span>             nn<span style="color:#f92672">.</span>Flatten(),
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">13</span>             nn<span style="color:#f92672">.</span>Linear(in_features<span style="color:#f92672">=</span><span style="color:#ae81ff">16</span> <span style="color:#f92672">*</span> <span style="color:#ae81ff">5</span> <span style="color:#f92672">*</span> <span style="color:#ae81ff">5</span>, out_features<span style="color:#f92672">=</span><span style="color:#ae81ff">120</span>),
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">14</span>             BatchNormalization(num_features<span style="color:#f92672">=</span><span style="color:#ae81ff">120</span>, num_dims<span style="color:#f92672">=</span><span style="color:#ae81ff">2</span>),
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">15</span>             nn<span style="color:#f92672">.</span>ReLU(),
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">16</span>             nn<span style="color:#f92672">.</span>Linear(in_features<span style="color:#f92672">=</span><span style="color:#ae81ff">120</span>, out_features<span style="color:#f92672">=</span><span style="color:#ae81ff">84</span>),
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">17</span>             BatchNormalization(num_features<span style="color:#f92672">=</span><span style="color:#ae81ff">84</span>, num_dims<span style="color:#f92672">=</span><span style="color:#ae81ff">2</span>),
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">18</span>             nn<span style="color:#f92672">.</span>ReLU(),
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">19</span>             nn<span style="color:#f92672">.</span>Linear(in_features<span style="color:#f92672">=</span><span style="color:#ae81ff">84</span>, out_features<span style="color:#f92672">=</span><span style="color:#ae81ff">10</span>))</span></span></code></pre></div><p>在上述代码中，第6、9、14和17行便是新加入的批归一化操作，其中对于前面两个归一化来说<code>num_features</code>便是对应的上一层卷积核的个数，后两个归一化中<code>num_features</code>对应的是上一层神经元的个数，<code>num_dims</code>则是指输入张量的维度。</p>
+<p>在定义完上述LeNet5网络的前向传播过程之后，便可进行网络的训练过程，输入结果如下所示：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#ae81ff">1</span> Epochs[<span style="color:#ae81ff">1</span><span style="color:#f92672">/</span><span style="color:#ae81ff">3</span>]<span style="color:#f92672">--</span>batch[<span style="color:#ae81ff">0</span><span style="color:#f92672">/</span><span style="color:#ae81ff">938</span>]<span style="color:#f92672">--</span>Acc: <span style="color:#ae81ff">0.0469</span><span style="color:#f92672">--</span>loss: <span style="color:#ae81ff">2.432</span>
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">2</span> Epochs[<span style="color:#ae81ff">1</span><span style="color:#f92672">/</span><span style="color:#ae81ff">3</span>]<span style="color:#f92672">--</span>batch[<span style="color:#ae81ff">50</span><span style="color:#f92672">/</span><span style="color:#ae81ff">938</span>]<span style="color:#f92672">--</span>Acc: <span style="color:#ae81ff">0.9688</span><span style="color:#f92672">--</span>loss: <span style="color:#ae81ff">0.4447</span>
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">3</span> Epochs[<span style="color:#ae81ff">1</span><span style="color:#f92672">/</span><span style="color:#ae81ff">3</span>]<span style="color:#f92672">--</span>batch[<span style="color:#ae81ff">100</span><span style="color:#f92672">/</span><span style="color:#ae81ff">938</span>]<span style="color:#f92672">--</span>Acc: <span style="color:#ae81ff">0.9531</span><span style="color:#f92672">--</span>loss: <span style="color:#ae81ff">0.2289</span>
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">4</span> Epochs[<span style="color:#ae81ff">1</span><span style="color:#f92672">/</span><span style="color:#ae81ff">3</span>]<span style="color:#f92672">--</span>batch[<span style="color:#ae81ff">150</span><span style="color:#f92672">/</span><span style="color:#ae81ff">938</span>]<span style="color:#f92672">--</span>Acc: <span style="color:#ae81ff">0.9688</span><span style="color:#f92672">--</span>loss: <span style="color:#ae81ff">0.1339</span>
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">5</span> <span style="color:#f92672">...</span>
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">6</span> Epochs[<span style="color:#ae81ff">1</span><span style="color:#f92672">/</span><span style="color:#ae81ff">3</span>]<span style="color:#f92672">--</span>Acc on test <span style="color:#ae81ff">0.9808</span></span></span></code></pre></div><p>从上述输出结果可以看出，相比于<a href="dl/Chapter04/c8af5d84174b4420">4.4节</a>不含批归一化的LeNet5模型，加入批归一化后网络的收敛速度有了明显的加快。同时，根据是否采用批归一化操作还能得到如图6-13所示的损失曲线图。</p>
+<div align=center><img width="500" src="/images/dl/23042233116.jpg"/></div><center>图 6-14. 是否采用批归一化损失对比图</center>
+<p>如图6-14所示，上下分别是未使用和使用批归一化后模型损失曲线的变化情况，可以看出使用批归一化的模型在大约500个小批量迭代后就开始进行入了收敛阶段，而没有使用批归一化的模型则在2500个小批量迭代后才逐步开始收敛。除此之外，使用批归一化后的模型还支持使用更大的学习率以及能够增强模型的泛化能力，各自读者可以自行设置相关实验进行验证。</p>
+<p><strong>3. 使用顺序</strong></p>
+<p>在上面批归一化的使用示例中我们可以发现一个明显的规律，那就是批归一化层均是放在卷积层或全连接层之后非线性变换之前。之所以这样做是因为非线性变换通常都会导致输入的分布发生改变，如果是在激活函数之后使用批归一化那么每次输入到激活的特征分布便是不同的，而这样就没有达到批归一化的初衷。同时，论文作者还认为激活函数之前的线性组合更接近于一个对称的高斯分布，如果是以“线性组合+批归一化+非线性变换”的顺序进行，那么这将使得每次输入到激活函数中的值都具有类似的分布，从而更有利于网络的训练。</p>
+<p>当然，上述观点也只是原论文中作者的视角，在实际运用中依然有研究者将批归一化放到了激活函数之后使用。</p>
+<h2 id="634-小结">6.3.4 小结<a class="anchor" href="#634-%e5%b0%8f%e7%bb%93">#</a></h2>
+<p>在本节内容中，我们首先介绍了批归一化算法提出的原因和动机；然后详细介绍了批归一化的原理及过程，包括训练时的归一化和预测时的归一化等；进一步，介绍了如何从零开始在PyTorch框架中实现批归一化算法的计算过程；最后，以LeNet5模型为例对批归一化层的使用和效果进行了示例和验证。</p>
+<h3 id="引用">引用<a class="anchor" href="#%e5%bc%95%e7%94%a8">#</a></h3>
+<p>[1] Ioffe S, Szegedy C, Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift. ICML, PMLR, 2015, 37:448-456.</p>
+</article>
+ 
+      
+
+      <footer class="book-footer">
+        
+  <div class="flex flex-wrap justify-between">
+
+<div>
+
+</div>
+
+<div>
+
+</div>
+
+</div>
+
+<div class="flex flex-wrap justify-between">
+    <span>
+    
+      <a href="/dl/chapter06/fc024c283f164849/" class="flex align-center">
+        <img src="/icons/backward.svg" class="book-icon" alt="Backward" />
+        <span>6.2 梯度裁剪</span>
+      </a>
+    
+    </span>
+    <span>
+    
+      <a href="/dl/chapter06/fdd5ba4b41f74a0e/" class="flex align-center">
+        <span>6.4 层归一化</span>
+        <img src="/icons/forward.svg" class="book-icon" alt="Forward" />
+      </a>
+    
+    </span>
+  </div>
+
+ 
+        
+  
+  <div class="book-comments">
+
+</div>
+  
+ 
+        
+  <link rel="stylesheet" href="/katex/katex.min.css" />
+  <script defer src="/katex/katex.min.js"></script>
+  <script defer src="/katex/auto-render.min.js"></script>
+  
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        if (window.renderMathInElement) {
+          renderMathInElement(
+            document.querySelector(".book-page"),
+            Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
+          );
+        }
+      });
+    </script>
+  
+
+
+        
+  
+ 
+        
+  
+    <script>(function(){document.querySelectorAll("pre:has(code)").forEach(e=>{e.addEventListener("click",e.focus),e.addEventListener("copy",function(t){if(t.preventDefault(),navigator.clipboard){const t=window.getSelection().toString()||e.textContent;navigator.clipboard.writeText(t)}})})})()</script>
+  
+
+      </footer>
+
+      <label for="menu-control" class="hidden book-menu-overlay"></label>
+    </div>
+
+    
+  
+  <aside class="book-toc">
+    <div class="book-toc-content">
+      
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#631-批归一化动机">6.3.1 批归一化动机</a></li>
+    <li><a href="#632-批归一化原理">6.3.2 批归一化原理</a></li>
+    <li><a href="#633-批归一化实现">6.3.3 批归一化实现</a></li>
+    <li><a href="#634-小结">6.3.4 小结</a>
+      <ul>
+        <li><a href="#引用">引用</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+
+
+
+    </div>
+  </aside>
+  
+ 
+  </main>
+
+  
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

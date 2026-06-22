@@ -1,0 +1,3847 @@
+<!DOCTYPE html>
+<html lang="zh_CN" dir="ltr">
+<head>
+  <!--
+Made with Book Theme
+https://github.com/alex-shpak/hugo-book
+-->
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="11.11 基于层次的聚类算法# 经过前面几节内容的介绍，我们已经清楚了Kmeans、Kmeans&#43;&#43;、基于权重的加权Kmeans和DBSCAN这4种聚类算法的原理与实现。总的来说这4种聚类算法各有千秋，分别都能在一些独特的场景中发挥自己的优势。在接下来的这篇文章中，我们将会为大家介绍第5种常见的聚类算法，层次聚类算法（Hierarchical Clustering），如图11-30所示便是整个算法的学习路线图。
+图 11-30 层次聚类算法学习路线图 11.11.1 HCA算法思想# 现在想象这么一个场景，假如你有大量病人的就医资料，需要通过聚类将其划分为不同的科室，例如消化科、呼吸科和皮肤科等等。但是除此之外，你还想顺便得到每个科室下具体病症的情况，例如呼吸科下面可能有肺炎病人、普通感冒病人等等。如果是通过前面介绍的4种聚类算法来进行建模，那么显然只能得到以科室为颗粒度的聚类结果[1]。
+不过此时有读者可能会说，直接以病症为颗粒度进行聚类不就解决了吗？虽然理论上可以这么做，但是这种做法的弊端在于K值太大聚类结果可能不会太理想。同时，在其它我们不知道样本的层次结构中（假如在上面例子中不知道肺炎和感冒属于呼吸科），还能够通过层次聚类算法来发现这种潜在的结构。
+在数据挖掘和统计分析中，层次聚类也叫做层次聚类分析（Hierarchical Cluster Analysis, HCA），旨在得到样本簇结构的同时发现样本分布的层次结构[2]。同时，层次聚类算法一般来说可以分为两种，一种是自下而上（Bottom-up）的凝聚层次聚类（Agglomerative Clustering）和自上而下的分裂层次聚类（Divisive Clustering）。
+凝聚层次聚类算法在聚类伊始会将数据中的每个样本点均看作是一个独立的簇结构，然后迭代将当前状态下最相似的两个簇进行合并，直到最后只剩下一个簇时聚类结束。对于分裂层次聚类算法来说则恰恰相反，分裂层次聚类算法在聚类伊始将所有的样本点都看成是一个簇，然后迭代将当前状态下最大的簇划分为两部分，直到最后将整个数据集划分成$n$个簇结束[2]。
+由于在实际应用中基于自上而下的分裂层次聚类使用较少，所以后续将只介绍采用不同策略下的凝聚层次聚类算法。
+11.11.2 HCA示例代码# 在介绍完层次聚类算法的基本思想以后，再来看如何借助sklearn来完成整个层次聚类的建模过程，以下完整示例代码可参见 AllBooKCode/Chapter11/C19_hca_train.py 文件，示例代码如下：
+1 from sklearn.cluster import AgglomerativeClustering 2 3 if __name__ == &#39;__main__&#39;: 4 n_clusters = 3 5 X, y = load_iris(return_X_y=True) 6 X = StandardScaler().fit_transform(X) 7 model = AgglomerativeClustering(n_clusters=n_clusters, linkage=&#34;ward&#34;) 8 model.fit(X) 9 print(f&#34;兰德系数为: {adjusted_rand_score(y, model.labels_)}&#34;)在上述代码中，第1行代码便是导入sklearn中的凝聚层次聚类算法模块。第4~6行是导入数据集并进行标准化处理。第7行是实例化一个类对象，其中linkage参数表示指定一种层次聚类的算法，取值有&#39;ward&#39;、 &#39;complete&#39;和 &#39;single&#39;这3种，后续也将分别详细进行介绍。第8~9行是先完成整个聚类过程，然后对聚类结果进行评估。
+11.11.3 HCA算法原理# 在知道了层次聚类算法的基本思想后再来看聚类过程的具体步骤。根据上面的介绍，可以将整个聚类过程归结为如下3步：
+（1）将每个样本点均初始化为一个单独的簇；
+（2）如果当前只存在一个簇则进入第（3）步，否则寻找当前状态下最相似的两个簇进行合并；
+（3）返回整个聚类合并结果[1]。
+如图11-31所示从$a$到$j$一共有10个样本点，下面将按照上述3个步骤来对凝聚层次聚类算法的聚类过程进行示例。
+图 11-31 层次聚类算法原理图 如图11-31右侧所示，首先将这10个样本点均看作是一个单独的簇结构$(\cdot )$；其次假定此时在所有簇的两两组合中，$(g)$和$(h)$这两个簇最相似，那么则将其合并为一个簇$(g,h)$；由于此时不止一个簇所以继续迭代，将$(i)$和$(j)$这两个簇进行合并得到簇$(i,j)$；进一步，根据同样的方式将会得到簇$(e,f)$；同理，再次将$(g,h)$与$(i,j)$合并得到簇$((g,h),(i,j))$；将$(b)$和$(c)$合并得到簇$(b,c)$；将$(d)$和$(e,f)$合并得到簇$(d,(e,f))$；将$(b,c)$和$(d,(e,f))$合并得到$((b,c),(d,(e,f)))$；将$(a)$与$((b,c),(d,(e,f)))$合并得到簇$(a,((b,c),(d,(e,f))))$；最后，将$((g,h),(i,j))$和$(a,((b,c),(d,(e,f))))$合并得到簇$(((g,h),(i,j)),(a,((b,c),(d,(e,f)))))$。由于此时只剩下一个簇，所以层次聚类过程结束。与此同时，我们还可以通过图11-31左侧所示的树状图（Dendrogram）来观察每个簇内部层次结构。
+介绍到这里肯定有读者会问，既然凝聚层次聚类算法的终止条件是只剩下一个簇，那么聚类结束后的簇结构到是怎么样的呢？如图11-31左侧所示，在整个聚类过程中，如果不进行最后1次合并那么将会得到两个簇结构；如果在倒数第2次停止合并那么将会得到3个簇结构，以此类推。同时，在每个簇的内部还能看到剩余样本的层次结构。因此实际情况中，如果我们知道真实的簇数量K，那么完全可以在只剩下K个簇的时候停止合并，后续的代码实现也将遵循这一准则。
+经过上面的介绍我们发现，凝聚层次聚类算法有两个关键的要素：距离的计算方式和相似性的计算方式（Linkage Criteria）。这一点就类似于K近邻算法一样，也需要两个关键的要素（距离度量方式和决策规则）。因为采用不同的距离计算方式，在后续进行相似性计算时将会得到不同的划分结果。通常在凝聚层次聚类中，距离的度量方式有欧式距离、曼哈顿距离等。对于相似性的度量方式来说常用的有Single-Link、Complete-Link和Ward等[2]。在接下来的内容，我们将分别介绍这3种相似性度量方式的原理及实现过程。
+11.11.4 Single-Link算法原理# 使用Single-Link作为相似性衡量标准的凝聚层次聚类算法也被称之为最近邻聚类（Nearest Neighbour Clustering），其核心思想是根据两个簇之间相邻最近两个样本点的距离来作为相似性评判标准，距离越近则表示这两个簇越相似，即这两个簇越有可能被合并。
+">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
+<meta name="color-scheme" content="light dark"><meta property="og:url" content="https://mlwithme.github.io/ml/chapter11/2f01ba751d914336/">
+	<meta property="og:site_name" content="《从零学AI指南手册》">
+	<meta property="og:title" content="11.11 基于层次的聚类算法">
+	<meta property="og:description" content="11.11 基于层次的聚类算法# 经过前面几节内容的介绍，我们已经清楚了Kmeans、Kmeans&#43;&#43;、基于权重的加权Kmeans和DBSCAN这4种聚类算法的原理与实现。总的来说这4种聚类算法各有千秋，分别都能在一些独特的场景中发挥自己的优势。在接下来的这篇文章中，我们将会为大家介绍第5种常见的聚类算法，层次聚类算法（Hierarchical Clustering），如图11-30所示便是整个算法的学习路线图。
+图 11-30 层次聚类算法学习路线图 11.11.1 HCA算法思想# 现在想象这么一个场景，假如你有大量病人的就医资料，需要通过聚类将其划分为不同的科室，例如消化科、呼吸科和皮肤科等等。但是除此之外，你还想顺便得到每个科室下具体病症的情况，例如呼吸科下面可能有肺炎病人、普通感冒病人等等。如果是通过前面介绍的4种聚类算法来进行建模，那么显然只能得到以科室为颗粒度的聚类结果[1]。
+不过此时有读者可能会说，直接以病症为颗粒度进行聚类不就解决了吗？虽然理论上可以这么做，但是这种做法的弊端在于K值太大聚类结果可能不会太理想。同时，在其它我们不知道样本的层次结构中（假如在上面例子中不知道肺炎和感冒属于呼吸科），还能够通过层次聚类算法来发现这种潜在的结构。
+在数据挖掘和统计分析中，层次聚类也叫做层次聚类分析（Hierarchical Cluster Analysis, HCA），旨在得到样本簇结构的同时发现样本分布的层次结构[2]。同时，层次聚类算法一般来说可以分为两种，一种是自下而上（Bottom-up）的凝聚层次聚类（Agglomerative Clustering）和自上而下的分裂层次聚类（Divisive Clustering）。
+凝聚层次聚类算法在聚类伊始会将数据中的每个样本点均看作是一个独立的簇结构，然后迭代将当前状态下最相似的两个簇进行合并，直到最后只剩下一个簇时聚类结束。对于分裂层次聚类算法来说则恰恰相反，分裂层次聚类算法在聚类伊始将所有的样本点都看成是一个簇，然后迭代将当前状态下最大的簇划分为两部分，直到最后将整个数据集划分成$n$个簇结束[2]。
+由于在实际应用中基于自上而下的分裂层次聚类使用较少，所以后续将只介绍采用不同策略下的凝聚层次聚类算法。
+11.11.2 HCA示例代码# 在介绍完层次聚类算法的基本思想以后，再来看如何借助sklearn来完成整个层次聚类的建模过程，以下完整示例代码可参见 AllBooKCode/Chapter11/C19_hca_train.py 文件，示例代码如下：
+1 from sklearn.cluster import AgglomerativeClustering 2 3 if __name__ == &#39;__main__&#39;: 4 n_clusters = 3 5 X, y = load_iris(return_X_y=True) 6 X = StandardScaler().fit_transform(X) 7 model = AgglomerativeClustering(n_clusters=n_clusters, linkage=&#34;ward&#34;) 8 model.fit(X) 9 print(f&#34;兰德系数为: {adjusted_rand_score(y, model.labels_)}&#34;)在上述代码中，第1行代码便是导入sklearn中的凝聚层次聚类算法模块。第4~6行是导入数据集并进行标准化处理。第7行是实例化一个类对象，其中linkage参数表示指定一种层次聚类的算法，取值有&#39;ward&#39;、 &#39;complete&#39;和 &#39;single&#39;这3种，后续也将分别详细进行介绍。第8~9行是先完成整个聚类过程，然后对聚类结果进行评估。
+11.11.3 HCA算法原理# 在知道了层次聚类算法的基本思想后再来看聚类过程的具体步骤。根据上面的介绍，可以将整个聚类过程归结为如下3步：
+（1）将每个样本点均初始化为一个单独的簇；
+（2）如果当前只存在一个簇则进入第（3）步，否则寻找当前状态下最相似的两个簇进行合并；
+（3）返回整个聚类合并结果[1]。
+如图11-31所示从$a$到$j$一共有10个样本点，下面将按照上述3个步骤来对凝聚层次聚类算法的聚类过程进行示例。
+图 11-31 层次聚类算法原理图 如图11-31右侧所示，首先将这10个样本点均看作是一个单独的簇结构$(\cdot )$；其次假定此时在所有簇的两两组合中，$(g)$和$(h)$这两个簇最相似，那么则将其合并为一个簇$(g,h)$；由于此时不止一个簇所以继续迭代，将$(i)$和$(j)$这两个簇进行合并得到簇$(i,j)$；进一步，根据同样的方式将会得到簇$(e,f)$；同理，再次将$(g,h)$与$(i,j)$合并得到簇$((g,h),(i,j))$；将$(b)$和$(c)$合并得到簇$(b,c)$；将$(d)$和$(e,f)$合并得到簇$(d,(e,f))$；将$(b,c)$和$(d,(e,f))$合并得到$((b,c),(d,(e,f)))$；将$(a)$与$((b,c),(d,(e,f)))$合并得到簇$(a,((b,c),(d,(e,f))))$；最后，将$((g,h),(i,j))$和$(a,((b,c),(d,(e,f))))$合并得到簇$(((g,h),(i,j)),(a,((b,c),(d,(e,f)))))$。由于此时只剩下一个簇，所以层次聚类过程结束。与此同时，我们还可以通过图11-31左侧所示的树状图（Dendrogram）来观察每个簇内部层次结构。
+介绍到这里肯定有读者会问，既然凝聚层次聚类算法的终止条件是只剩下一个簇，那么聚类结束后的簇结构到是怎么样的呢？如图11-31左侧所示，在整个聚类过程中，如果不进行最后1次合并那么将会得到两个簇结构；如果在倒数第2次停止合并那么将会得到3个簇结构，以此类推。同时，在每个簇的内部还能看到剩余样本的层次结构。因此实际情况中，如果我们知道真实的簇数量K，那么完全可以在只剩下K个簇的时候停止合并，后续的代码实现也将遵循这一准则。
+经过上面的介绍我们发现，凝聚层次聚类算法有两个关键的要素：距离的计算方式和相似性的计算方式（Linkage Criteria）。这一点就类似于K近邻算法一样，也需要两个关键的要素（距离度量方式和决策规则）。因为采用不同的距离计算方式，在后续进行相似性计算时将会得到不同的划分结果。通常在凝聚层次聚类中，距离的度量方式有欧式距离、曼哈顿距离等。对于相似性的度量方式来说常用的有Single-Link、Complete-Link和Ward等[2]。在接下来的内容，我们将分别介绍这3种相似性度量方式的原理及实现过程。
+11.11.4 Single-Link算法原理# 使用Single-Link作为相似性衡量标准的凝聚层次聚类算法也被称之为最近邻聚类（Nearest Neighbour Clustering），其核心思想是根据两个簇之间相邻最近两个样本点的距离来作为相似性评判标准，距离越近则表示这两个簇越相似，即这两个簇越有可能被合并。">
+	<meta property="og:locale" content="zh_CN">
+	<meta property="og:type" content="article">
+		<meta property="article:section" content="ml">
+
+
+	<meta itemprop="name" content="11.11 基于层次的聚类算法">
+	<meta itemprop="description" content="11.11 基于层次的聚类算法# 经过前面几节内容的介绍，我们已经清楚了Kmeans、Kmeans&#43;&#43;、基于权重的加权Kmeans和DBSCAN这4种聚类算法的原理与实现。总的来说这4种聚类算法各有千秋，分别都能在一些独特的场景中发挥自己的优势。在接下来的这篇文章中，我们将会为大家介绍第5种常见的聚类算法，层次聚类算法（Hierarchical Clustering），如图11-30所示便是整个算法的学习路线图。
+图 11-30 层次聚类算法学习路线图 11.11.1 HCA算法思想# 现在想象这么一个场景，假如你有大量病人的就医资料，需要通过聚类将其划分为不同的科室，例如消化科、呼吸科和皮肤科等等。但是除此之外，你还想顺便得到每个科室下具体病症的情况，例如呼吸科下面可能有肺炎病人、普通感冒病人等等。如果是通过前面介绍的4种聚类算法来进行建模，那么显然只能得到以科室为颗粒度的聚类结果[1]。
+不过此时有读者可能会说，直接以病症为颗粒度进行聚类不就解决了吗？虽然理论上可以这么做，但是这种做法的弊端在于K值太大聚类结果可能不会太理想。同时，在其它我们不知道样本的层次结构中（假如在上面例子中不知道肺炎和感冒属于呼吸科），还能够通过层次聚类算法来发现这种潜在的结构。
+在数据挖掘和统计分析中，层次聚类也叫做层次聚类分析（Hierarchical Cluster Analysis, HCA），旨在得到样本簇结构的同时发现样本分布的层次结构[2]。同时，层次聚类算法一般来说可以分为两种，一种是自下而上（Bottom-up）的凝聚层次聚类（Agglomerative Clustering）和自上而下的分裂层次聚类（Divisive Clustering）。
+凝聚层次聚类算法在聚类伊始会将数据中的每个样本点均看作是一个独立的簇结构，然后迭代将当前状态下最相似的两个簇进行合并，直到最后只剩下一个簇时聚类结束。对于分裂层次聚类算法来说则恰恰相反，分裂层次聚类算法在聚类伊始将所有的样本点都看成是一个簇，然后迭代将当前状态下最大的簇划分为两部分，直到最后将整个数据集划分成$n$个簇结束[2]。
+由于在实际应用中基于自上而下的分裂层次聚类使用较少，所以后续将只介绍采用不同策略下的凝聚层次聚类算法。
+11.11.2 HCA示例代码# 在介绍完层次聚类算法的基本思想以后，再来看如何借助sklearn来完成整个层次聚类的建模过程，以下完整示例代码可参见 AllBooKCode/Chapter11/C19_hca_train.py 文件，示例代码如下：
+1 from sklearn.cluster import AgglomerativeClustering 2 3 if __name__ == &#39;__main__&#39;: 4 n_clusters = 3 5 X, y = load_iris(return_X_y=True) 6 X = StandardScaler().fit_transform(X) 7 model = AgglomerativeClustering(n_clusters=n_clusters, linkage=&#34;ward&#34;) 8 model.fit(X) 9 print(f&#34;兰德系数为: {adjusted_rand_score(y, model.labels_)}&#34;)在上述代码中，第1行代码便是导入sklearn中的凝聚层次聚类算法模块。第4~6行是导入数据集并进行标准化处理。第7行是实例化一个类对象，其中linkage参数表示指定一种层次聚类的算法，取值有&#39;ward&#39;、 &#39;complete&#39;和 &#39;single&#39;这3种，后续也将分别详细进行介绍。第8~9行是先完成整个聚类过程，然后对聚类结果进行评估。
+11.11.3 HCA算法原理# 在知道了层次聚类算法的基本思想后再来看聚类过程的具体步骤。根据上面的介绍，可以将整个聚类过程归结为如下3步：
+（1）将每个样本点均初始化为一个单独的簇；
+（2）如果当前只存在一个簇则进入第（3）步，否则寻找当前状态下最相似的两个簇进行合并；
+（3）返回整个聚类合并结果[1]。
+如图11-31所示从$a$到$j$一共有10个样本点，下面将按照上述3个步骤来对凝聚层次聚类算法的聚类过程进行示例。
+图 11-31 层次聚类算法原理图 如图11-31右侧所示，首先将这10个样本点均看作是一个单独的簇结构$(\cdot )$；其次假定此时在所有簇的两两组合中，$(g)$和$(h)$这两个簇最相似，那么则将其合并为一个簇$(g,h)$；由于此时不止一个簇所以继续迭代，将$(i)$和$(j)$这两个簇进行合并得到簇$(i,j)$；进一步，根据同样的方式将会得到簇$(e,f)$；同理，再次将$(g,h)$与$(i,j)$合并得到簇$((g,h),(i,j))$；将$(b)$和$(c)$合并得到簇$(b,c)$；将$(d)$和$(e,f)$合并得到簇$(d,(e,f))$；将$(b,c)$和$(d,(e,f))$合并得到$((b,c),(d,(e,f)))$；将$(a)$与$((b,c),(d,(e,f)))$合并得到簇$(a,((b,c),(d,(e,f))))$；最后，将$((g,h),(i,j))$和$(a,((b,c),(d,(e,f))))$合并得到簇$(((g,h),(i,j)),(a,((b,c),(d,(e,f)))))$。由于此时只剩下一个簇，所以层次聚类过程结束。与此同时，我们还可以通过图11-31左侧所示的树状图（Dendrogram）来观察每个簇内部层次结构。
+介绍到这里肯定有读者会问，既然凝聚层次聚类算法的终止条件是只剩下一个簇，那么聚类结束后的簇结构到是怎么样的呢？如图11-31左侧所示，在整个聚类过程中，如果不进行最后1次合并那么将会得到两个簇结构；如果在倒数第2次停止合并那么将会得到3个簇结构，以此类推。同时，在每个簇的内部还能看到剩余样本的层次结构。因此实际情况中，如果我们知道真实的簇数量K，那么完全可以在只剩下K个簇的时候停止合并，后续的代码实现也将遵循这一准则。
+经过上面的介绍我们发现，凝聚层次聚类算法有两个关键的要素：距离的计算方式和相似性的计算方式（Linkage Criteria）。这一点就类似于K近邻算法一样，也需要两个关键的要素（距离度量方式和决策规则）。因为采用不同的距离计算方式，在后续进行相似性计算时将会得到不同的划分结果。通常在凝聚层次聚类中，距离的度量方式有欧式距离、曼哈顿距离等。对于相似性的度量方式来说常用的有Single-Link、Complete-Link和Ward等[2]。在接下来的内容，我们将分别介绍这3种相似性度量方式的原理及实现过程。
+11.11.4 Single-Link算法原理# 使用Single-Link作为相似性衡量标准的凝聚层次聚类算法也被称之为最近邻聚类（Nearest Neighbour Clustering），其核心思想是根据两个簇之间相邻最近两个样本点的距离来作为相似性评判标准，距离越近则表示这两个簇越相似，即这两个簇越有可能被合并。">
+	<meta itemprop="wordCount" content="271">
+
+<title>11.11 基于层次的聚类算法 • 《从零学AI指南手册》</title>
+<link rel="icon" href="/favicon.png" >
+<link rel="manifest" href="/manifest.json">
+<link rel="canonical" href="https://mlwithme.github.io/ml/chapter11/2f01ba751d914336/">
+<link rel="stylesheet" href="/book.min.6097ccf1d338ddfaa037d2f96478059a71fa573d0f917d128bab595efea338ca.css" integrity="sha256-YJfM8dM43fqgN9L5ZHgFmnH6Vz0PkX0Si6tZXv6jOMo=" crossorigin="anonymous">
+
+
+  <script defer type="module" src="/en.search.min.ffaad769e546b38d39820301bb9e5c193822f7bf0f46a855602e4e14707802e0.js" integrity="sha256-/6rXaeVGs405ggMBu55cGTgi978PRqhVYC5OFHB4AuA=" crossorigin="anonymous"></script>
+
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-23SZ6E8VY7"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-23SZ6E8VY7');
+</script>
+<script async src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
+
+</head>
+<body dir="ltr" class="book-kind-page book-type-ml">
+  <input type="checkbox" class="hidden toggle" id="menu-control" />
+  <input type="checkbox" class="hidden toggle" id="toc-control" />
+  <main class="container flex">
+    
+<aside class="book-menu">
+  <div class="book-menu-content">
+    
+  <nav>
+<h2 class="book-brand">
+  <a class="flex align-center" href="/"><span>《从零学AI指南手册》</span>
+  </a>
+</h2>
+
+
+<div class="book-search hidden">
+  <input id="book-search-input" type="text" 
+    placeholder="Search"
+    aria-label="Search"
+    maxlength="64" />
+  <div class="book-search-spinner hidden"></div>
+  <ul id="book-search-results"></ul>
+</div>
+<script>document.querySelector(".book-search").classList.remove("hidden")</script>
+
+
+
+
+
+
+
+
+
+
+  
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a>
+      大模型Agent开发</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-253e26e732e57a78f635dcf47df3d0a3" class="toggle"  />
+    <label for="section-253e26e732e57a78f635dcf47df3d0a3" class="flex">
+      <a role="button" class="">
+        第 1 章 RAG 基础概念</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/454f0942222e471e/" class="">
+      1.1 RAG 提出背景</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/d7623d619f884b25/" class="">
+      1.2 RAG 流程概览</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-810ee5a2a3a24c9b7c25ab5324ae7db7" class="toggle"  />
+    <label for="section-810ee5a2a3a24c9b7c25ab5324ae7db7" class="flex">
+      <a role="button" class="">
+        第 2 章 大模型接入与使用</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/d43adfc00df54515/" class="">
+      2.1 SDK 介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/8b9059fde1d644a4/" class="">
+      2.2 现代大模型中的 SDK</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/95d3214ab80b4769/" class="">
+      2.3 DashScope 接口体系</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/b9843c089d654494/" class="">
+      2.4 千问大模型接入与使用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ed1727f01d0e40dc9b7961b72e42160e" class="toggle"  />
+    <label for="section-ed1727f01d0e40dc9b7961b72e42160e" class="flex">
+      <a role="button" class="">
+        第 3 章 文档标准化与语义检索</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/7f4af6d48c5b425c/" class="">
+      3.1 文档加载与标准化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/572ba4c9cb114677/" class="">
+      3.2 常见文本切分策略</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/06e588cd33fa4454/" class="">
+      3.3 向量数据库选择</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/ff27306c0d7b4387/" class="">
+      3.4 Qwen3 Embedding 模型介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/303035851c5e42f2/" class="">
+      3.5 语义搜索引擎构建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/e1328cb23e8c412b/" class="">
+      3.6  Milvus 模块解析</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-caaf9d8eb5e5559f7ca8bb11c41da71a" class="toggle"  />
+    <label for="section-caaf9d8eb5e5559f7ca8bb11c41da71a" class="flex">
+      <a role="button" class="">
+        第 4 章 RAG 与 Agent</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/4c646aa07f3b4b74/" class="">
+      4.1 两步式 RAG 搭建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/5c35e934bab24ac3/" class="">
+      4.2 Function Calling 概念介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/88ff352fc22e4cd6/" class="">
+      4.3 LangChain 中的 Tool 修饰器</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/83fe26536a5d4b6e/" class="">
+      4.4 RAG Agent 原理与搭建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/b7e49268357a4bca/" class="">
+      4.5 复杂问题拆解与ReAct框架</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/469b5963f2ca4799/" class="">
+      4.6 RAG 中的两阶段索引</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/10fb92a6c5484039/" class="">
+      4.7 Qwen3 Reranking 原理与使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/45d286aec1bc4d66/" class="">
+      4.8 基于两阶段索引的 RAG Agent 搭建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/43af483460574e48/" class="">
+      4.9 LangGraph 基本概念介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/0def4564f3aa455d/" class="">
+      4.10  基于 LangGraph 构建自定义 RAG Agent</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a>
+      深度学习</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/70e5f9cdbedc4b2c/" class="">
+      学习思维导图</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-a9b664bcf9e1dab8add449268565f466" class="toggle"  />
+    <label for="section-a9b664bcf9e1dab8add449268565f466" class="flex">
+      <a role="button" class="">
+        第 1 章 深度学习简介</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/647eb9c607874e3a/" class="">
+      1.1 深度学习的发展阶段</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/f31da36a6f444afe/" class="">
+      1.2 深度学习中的关键人物</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/da9fa13021e64f3c/" class="">
+      1.3 深度学习框架介绍</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-e6e0db5d4bc28bd97dfe8d5210249e63" class="toggle"  />
+    <label for="section-e6e0db5d4bc28bd97dfe8d5210249e63" class="flex">
+      <a role="button" class="">
+        第 2 章 环境配置</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/a0c5d1e0de0140cb/" class="">
+      2.1 体系结构介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/04f07b9246984577/" class="">
+      2.2 深度学习环境安装</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/5bf6454673194c67/" class="">
+      2.3 开发环境安装配置</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-0a2ca47f15332c8b06ae83247328edb4" class="toggle"  />
+    <label for="section-0a2ca47f15332c8b06ae83247328edb4" class="flex">
+      <a role="button" class="">
+        第 3 章 深度学习基础</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/75c5fa7839174c16/" class="">
+      3.1 线性回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/ca16f8cb6df444a6/" class="">
+      3.2 线性回归简洁实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/97e1da1143cd4554/" class="">
+      3.3 梯度下降与反向传播</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/7b865de988ea422c/" class="">
+      3.4 从零实现回归模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/18fdd1deff424a16/" class="">
+      3.5 从逻辑回归到Softmax回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/55967b0f642b4509/" class="">
+      3.6 Softmax回归简洁实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/381bbd56509e4a6f/" class="">
+      3.7 从零实现分类模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/2c061df4435d4928/" class="">
+      3.8 回归模型评估指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/e3442eff254e473c/" class="">
+      3.9 分类模型评估指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/307f927c8a1245c5/" class="">
+      3.10 过拟合与正则化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/bcb64de5aa404f18/" class="">
+      3.11 超参数与交叉验证</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/66dd7425cdd04565/" class="">
+      3.12 激活函数</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/0d3dacfff4c04794/" class="">
+      3.13 多标签分类</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-95b7e7417bf2b821a1b760975d3acc22" class="toggle"  />
+    <label for="section-95b7e7417bf2b821a1b760975d3acc22" class="flex">
+      <a role="button" class="">
+        第 4 章 卷积神经网络</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/102e183e8be94f46/" class="">
+      4.1 卷积的概念</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/5b3e3152e9e54f4f/" class="">
+      4.2 卷积的计算过程</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/762f60de801a4ccd/" class="">
+      4.3 填充和池化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/c8af5d84174b4420/" class="">
+      4.4 LeNet5网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/de007462967e4701/" class="">
+      4.5 AlexNet网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/f084f181c3554082/" class="">
+      4.6 VGG网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/911b961cc5d949b6/" class="">
+      4.7 NIN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/47da186baf3e4a0b/" class="">
+      4.8 GoogLeNet网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/da16c61397454b2c/" class="">
+      4.9 ResNet网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/1c24468824274650/" class="">
+      4.10 DenseNet网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-17076fe90a2d84e207bbd0c829983325" class="toggle"  />
+    <label for="section-17076fe90a2d84e207bbd0c829983325" class="flex">
+      <a role="button" class="">
+        第 5 章 模型训练与复用</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/4557a6f03dec4475/" class="">
+      5.1 参数及日志管理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/e7c4c6da085148d0/" class="">
+      5.2 Tensorboard可视化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/27387966672c45ed/" class="">
+      5.3 模型的保存与复用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/211b26bdd8f248ac/" class="">
+      5.4 模型的迁移学习</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/345c1b72253043cb/" class="">
+      5.5 开源模型复用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/c912dda030c946d9/" class="">
+      5.6 多GPU训练</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/f065af80f3844b0b/" class="">
+      5.7 数据预处理与缓存</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-2d091d454d5c3f03f5e0a202c37cc226" class="toggle"  />
+    <label for="section-2d091d454d5c3f03f5e0a202c37cc226" class="flex">
+      <a role="button" class="">
+        第 6 章 模型优化方法</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/cc35bb112783410e/" class="">
+      6.1 学习率调度器</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/fc024c283f164849/" class="">
+      6.2 梯度裁剪</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/27ed3ed136e24092/" class="">
+      6.3 批归一化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/fdd5ba4b41f74a0e/" class="">
+      6.4 层归一化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/9246afed14eb436c/" class="">
+      6.5 组归一化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/fcbc66ad051a4336/" class="">
+      6.6 动量法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/8b83d654898c40a2/" class="">
+      6.7 AdaGrad算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/078f2394980d41d2/" class="">
+      6.8 AdaDelta算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/28ad7fb39987447e/" class="">
+      6.9 Adam算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/4b81b8d39721434d/" class="">
+      6.10 初始化方法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f2f78ba4851131558fc284d927542d28" class="toggle"  />
+    <label for="section-f2f78ba4851131558fc284d927542d28" class="flex">
+      <a role="button" class="">
+        第 7 章 循环神经网络</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/88ba4e03337b4233/" class="">
+      7.1 RNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/ec8ff069aadc49b9/" class="">
+      7.2 时序数据</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/b4c5ddcc9e904238/" class="">
+      7.3 LSTM网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/4112672112224dc1/" class="">
+      7.4 GRU网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/b6e5ccb6cd064f74/" class="">
+      7.5 BiRNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/4bf3ecf7b21e45fb/" class="">
+      7.6 CharRNN网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-49992cff6143e64ae5d7f2209dcfb054" class="toggle"  />
+    <label for="section-49992cff6143e64ae5d7f2209dcfb054" class="flex">
+      <a role="button" class="">
+        第 8 章 时序与模型融合</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/2be88fbc08a5418f/" class="">
+      8.1 TextCNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/9023d1f822a54226/" class="">
+      8.2 TextRNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/9edd7db2d439402f/" class="">
+      8.3 CNN-RNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/19c2b86e85f2461e/" class="">
+      8.4 ConvLSTM网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/1e6da79bf7b44c20/" class="">
+      8.5 3DCNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/5f426a9190e7454b/" class="">
+      8.6 STResNet网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ca07c572acb4d7fd40854f5b367c247b" class="toggle"  />
+    <label for="section-ca07c572acb4d7fd40854f5b367c247b" class="flex">
+      <a role="button" class="">
+        第 9 章 自然语言处理</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/e0cb9a7aae814045/" class="">
+      9.1 自然语言处理介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/d4703d990f8d4fed/" class="">
+      9.2 Word2Vec词向量</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/1bb6351b01a2479b/" class="">
+      9.3 Word2Vec训练与使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/40a8a1146d934c55/" class="">
+      9.4 GloVe词向量</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/c6aa1405b8cf46d8/" class="">
+      9.5 词向量的微调使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/48c26d04b342452d/" class="">
+      9.6 fastText网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/03a0166e195f443f/" class="">
+      9.7 Seq2Seq网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/271bda16904544af/" class="">
+      9.8 序列模型评价指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/fefa60e0bc854a17/" class="">
+      9.9 NMT网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/5bcd8b0920414f34/" class="">
+      9.10 注意力机制</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/8a78e8213ee04aac/" class="">
+      9.11 含注意力的NMT网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/474ac7a1867d4b5e/" class="">
+      9.12 含注意力的RNN网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-8cdec04c2fd8683c5c7373c78d943528" class="toggle"  />
+    <label for="section-8cdec04c2fd8683c5c7373c78d943528" class="flex">
+      <a role="button" class="">
+        第10章 现代神经网络</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/7523731afc0241c0/" class="">
+      10.1 ELMo网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/4987d1044939480d/" class="">
+      10.2 Transformer网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/a469ed1a25e1498f/" class="">
+      10.3 Transformer结构</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/d50c490eef3b4565/" class="">
+      10.4 Transformer实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/f6c507b3d2d74f03/" class="">
+      10.5 Transformer对联模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/3aedea1d3f3e48dd/" class="">
+      10.6 BERT网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/82a1cd0def084620/" class="">
+      10.7 从零实现BERT</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/e736d3974ed0484c/" class="">
+      10.8 BERT文本分类模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/f5076cbadda84d4e/" class="">
+      10.9 BERT问题选择模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/25d9ef3d9b34472a/" class="">
+      10.10 BERT问题回答模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/64d3ec5593ec4b94/" class="">
+      10.11 BERT命名体识别模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/90ea8d3e090d48b4/" class="">
+      10.12 BERT从零训练</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/e36878dad7a647d8/" class="">
+      10.13 GPT-1模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/94dda9bbbc994913/" class="">
+      10.14 GPT-2与GPT-3模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/4af57a29308840de/" class="">
+      10.15 基于GPT-2的中文预训练模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/9f5c00cadde14d31/" class="">
+      10.16 InstructGPT与ChatGPT</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/050b54fd34ca480a/" class="">
+      10.17 ChatGPT与提示词工程</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/a90b0d71389b4d69/" class="">
+      10.18 百川大模型使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/40c1c9ade70c4ce7/" class="">
+      10.19 百川大模型实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/ea1b4cf8b40c4b05/" class="">
+      10.20 GPT-4与GPTs使用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a>
+      机器学习</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/43fc00b3809d4be6/" class="">
+      学习思维导图</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-0a3254d1ca9963fd6975aa5bc0b3edcc" class="toggle"  />
+    <label for="section-0a3254d1ca9963fd6975aa5bc0b3edcc" class="flex">
+      <a role="button" class="">
+        第 1 章 环境配置</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/baafb91f0af14a84/" class="">
+      1.1 安装使用Conda</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/7a01c403acd6488a/" class="">
+      1.2 开发环境安装配置</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-4569258198323c16bc8a634ea44fd5db" class="toggle"  />
+    <label for="section-4569258198323c16bc8a634ea44fd5db" class="flex">
+      <a role="button" class="">
+        第 2 章 线性回归</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/2414d4b6648d405a/" class="">
+      2.1 模型的建立与求解</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/3e9ba14da71f4fd3/" class="">
+      2.2 多变量线性回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/4a16c0dc82a84e78/" class="">
+      2.3 多项式回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/f8dea699983c48c6/" class="">
+      2.4 回归模型评估</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/df41c2e97f554e68/" class="">
+      2.5 梯度下降</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/71ef816e0005492d/" class="">
+      2.6 正态分布</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/803bee4f70be4dca/" class="">
+      2.7 目标函数推导</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-a6ca5e2f846ebd900d1a868e6718dc82" class="toggle"  />
+    <label for="section-a6ca5e2f846ebd900d1a868e6718dc82" class="flex">
+      <a role="button" class="">
+        第 3 章 逻辑回归</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/96d46b53aee14c3b/" class="">
+      3.1 模型的建立与求解</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/fac70083dd764141/" class="">
+      3.2 多分类任务</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/6d7cfd79ef304cbd/" class="">
+      3.3 常见的分类评估指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/2fdc655d00c74548/" class="">
+      3.4 目标函数推导</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/a4b61c5bbadd43a6/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-9f462f716bd0e46ef79984b356eeb5a2" class="toggle"  />
+    <label for="section-9f462f716bd0e46ef79984b356eeb5a2" class="flex">
+      <a role="button" class="">
+        第 4 章 模型的改善与泛化</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/2089400b28f54dd9/" class="">
+      4.1 基本概念</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/56b788b624cd4971/" class="">
+      4.2 特征标准化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/ca091dc393a84518/" class="">
+      4.3过拟合</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/5097d3b8c1144427/" class="">
+      4.4 正则化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/3c7eee1621d4480b/" class="">
+      4.5 偏差、方差与交叉验证</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/c5957e0753d04746/" class="">
+      4.6 实例分析手写体识别</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/a915e49586eb4426/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-327db48e4f4df6236855078634147679" class="toggle"  />
+    <label for="section-327db48e4f4df6236855078634147679" class="flex">
+      <a role="button" class="">
+        第 5 章 K近邻</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/7c610e923e754259/" class="">
+      5.1 K近邻思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/1a97571e0a6447ef/" class="">
+      5.2 K近邻原理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/d245bda107034e65/" class="">
+      5.3 sklearn接口与示例代码</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/24378571ce404d9c/" class="">
+      5.4 kd树构建与搜索</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/40f253b916f24038/" class="">
+      5.5 从零实现K近邻</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/76818d9e48944f8c/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-94d0a5f5555d92c51e0903b148e34993" class="toggle"  />
+    <label for="section-94d0a5f5555d92c51e0903b148e34993" class="flex">
+      <a role="button" class="">
+        第 6 章 文本特征与模型复用</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/e05b5928c41d4841/" class="">
+      6.1 词袋模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/de59bf74d753457e/" class="">
+      6 .2 基于K近邻算法的垃圾邮件分类</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/c6fdc78b49d44453/" class="">
+      6.3 考虑权重的词袋模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/825fde8589654b16/" class="">
+      6.4 词云图</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/8451cffe49f5477c/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-544be5d1e48c4fd8b33ba2f91964c6dd" class="toggle"  />
+    <label for="section-544be5d1e48c4fd8b33ba2f91964c6dd" class="flex">
+      <a role="button" class="">
+        第 7 章 朴素贝叶斯</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/faf303eb93a241d1/" class="">
+      7.1 朴素贝叶斯算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/842c7b8684c747d2/" class="">
+      7.2 贝叶斯估计</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/724bf42b09bb440e/" class="">
+      7.3 朴素贝叶斯实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/1a9deee1d5f042b5/" class="">
+      7.4 多项式朴素贝叶斯原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/5c27cdd8b3264f50/" class="">
+      7.5 高斯朴素贝叶斯原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/715b8eaf245f45f1/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-d1884c6b3e8f1260019220c57d615371" class="toggle"  />
+    <label for="section-d1884c6b3e8f1260019220c57d615371" class="flex">
+      <a role="button" class="">
+        第 8 章 决策树</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/690fe2be21834c2a/" class="">
+      8.1 决策树的基本思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/ee9ada9729124049/" class="">
+      8.2 决策树建模与可视化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/5887cf1408dd4c7f/" class="">
+      8.3 决策树生成之ID3与C4.5</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/87ba589d6c17434d/" class="">
+      8.4 决策树剪枝过程</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/34bc962c974646f4/" class="">
+      8.5 从零实现ID3与C4.5算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/c44682dbb3364be4/" class="">
+      8.6 连续型特征变量下决策树实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/4eead717a84a4dbf/" class="">
+      8.7 CART生成与剪枝算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/1c72d67dffc64dc9/" class="">
+      8.8 从零实现CART算法及剪枝示例</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/ae452792b2604e84/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-1f0a2178f0a580ba251c7da2649aa52f" class="toggle"  />
+    <label for="section-1f0a2178f0a580ba251c7da2649aa52f" class="flex">
+      <a role="button" class="">
+        第 9 章 集成学习与提升算法</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/9eff4004fd6c437d/" class="">
+      9.1 集成学习算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/18980c9f757e42c8/" class="">
+      9.2 随机森林</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/8a91b358b2f74d56/" class="">
+      9.3 泰坦尼克号生还预测</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/73f6914844f549f1/" class="">
+      9.4 AdaBoost原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/71fd0e44294e4abb/" class="">
+      9.5 MultiAdaBoost原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/f3c2341ce7d64f70/" class="">
+      9.6 Gradient Boost 原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/4f9b26d5b65541f5/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f63defd924ef7373144c8643a39fd7b2" class="toggle"  />
+    <label for="section-f63defd924ef7373144c8643a39fd7b2" class="flex">
+      <a role="button" class="">
+        第 10 章 支持向量机</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/dce7180d4eb047d7/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/515b54e2307a4c8a/" class="">
+      10.1 SVM思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/9c3862bc843c4179/" class="">
+      10.2 SVM线性不可分</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/fbdb6f8adace457d/" class="">
+      10.3 SVM原理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/1a3ffa363b1d4f83/" class="">
+      10.4 SVM中的软间隔</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/8b7a06412a9f4267/" class="">
+      10.5 拉格朗日乘数法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/40e977f0a2f84ac0/" class="">
+      10.6 对偶性与KKT条件</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/b18d45a772574ddb/" class="">
+      10.7 SVM优化问题</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/c53ed12f7bc04405/" class="">
+      10.8 SVM核函数原理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/26d9b2b328a849c2/" class="">
+      10.9 SMO算法求解SVM</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/215a1e15c0f2470d/" class="">
+      10.10 从零实现SVM分类算法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bdcc54d1c295c5cc69c9c851c02886ea" class="toggle" checked />
+    <label for="section-bdcc54d1c295c5cc69c9c851c02886ea" class="flex">
+      <a role="button" class="">
+        第 11 章 聚类分析</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/f9d9305a55a548a1/" class="">
+      11.1 聚类算法的思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/e635df24de32487a/" class="">
+      11.2 Kmeans聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/e75b8efa232249ab/" class="">
+      11.3 Kmeans算法求解</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/60e49a33d1aa4f50/" class="">
+      11.4 从零实现Kmeans聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/c8b45d8a3d8c4cf4/" class="">
+      11.5 Kmeans&#43;&#43;聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/1ede2f3557d0438f/" class="">
+      11.6 聚类外部评价指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/e6a75df19f85498c/" class="">
+      11.7 加权Kmeans聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/c52cf7920f1d4636/" class="">
+      11.8 聚类内部评价指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/f95259c359b146ba/" class="">
+      11.9 聚类K值选取与分析</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/b85c1a858f7c4686/" class="">
+      11.10 基于密度的聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/2f01ba751d914336/" class="active">
+      11.11 基于层次的聚类算法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bafa8c48214ccf62d333a6d0457c5f72" class="toggle"  />
+    <label for="section-bafa8c48214ccf62d333a6d0457c5f72" class="flex">
+      <a role="button" class="">
+        第 12 章 降维算法</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/9478de824edd44c6/" class="">
+      12.1 主成分分析</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/909356aa90fe456a/" class="">
+      12.2 基于核函数的主成分分析</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-d5f143889a719ce66d602e75b72bffb9" class="toggle"  />
+    <label for="section-d5f143889a719ce66d602e75b72bffb9" class="flex">
+      <a role="button" class="">
+        第 13 章 自训练与标签传播</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/8d71301c2e414efe/" class="">
+      13.1 Self-Training 自训练算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/87fdcf0be1c34644/" class="">
+      13.2 Label Propagation算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/7fc8b0fc47d2427c/" class="">
+      13.3 Label Spreading 算法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+
+
+
+
+
+
+
+
+
+
+
+
+</nav>
+
+
+
+
+  <script>(function(){var e=document.querySelector("aside .book-menu-content");addEventListener("beforeunload",function(){localStorage.setItem("menu.scrollTop",e.scrollTop)}),e.scrollTop=localStorage.getItem("menu.scrollTop")})()</script>
+
+
+
+  </div>
+</aside>
+ 
+
+    <div class="book-page">
+      <header class="book-header hidden">
+        
+  <div class="flex align-center justify-between">
+  <label for="menu-control">
+    <img src="/icons/menu.svg" class="book-icon" alt="Menu" />
+  </label>
+
+  <h3>11.11 基于层次的聚类算法</h3>
+
+  <label for="toc-control">
+    
+    <img src="/icons/toc.svg" class="book-icon" alt="Table of Contents" />
+    
+  </label>
+</div>
+
+
+  
+  <aside class="hidden">
+    
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#11111-hca算法思想">11.11.1 HCA算法思想</a></li>
+    <li><a href="#11112-hca示例代码">11.11.2 HCA示例代码</a></li>
+    <li><a href="#11113-hca算法原理">11.11.3 HCA算法原理</a></li>
+    <li><a href="#11114-single-link算法原理">11.11.4 Single-Link算法原理</a></li>
+    <li><a href="#11115-从零实现single-link算法">11.11.5 从零实现Single-Link算法</a></li>
+    <li><a href="#11116-single-link使用示例">11.11.6 Single-Link使用示例</a></li>
+    <li><a href="#11117-complete-link算法原理">11.11.7 Complete-Link算法原理</a></li>
+    <li><a href="#11118-从零实现complete-link算法">11.11.8 从零实现Complete-Link算法</a></li>
+    <li><a href="#11119-complete-link使用示例">11.11.9 Complete-Link使用示例</a></li>
+    <li><a href="#111110-ward算法原理">11.11.10 Ward算法原理</a></li>
+    <li><a href="#111111-从零实现ward算法">11.11.11 从零实现Ward算法</a></li>
+    <li><a href="#111112-ward使用示例">11.11.12 Ward使用示例</a></li>
+    <li><a href="#111113-小结">11.11.13 小结</a></li>
+  </ul>
+</nav>
+
+
+
+  </aside>
+  
+ 
+      </header>
+
+      
+      
+  <article class="markdown book-article"><h1 id="1111-基于层次的聚类算法">11.11 基于层次的聚类算法<a class="anchor" href="#1111-%e5%9f%ba%e4%ba%8e%e5%b1%82%e6%ac%a1%e7%9a%84%e8%81%9a%e7%b1%bb%e7%ae%97%e6%b3%95">#</a></h1>
+<p>经过前面几节内容的介绍，我们已经清楚了Kmeans、Kmeans++、基于权重的加权Kmeans和DBSCAN这4种聚类算法的原理与实现。总的来说这4种聚类算法各有千秋，分别都能在一些独特的场景中发挥自己的优势。在接下来的这篇文章中，我们将会为大家介绍第5种常见的聚类算法，层次聚类算法（Hierarchical Clustering），如图11-30所示便是整个算法的学习路线图。</p>
+<div align=center><img width="400" src="/images/ml/240427161413.jpg"/> </div><center>图 11-30 层次聚类算法学习路线图</center>
+<h2 id="11111-hca算法思想">11.11.1 HCA算法思想<a class="anchor" href="#11111-hca%e7%ae%97%e6%b3%95%e6%80%9d%e6%83%b3">#</a></h2>
+<p>现在想象这么一个场景，假如你有大量病人的就医资料，需要通过聚类将其划分为不同的科室，例如消化科、呼吸科和皮肤科等等。但是除此之外，你还想顺便得到每个科室下具体病症的情况，例如呼吸科下面可能有肺炎病人、普通感冒病人等等。如果是通过前面介绍的4种聚类算法来进行建模，那么显然只能得到以科室为颗粒度的聚类结果[1]。</p>
+<p>不过此时有读者可能会说，直接以病症为颗粒度进行聚类不就解决了吗？虽然理论上可以这么做，但是这种做法的弊端在于K值太大聚类结果可能不会太理想。同时，在其它我们不知道样本的层次结构中（假如在上面例子中不知道肺炎和感冒属于呼吸科），还能够通过层次聚类算法来发现这种潜在的结构。</p>
+<p>在数据挖掘和统计分析中，层次聚类也叫做层次聚类分析（Hierarchical Cluster Analysis, HCA），旨在得到样本簇结构的同时发现样本分布的层次结构[2]。同时，层次聚类算法一般来说可以分为两种，一种是自下而上（Bottom-up）的凝聚层次聚类（Agglomerative Clustering）和自上而下的分裂层次聚类（Divisive Clustering）。</p>
+<p>凝聚层次聚类算法在聚类伊始会将数据中的每个样本点均看作是一个独立的簇结构，然后迭代将当前状态下最相似的两个簇进行合并，直到最后只剩下一个簇时聚类结束。对于分裂层次聚类算法来说则恰恰相反，分裂层次聚类算法在聚类伊始将所有的样本点都看成是一个簇，然后迭代将当前状态下最大的簇划分为两部分，直到最后将整个数据集划分成$n$个簇结束[2]。</p>
+<p>由于在实际应用中基于自上而下的分裂层次聚类使用较少，所以后续将只介绍采用不同策略下的凝聚层次聚类算法。</p>
+<h2 id="11112-hca示例代码">11.11.2 HCA示例代码<a class="anchor" href="#11112-hca%e7%a4%ba%e4%be%8b%e4%bb%a3%e7%a0%81">#</a></h2>
+<p>在介绍完层次聚类算法的基本思想以后，再来看如何借助sklearn来完成整个层次聚类的建模过程，以下完整示例代码可参见 <code>AllBooKCode/Chapter11/C19_hca_train.py</code> 文件，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#ae81ff">1</span> <span style="color:#f92672">from</span> sklearn.cluster <span style="color:#f92672">import</span> AgglomerativeClustering
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">2</span> 
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">3</span> <span style="color:#66d9ef">if</span> __name__ <span style="color:#f92672">==</span> <span style="color:#e6db74">&#39;__main__&#39;</span>:
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">4</span>     n_clusters <span style="color:#f92672">=</span> <span style="color:#ae81ff">3</span>
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">5</span>     X, y <span style="color:#f92672">=</span> load_iris(return_X_y<span style="color:#f92672">=</span><span style="color:#66d9ef">True</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">6</span>     X <span style="color:#f92672">=</span> StandardScaler()<span style="color:#f92672">.</span>fit_transform(X)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">7</span>     model <span style="color:#f92672">=</span> AgglomerativeClustering(n_clusters<span style="color:#f92672">=</span>n_clusters, linkage<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;ward&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">8</span>     model<span style="color:#f92672">.</span>fit(X)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">9</span>     print(<span style="color:#e6db74">f</span><span style="color:#e6db74">&#34;兰德系数为: </span><span style="color:#e6db74">{</span>adjusted_rand_score(y, model<span style="color:#f92672">.</span>labels_)<span style="color:#e6db74">}</span><span style="color:#e6db74">&#34;</span>)</span></span></code></pre></div><p>在上述代码中，第1行代码便是导入sklearn中的凝聚层次聚类算法模块。第4~6行是导入数据集并进行标准化处理。第7行是实例化一个类对象，其中<code>linkage</code>参数表示指定一种层次聚类的算法，取值有<code>'ward'</code>、<code> 'complete'</code>和 <code>'single'</code>这3种，后续也将分别详细进行介绍。第8~9行是先完成整个聚类过程，然后对聚类结果进行评估。</p>
+<h2 id="11113-hca算法原理">11.11.3 HCA算法原理<a class="anchor" href="#11113-hca%e7%ae%97%e6%b3%95%e5%8e%9f%e7%90%86">#</a></h2>
+<p>在知道了层次聚类算法的基本思想后再来看聚类过程的具体步骤。根据上面的介绍，可以将整个聚类过程归结为如下3步：</p>
+<p>（1）将每个样本点均初始化为一个单独的簇；</p>
+<p>（2）如果当前只存在一个簇则进入第（3）步，否则寻找当前状态下最相似的两个簇进行合并；</p>
+<p>（3）返回整个聚类合并结果[1]。</p>
+<p>如图11-31所示从$a$到$j$一共有10个样本点，下面将按照上述3个步骤来对凝聚层次聚类算法的聚类过程进行示例。</p>
+<div align=center><img width="450" src="/images/ml/22051527824.jpg"/></div><center>图 11-31 层次聚类算法原理图</center>
+<p>如图11-31右侧所示，首先将这10个样本点均看作是一个单独的簇结构$(\cdot )$；其次假定此时在所有簇的两两组合中，$(g)$和$(h)$这两个簇最相似，那么则将其合并为一个簇$(g,h)$；由于此时不止一个簇所以继续迭代，将$(i)$和$(j)$这两个簇进行合并得到簇$(i,j)$；进一步，根据同样的方式将会得到簇$(e,f)$；同理，再次将$(g,h)$与$(i,j)$合并得到簇$((g,h),(i,j))$；将$(b)$和$(c)$合并得到簇$(b,c)$；将$(d)$和$(e,f)$合并得到簇$(d,(e,f))$；将$(b,c)$和$(d,(e,f))$合并得到$((b,c),(d,(e,f)))$；将$(a)$与$((b,c),(d,(e,f)))$合并得到簇$(a,((b,c),(d,(e,f))))$；最后，将$((g,h),(i,j))$和$(a,((b,c),(d,(e,f))))$合并得到簇$(((g,h),(i,j)),(a,((b,c),(d,(e,f)))))$。由于此时只剩下一个簇，所以层次聚类过程结束。与此同时，我们还可以通过图11-31左侧所示的树状图（Dendrogram）来观察每个簇内部层次结构。</p>
+<p>介绍到这里肯定有读者会问，既然凝聚层次聚类算法的终止条件是只剩下一个簇，那么聚类结束后的簇结构到是怎么样的呢？如图11-31左侧所示，在整个聚类过程中，如果不进行最后1次合并那么将会得到两个簇结构；如果在倒数第2次停止合并那么将会得到3个簇结构，以此类推。同时，在每个簇的内部还能看到剩余样本的层次结构。因此实际情况中，如果我们知道真实的簇数量K，那么完全可以在只剩下K个簇的时候停止合并，后续的代码实现也将遵循这一准则。</p>
+<p>经过上面的介绍我们发现，凝聚层次聚类算法有两个关键的要素：距离的计算方式和相似性的计算方式（Linkage Criteria）。这一点就类似于K近邻算法一样，也需要两个关键的要素（距离度量方式和决策规则）。因为采用不同的距离计算方式，在后续进行相似性计算时将会得到不同的划分结果。通常在凝聚层次聚类中，距离的度量方式有欧式距离、曼哈顿距离等。对于相似性的度量方式来说常用的有Single-Link、Complete-Link和Ward等[2]。在接下来的内容，我们将分别介绍这3种相似性度量方式的原理及实现过程。</p>
+<h2 id="11114-single-link算法原理">11.11.4 Single-Link算法原理<a class="anchor" href="#11114-single-link%e7%ae%97%e6%b3%95%e5%8e%9f%e7%90%86">#</a></h2>
+<p>使用Single-Link作为相似性衡量标准的凝聚层次聚类算法也被称之为最近邻聚类（Nearest Neighbour Clustering），其核心思想是根据两个簇之间相邻最近两个样本点的距离来作为相似性评判标准，距离越近则表示这两个簇越相似，即这两个簇越有可能被合并。</p>
+<p>如图11-32所示，在聚类过程中对于任意两个簇结构来说，我们需要计算得到相邻两个簇最近样本点之间的距离作为这两个簇相似性的度量值；然后在所有结果中选择相似度最大的值（距离最小）对应的两个簇进行合并；最后按照同样的方法继续进行迭代直到剩余簇数量为1或到达指定值时结束[1]。</p>
+<div align=center><img width="380" src="/images/ml/22051523630.jpg"/></div><center>图 11-32 Single-Link原理图</center>
+<p>假如现在某数据集一共有$a$到$e$这6个样本点，则聚类伊始将这6个样本点均视为6个不同的簇[3]。同时，任意两个簇之间的距离如表11-7所示。</p>
+<center>表11-7 簇与簇之间的两两距离D1 </center><div align=center><img width="250" src="/images/ml/22051551629.jpg"/></div>
+<p>如表11-7所示，D1为一个距离矩阵，用来记录所有簇两两之间的距离。从表中可以看出，此时簇$a$与簇$b$之间的距离最短为17，即最相似，因此将这两个簇进行合并。在合并结束后$a,b$两个簇便合并成了一簇，因此需要删除矩阵D1中簇$a$和簇$b$所在的行与列。同时，由于其它簇两两之间的距离并没有发生改变因此只需要更新簇$(a,b)$与其它3个簇之间的最近距离即可，计算过程如下：
+</p>
+$$
+\begin{aligned}
+\text{D}2((a,b),c)=\min(\text{D}1(a,c),\text{D}1(b,c))=\min(21,30)=21\\[1ex]
+\text{D}2((a,b),d)=\min(\text{D}1(a,d),\text{D}1(b,d))=\min(31,34)=31\\[1ex]
+\text{D}2((a,b),e)=\min(\text{D}1(a,e),\text{D}1(b,e))=\min(23,21)=21\\[1ex]
+\end{aligned}\tag{11-47}
+$$<p>
+更新后的距离矩阵D2如表11-8所示。</p>
+<center>表 11-8 簇与簇之间的两两距离D2</center><div align=center><img width="250" src="/images/ml/22051500411.jpg"/></div>
+<p>如表11-8所示，此时簇$(a,b)$与簇$c$和簇$d$之间的距离均为21，因此需要将这3个簇进行合并。此时尤其需要注意的一点是，由于D2中是其中一个簇分别与另外两个簇的距离相等（且该距离是簇与簇之间的最短距离），因此可以同时将这3个簇合并到一起。假如此时是簇$(a,b)$与$c$的距离为17，簇$d$和簇$e$之间的距离也是17，那么本次只能是将$(a,b)$与$c$进行合并，或者是将$d$与$e$进行合并，而不能简单地直接将这4个簇进行合并。在簇$(a,b)$与$c$和$e$进行合并后，只需要更新D2中簇$((a,b),c,e)$与剩余其它簇（即仅剩$d$）之间的最近距离即可，计算过程如下：
+</p>
+$$
+\begin{aligned}
+\text{D}3(((a,b),c,e),d)=\min(\text{D}2((a,b),d),\text{D}2(c,d),\text{D}2(e,d))=\min(31,28,43)=28\\[1ex]
+\end{aligned}\tag{11-48}
+$$<p>
+更新后的距离矩阵D3如表11-9所示。</p>
+<center>表 11-9 簇与簇之间的两两距离D3</center><div align=center><img width="250" src="/images/ml/22051506206.jpg"/></div>
+<p>如表11-9所示，此时只剩下$((a,b),c,e)$和$d$这两个簇，因此最后将这两个簇进行合并。最终，根据上述合并过程，我们可以得到如图11-33所示的树状图。</p>
+<div align=center><img width="300" src="/images/ml/22051709518.jpg"/></div><center>图 11-33 Single-Link层次聚类树状图</center>
+<p>到此，对于基于Single-Link的凝聚层次聚类算法的原理就介绍完了，下面再来介绍如何一步一步实现整个算法。</p>
+<h2 id="11115-从零实现single-link算法">11.11.5 从零实现Single-Link算法<a class="anchor" href="#11115-%e4%bb%8e%e9%9b%b6%e5%ae%9e%e7%8e%b0single-link%e7%ae%97%e6%b3%95">#</a></h2>
+<p>在正式介绍Single-Link实现之前，需要先定义节点类来保存每次合并后的簇结构信息，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#ae81ff">1</span> <span style="color:#66d9ef">class</span> <span style="color:#a6e22e">ClusterNode</span>(object):
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">2</span>     <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">__init__</span>(self, idx<span style="color:#f92672">=</span><span style="color:#66d9ef">None</span>, centroid<span style="color:#f92672">=</span><span style="color:#66d9ef">None</span>):
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">3</span>         samples <span style="color:#f92672">=</span> []
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">4</span>         <span style="color:#66d9ef">if</span> idx <span style="color:#f92672">is</span> <span style="color:#f92672">not</span> <span style="color:#66d9ef">None</span>:
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">5</span>             samples <span style="color:#f92672">=</span> [idx]
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">6</span>         self<span style="color:#f92672">.</span>samples <span style="color:#f92672">=</span> samples
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">7</span>         self<span style="color:#f92672">.</span>n_samples <span style="color:#f92672">=</span> len(self<span style="color:#f92672">.</span>samples)  
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">8</span>         self<span style="color:#f92672">.</span>children <span style="color:#f92672">=</span> {}  
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">9</span>         self<span style="color:#f92672">.</span>centroid <span style="color:#f92672">=</span> centroid</span></span></code></pre></div><p>在上述代码中，第2行 <code>idx</code> 表示初始化时指定每个每个样本点对应的索引；<code>centroid</code> 表示每个簇对应的簇中心。第6行用来保存当前簇结构中所有样本在原始数据集中的索引。第7行用来保存当前节点对应的样本数量。第8行是保存当前节点对应的孩子节点，即对应的层次信息，如果仅仅只是为了完成聚类任务那么这个参数也可以不用。第9行用来保存当前簇结构对应的簇中心，这个参数只用于 Ward 算法中。</p>
+<p>进一步，定义一个类方法来完成簇与簇之间的合并过程，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#ae81ff">1</span>     <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">merge</span>(self, node):
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">2</span>         self<span style="color:#f92672">.</span>samples <span style="color:#f92672">+=</span> node<span style="color:#f92672">.</span>samples
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">3</span>         self<span style="color:#f92672">.</span>children[id(node)] <span style="color:#f92672">=</span> node
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">4</span>         self<span style="color:#f92672">.</span>n_samples <span style="color:#f92672">=</span> len(self<span style="color:#f92672">.</span>samples)</span></span></code></pre></div><p>在定义完簇节点的相关信息后，下面便可以通过一个函数来实现Single-Link算法的逻辑功能，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#ae81ff">1</span> <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">single_linkage</span>(X, n_clusters, metric<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;euclidean&#34;</span>):
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">2</span>     cluster_nodes <span style="color:#f92672">=</span> [ClusterNode(i) <span style="color:#66d9ef">for</span> i <span style="color:#f92672">in</span> range(len(X))]  
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">3</span>     old_d <span style="color:#f92672">=</span> pairwise_distances(X, metric<span style="color:#f92672">=</span>metric)  
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">4</span>     n_merge <span style="color:#f92672">=</span> <span style="color:#ae81ff">0</span>
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">5</span>     <span style="color:#66d9ef">while</span> len(cluster_nodes) <span style="color:#f92672">&gt;</span> n_clusters:
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">6</span>         n_merge <span style="color:#f92672">+=</span> <span style="color:#ae81ff">1</span>
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">7</span>         merge_dims <span style="color:#f92672">=</span> <span style="color:#66d9ef">None</span>
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">8</span>         all_locations <span style="color:#f92672">=</span> np<span style="color:#f92672">.</span>where(np<span style="color:#f92672">.</span>abs(old_d <span style="color:#f92672">-</span> np<span style="color:#f92672">.</span>sort(old_d<span style="color:#f92672">.</span>ravel())
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">9</span>                                  [len(old_d)]) <span style="color:#f92672">&lt;</span> <span style="color:#ae81ff">1e-6</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">10</span>         <span style="color:#66d9ef">for</span> (row, col) <span style="color:#f92672">in</span> zip(<span style="color:#f92672">*</span>all_locations):
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">11</span>             <span style="color:#66d9ef">if</span> row <span style="color:#f92672">==</span> col:
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">12</span>                 <span style="color:#66d9ef">continue</span>
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">13</span>             merge_dims <span style="color:#f92672">=</span> [row, col] 
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">14</span>             <span style="color:#66d9ef">break</span>
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">15</span>         merge_node <span style="color:#f92672">=</span> ClusterNode()
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">16</span>         del_nodes <span style="color:#f92672">=</span> [cluster_nodes<span style="color:#f92672">.</span>pop(dim) <span style="color:#66d9ef">for</span> dim <span style="color:#f92672">in</span> sorted(</span></span></code></pre></div><h2 id="11116-single-link使用示例">11.11.6 Single-Link使用示例<a class="anchor" href="#11116-single-link%e4%bd%bf%e7%94%a8%e7%a4%ba%e4%be%8b">#</a></h2>
+<h2 id="11117-complete-link算法原理">11.11.7 Complete-Link算法原理<a class="anchor" href="#11117-complete-link%e7%ae%97%e6%b3%95%e5%8e%9f%e7%90%86">#</a></h2>
+<h2 id="11118-从零实现complete-link算法">11.11.8 从零实现Complete-Link算法<a class="anchor" href="#11118-%e4%bb%8e%e9%9b%b6%e5%ae%9e%e7%8e%b0complete-link%e7%ae%97%e6%b3%95">#</a></h2>
+<h2 id="11119-complete-link使用示例">11.11.9 Complete-Link使用示例<a class="anchor" href="#11119-complete-link%e4%bd%bf%e7%94%a8%e7%a4%ba%e4%be%8b">#</a></h2>
+<h2 id="111110-ward算法原理">11.11.10 Ward算法原理<a class="anchor" href="#111110-ward%e7%ae%97%e6%b3%95%e5%8e%9f%e7%90%86">#</a></h2>
+<h2 id="111111-从零实现ward算法">11.11.11 从零实现Ward算法<a class="anchor" href="#111111-%e4%bb%8e%e9%9b%b6%e5%ae%9e%e7%8e%b0ward%e7%ae%97%e6%b3%95">#</a></h2>
+<h2 id="111112-ward使用示例">11.11.12 Ward使用示例<a class="anchor" href="#111112-ward%e4%bd%bf%e7%94%a8%e7%a4%ba%e4%be%8b">#</a></h2>
+<h2 id="111113-小结">11.11.13 小结<a class="anchor" href="#111113-%e5%b0%8f%e7%bb%93">#</a></h2>
+<p><subscribe>32</subscribe></p>
+<br>
+<br>
+<br></article>
+ 
+      
+
+      <footer class="book-footer">
+        
+  <div class="flex flex-wrap justify-between">
+
+<div>
+
+</div>
+
+<div>
+
+</div>
+
+</div>
+
+<div class="flex flex-wrap justify-between">
+    <span>
+    
+      <a href="/ml/chapter11/b85c1a858f7c4686/" class="flex align-center">
+        <img src="/icons/backward.svg" class="book-icon" alt="Backward" />
+        <span>11.10 基于密度的聚类算法</span>
+      </a>
+    
+    </span>
+    <span>
+    
+      <a href="/ml/chapter12/9478de824edd44c6/" class="flex align-center">
+        <span>12.1 主成分分析</span>
+        <img src="/icons/forward.svg" class="book-icon" alt="Forward" />
+      </a>
+    
+    </span>
+  </div>
+
+ 
+        
+  
+  <div class="book-comments">
+
+</div>
+  
+ 
+        
+  <link rel="stylesheet" href="/katex/katex.min.css" />
+  <script defer src="/katex/katex.min.js"></script>
+  <script defer src="/katex/auto-render.min.js"></script>
+  
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        if (window.renderMathInElement) {
+          renderMathInElement(
+            document.querySelector(".book-page"),
+            Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
+          );
+        }
+      });
+    </script>
+  
+
+
+        
+  
+ 
+        
+  
+    <script>(function(){document.querySelectorAll("pre:has(code)").forEach(e=>{e.addEventListener("click",e.focus),e.addEventListener("copy",function(t){if(t.preventDefault(),navigator.clipboard){const t=window.getSelection().toString()||e.textContent;navigator.clipboard.writeText(t)}})})})()</script>
+  
+
+      </footer>
+
+      <label for="menu-control" class="hidden book-menu-overlay"></label>
+    </div>
+
+    
+  
+  <aside class="book-toc">
+    <div class="book-toc-content">
+      
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#11111-hca算法思想">11.11.1 HCA算法思想</a></li>
+    <li><a href="#11112-hca示例代码">11.11.2 HCA示例代码</a></li>
+    <li><a href="#11113-hca算法原理">11.11.3 HCA算法原理</a></li>
+    <li><a href="#11114-single-link算法原理">11.11.4 Single-Link算法原理</a></li>
+    <li><a href="#11115-从零实现single-link算法">11.11.5 从零实现Single-Link算法</a></li>
+    <li><a href="#11116-single-link使用示例">11.11.6 Single-Link使用示例</a></li>
+    <li><a href="#11117-complete-link算法原理">11.11.7 Complete-Link算法原理</a></li>
+    <li><a href="#11118-从零实现complete-link算法">11.11.8 从零实现Complete-Link算法</a></li>
+    <li><a href="#11119-complete-link使用示例">11.11.9 Complete-Link使用示例</a></li>
+    <li><a href="#111110-ward算法原理">11.11.10 Ward算法原理</a></li>
+    <li><a href="#111111-从零实现ward算法">11.11.11 从零实现Ward算法</a></li>
+    <li><a href="#111112-ward使用示例">11.11.12 Ward使用示例</a></li>
+    <li><a href="#111113-小结">11.11.13 小结</a></li>
+  </ul>
+</nav>
+
+
+
+    </div>
+  </aside>
+  
+ 
+  </main>
+
+  
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

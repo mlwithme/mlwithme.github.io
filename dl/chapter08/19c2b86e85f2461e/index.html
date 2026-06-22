@@ -1,0 +1,3856 @@
+<!DOCTYPE html>
+<html lang="zh_CN" dir="ltr">
+<head>
+  <!--
+Made with Book Theme
+https://github.com/alex-shpak/hugo-book
+-->
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="8.4 ConvLSTM网络# 在8.3节内容中，我们介绍了几种将CNN和RNN进行结合的时序模型，包括串行的方式将CNN和RNN进行结合、以并行的方式将CNN和RNN进行结合。同时，在这些任务场景中序列样本所拥有的一个共同特点便是对于每个序列中的每个时刻来说，其特征表示均为一个向量。但是在现实情况中，还有一类时序数据是以数据帧的形式而存在，即每一时刻均为一个三维（或二维）矩阵。这样的数据也被称为时空（Spatiotemporal）数据，例如最常见的视频数据。因此，在本节内容中，我们将会介绍另外一种结合CNN和RNN的深度学习模型ConvLSTM来解决这一问题[1]。
+8.4.1 ConvLSTM动机# 在气象学领域中，对于如何能够准确地预测未来短时间（如0~6小时）内的降雨情况一直以来就是一个热门的研究方向。通常，研究者会根据实时拍摄得到的雷达回波数据（Radar Echo Data）作为输入序列来预测接下来一段时间内的降雨情况。得益于深度学习的发展，有研究者提出了基于循环神经网络和卷积神经网络的预测模型。尽管通过这样的结合方式也能够建模完成这一预测任务，但是模型并没有充分考虑到时空数据中的空间依赖关系（Spatial Correlation）。
+基于这样的动机，施行健等人[1]在2015年提出了一种融合CNN和LSTM的时序预测模型ConvLSTM。ConvLSTM模型的动机是通过将CNN和LSTM结合起来克服传统RNN和CNN各自的局限性。ConvLSTM引入了空间上的卷积操作和时间上的循环操作，同时保留了LSTM中的记忆单元和门控机制，能够捕捉到时间和空间上的特征，考虑到时序数据的长期依赖性和空间结构的局部相关性。因此,ConvLSTM可以有效地用于处理时空数据，例如视频数据、雷达数据等。
+8.4.2 ConvLSTM结构# 从整体上看，ConvLSTM的模型结构主要分为两部分：在时序结构上遵循典型的RNN网络结构；在空间结构上遵循CNN的特征提取方式。简单来说，ConvLSTM模型就等价于将LSTM中的所有全连接结构替换为卷积结构，同时采用了基于窥视连接的结构（详见7.4.5节内容）。如图8-5所示便是ConvLSTM的循环记忆单元。
+图 8-5 ConvLSTM结构图 如图8-5所示便是ConvLSTM的记忆单元结构图，总体上同LSTM类似包含有4个门结构，因此这部分内容不在赘述参考7.3节内容即可。对于ConvLSTM来说，其唯一变化的地方在于各个门控单元的计算方式，具体计算过程如式(8-1)所示。 $$ \begin{aligned} f_t&amp;=\sigma([h_{t-1},x_t,C_{t-1}]\ast W_f&#43;b_f)\\[2ex] i_t&amp;=\sigma([h_{t-1},x_t,C_{t-1}]\ast W_i&#43;b_i)\\[2ex] \tilde{C_t}&amp;=\tanh([h_{t-1},x_t]\ast W_c&#43;b_c)\\[2ex] C_t&amp;=f_t\odot C_{t-1}\oplus i_t\odot\tilde{C_t}\\[2ex] o_t&amp;=\sigma([h_{t-1},x_t,C_{t}]\ast W_o&#43;b_o)\\[2ex] h_t&amp;=o_t\odot\tanh(C_t) \end{aligned}\tag{8-1} $$在式(8-1)中，$\ast$ 表示卷积操作，$W_f$、$W_i$、$W_c$和$W_o$均为卷积核，因此ConvLSTM模型的输入将是一个5维张量，即[batch_size,time_step,in_channels,height,width]。由此可知，$x_t$的形状为[batch_size,in_channels,height,width]；$h_t$和$C_t$的形状均为[batch_size,out_channels,height,width]；$[h_{t-1},x_t]$的形状为[batch_size,in_channels&#43;out_channels,height,width]；$[h_{t-1},x_t,C_{t-1}]$的形状为[batch_size,in_channels&#43;out_channels*2,height,width]。
+同时，由于循环神经网络可以在时间维度和网络层数两个方向展开，因此在ConvLSTM记忆单元中每次卷积之前都会进行填充，以保证每次卷积后特征图的长和宽不发生改变，所以$f_t$、$i_t$和$o_t$的形状均为[batch_size, out_channels, height, width]。对于ConvLSTM来说，其同样类似于RNN模型，因此也可以根据7.1.4节中的结构来构造网络模型并完成相关下游任务。
+8.4.3 ConvLSTM实现# 在清楚ConvLSTM模型的相关原理之后，我们再来看如何借助PyTorch快速实现ConvLSTM模型。由于PyTorch框架中的nn模块并没有实现ConvLSTM模型，因此需要我们自己动手进行实现。以下完整示例代码可以参见Code/Chapter08/C05_ConvLSTM/ConvLSTM.py文件。
+1. ConvLSTMCell实现
+为了便于实现这里以不带窥视连接的结构进行介绍。首先，需要实现一个单独的ConvLSTM记忆单元的前向传播过程，示例代码如下所示：
+1 class ConvLSTMCell(nn.Module): 2 def __init__(self, in_channels, out_channels, kernel_size, bias): 3 super(ConvLSTMCell, self).__init__() 4 self.in_channels = in_channels 5 self.out_channels = out_channels 6 self.kernel_size = kernel_size 7 self.padding = kernel_size[0] // 2, kernel_size[1] // 2 8 self.bias = bias 9 self.conv = nn.Conv2d(in_channels=self.in_channels &#43; self.out_channels, 10 out_channels=4 * self.out_channels,kernel_size=self.kernel_size, 11 padding=self.padding,bias=self.bias)在上述代码中，第1行中in_channels表示输入特征图的通道数，out_channels表示输出特征图的通道数，kernel_size表示卷积核的窗口大小为一个元组。第7行用于计算填充的数量，以保证每次卷积后特征图的大小不发生变化，其计算规则可见4.3.2节内容；同时，为了提高计算效率，对于ConvLSTM中所有卷积操作可以在一个Conv2d实例中完成，第9~10行中in_channels和out_channels两个参数的传入值便是这一点的体现。
+">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
+<meta name="color-scheme" content="light dark"><meta property="og:url" content="https://mlwithme.github.io/dl/chapter08/19c2b86e85f2461e/">
+	<meta property="og:site_name" content="《从零学AI指南手册》">
+	<meta property="og:title" content="8.4 ConvLSTM网络">
+	<meta property="og:description" content="8.4 ConvLSTM网络# 在8.3节内容中，我们介绍了几种将CNN和RNN进行结合的时序模型，包括串行的方式将CNN和RNN进行结合、以并行的方式将CNN和RNN进行结合。同时，在这些任务场景中序列样本所拥有的一个共同特点便是对于每个序列中的每个时刻来说，其特征表示均为一个向量。但是在现实情况中，还有一类时序数据是以数据帧的形式而存在，即每一时刻均为一个三维（或二维）矩阵。这样的数据也被称为时空（Spatiotemporal）数据，例如最常见的视频数据。因此，在本节内容中，我们将会介绍另外一种结合CNN和RNN的深度学习模型ConvLSTM来解决这一问题[1]。
+8.4.1 ConvLSTM动机# 在气象学领域中，对于如何能够准确地预测未来短时间（如0~6小时）内的降雨情况一直以来就是一个热门的研究方向。通常，研究者会根据实时拍摄得到的雷达回波数据（Radar Echo Data）作为输入序列来预测接下来一段时间内的降雨情况。得益于深度学习的发展，有研究者提出了基于循环神经网络和卷积神经网络的预测模型。尽管通过这样的结合方式也能够建模完成这一预测任务，但是模型并没有充分考虑到时空数据中的空间依赖关系（Spatial Correlation）。
+基于这样的动机，施行健等人[1]在2015年提出了一种融合CNN和LSTM的时序预测模型ConvLSTM。ConvLSTM模型的动机是通过将CNN和LSTM结合起来克服传统RNN和CNN各自的局限性。ConvLSTM引入了空间上的卷积操作和时间上的循环操作，同时保留了LSTM中的记忆单元和门控机制，能够捕捉到时间和空间上的特征，考虑到时序数据的长期依赖性和空间结构的局部相关性。因此,ConvLSTM可以有效地用于处理时空数据，例如视频数据、雷达数据等。
+8.4.2 ConvLSTM结构# 从整体上看，ConvLSTM的模型结构主要分为两部分：在时序结构上遵循典型的RNN网络结构；在空间结构上遵循CNN的特征提取方式。简单来说，ConvLSTM模型就等价于将LSTM中的所有全连接结构替换为卷积结构，同时采用了基于窥视连接的结构（详见7.4.5节内容）。如图8-5所示便是ConvLSTM的循环记忆单元。
+图 8-5 ConvLSTM结构图 如图8-5所示便是ConvLSTM的记忆单元结构图，总体上同LSTM类似包含有4个门结构，因此这部分内容不在赘述参考7.3节内容即可。对于ConvLSTM来说，其唯一变化的地方在于各个门控单元的计算方式，具体计算过程如式(8-1)所示。 $$ \begin{aligned} f_t&amp;=\sigma([h_{t-1},x_t,C_{t-1}]\ast W_f&#43;b_f)\\[2ex] i_t&amp;=\sigma([h_{t-1},x_t,C_{t-1}]\ast W_i&#43;b_i)\\[2ex] \tilde{C_t}&amp;=\tanh([h_{t-1},x_t]\ast W_c&#43;b_c)\\[2ex] C_t&amp;=f_t\odot C_{t-1}\oplus i_t\odot\tilde{C_t}\\[2ex] o_t&amp;=\sigma([h_{t-1},x_t,C_{t}]\ast W_o&#43;b_o)\\[2ex] h_t&amp;=o_t\odot\tanh(C_t) \end{aligned}\tag{8-1} $$在式(8-1)中，$\ast$ 表示卷积操作，$W_f$、$W_i$、$W_c$和$W_o$均为卷积核，因此ConvLSTM模型的输入将是一个5维张量，即[batch_size,time_step,in_channels,height,width]。由此可知，$x_t$的形状为[batch_size,in_channels,height,width]；$h_t$和$C_t$的形状均为[batch_size,out_channels,height,width]；$[h_{t-1},x_t]$的形状为[batch_size,in_channels&#43;out_channels,height,width]；$[h_{t-1},x_t,C_{t-1}]$的形状为[batch_size,in_channels&#43;out_channels*2,height,width]。
+同时，由于循环神经网络可以在时间维度和网络层数两个方向展开，因此在ConvLSTM记忆单元中每次卷积之前都会进行填充，以保证每次卷积后特征图的长和宽不发生改变，所以$f_t$、$i_t$和$o_t$的形状均为[batch_size, out_channels, height, width]。对于ConvLSTM来说，其同样类似于RNN模型，因此也可以根据7.1.4节中的结构来构造网络模型并完成相关下游任务。
+8.4.3 ConvLSTM实现# 在清楚ConvLSTM模型的相关原理之后，我们再来看如何借助PyTorch快速实现ConvLSTM模型。由于PyTorch框架中的nn模块并没有实现ConvLSTM模型，因此需要我们自己动手进行实现。以下完整示例代码可以参见Code/Chapter08/C05_ConvLSTM/ConvLSTM.py文件。
+1. ConvLSTMCell实现
+为了便于实现这里以不带窥视连接的结构进行介绍。首先，需要实现一个单独的ConvLSTM记忆单元的前向传播过程，示例代码如下所示：
+1 class ConvLSTMCell(nn.Module): 2 def __init__(self, in_channels, out_channels, kernel_size, bias): 3 super(ConvLSTMCell, self).__init__() 4 self.in_channels = in_channels 5 self.out_channels = out_channels 6 self.kernel_size = kernel_size 7 self.padding = kernel_size[0] // 2, kernel_size[1] // 2 8 self.bias = bias 9 self.conv = nn.Conv2d(in_channels=self.in_channels &#43; self.out_channels, 10 out_channels=4 * self.out_channels,kernel_size=self.kernel_size, 11 padding=self.padding,bias=self.bias)在上述代码中，第1行中in_channels表示输入特征图的通道数，out_channels表示输出特征图的通道数，kernel_size表示卷积核的窗口大小为一个元组。第7行用于计算填充的数量，以保证每次卷积后特征图的大小不发生变化，其计算规则可见4.3.2节内容；同时，为了提高计算效率，对于ConvLSTM中所有卷积操作可以在一个Conv2d实例中完成，第9~10行中in_channels和out_channels两个参数的传入值便是这一点的体现。">
+	<meta property="og:locale" content="zh_CN">
+	<meta property="og:type" content="article">
+		<meta property="article:section" content="dl">
+
+
+	<meta itemprop="name" content="8.4 ConvLSTM网络">
+	<meta itemprop="description" content="8.4 ConvLSTM网络# 在8.3节内容中，我们介绍了几种将CNN和RNN进行结合的时序模型，包括串行的方式将CNN和RNN进行结合、以并行的方式将CNN和RNN进行结合。同时，在这些任务场景中序列样本所拥有的一个共同特点便是对于每个序列中的每个时刻来说，其特征表示均为一个向量。但是在现实情况中，还有一类时序数据是以数据帧的形式而存在，即每一时刻均为一个三维（或二维）矩阵。这样的数据也被称为时空（Spatiotemporal）数据，例如最常见的视频数据。因此，在本节内容中，我们将会介绍另外一种结合CNN和RNN的深度学习模型ConvLSTM来解决这一问题[1]。
+8.4.1 ConvLSTM动机# 在气象学领域中，对于如何能够准确地预测未来短时间（如0~6小时）内的降雨情况一直以来就是一个热门的研究方向。通常，研究者会根据实时拍摄得到的雷达回波数据（Radar Echo Data）作为输入序列来预测接下来一段时间内的降雨情况。得益于深度学习的发展，有研究者提出了基于循环神经网络和卷积神经网络的预测模型。尽管通过这样的结合方式也能够建模完成这一预测任务，但是模型并没有充分考虑到时空数据中的空间依赖关系（Spatial Correlation）。
+基于这样的动机，施行健等人[1]在2015年提出了一种融合CNN和LSTM的时序预测模型ConvLSTM。ConvLSTM模型的动机是通过将CNN和LSTM结合起来克服传统RNN和CNN各自的局限性。ConvLSTM引入了空间上的卷积操作和时间上的循环操作，同时保留了LSTM中的记忆单元和门控机制，能够捕捉到时间和空间上的特征，考虑到时序数据的长期依赖性和空间结构的局部相关性。因此,ConvLSTM可以有效地用于处理时空数据，例如视频数据、雷达数据等。
+8.4.2 ConvLSTM结构# 从整体上看，ConvLSTM的模型结构主要分为两部分：在时序结构上遵循典型的RNN网络结构；在空间结构上遵循CNN的特征提取方式。简单来说，ConvLSTM模型就等价于将LSTM中的所有全连接结构替换为卷积结构，同时采用了基于窥视连接的结构（详见7.4.5节内容）。如图8-5所示便是ConvLSTM的循环记忆单元。
+图 8-5 ConvLSTM结构图 如图8-5所示便是ConvLSTM的记忆单元结构图，总体上同LSTM类似包含有4个门结构，因此这部分内容不在赘述参考7.3节内容即可。对于ConvLSTM来说，其唯一变化的地方在于各个门控单元的计算方式，具体计算过程如式(8-1)所示。 $$ \begin{aligned} f_t&amp;=\sigma([h_{t-1},x_t,C_{t-1}]\ast W_f&#43;b_f)\\[2ex] i_t&amp;=\sigma([h_{t-1},x_t,C_{t-1}]\ast W_i&#43;b_i)\\[2ex] \tilde{C_t}&amp;=\tanh([h_{t-1},x_t]\ast W_c&#43;b_c)\\[2ex] C_t&amp;=f_t\odot C_{t-1}\oplus i_t\odot\tilde{C_t}\\[2ex] o_t&amp;=\sigma([h_{t-1},x_t,C_{t}]\ast W_o&#43;b_o)\\[2ex] h_t&amp;=o_t\odot\tanh(C_t) \end{aligned}\tag{8-1} $$在式(8-1)中，$\ast$ 表示卷积操作，$W_f$、$W_i$、$W_c$和$W_o$均为卷积核，因此ConvLSTM模型的输入将是一个5维张量，即[batch_size,time_step,in_channels,height,width]。由此可知，$x_t$的形状为[batch_size,in_channels,height,width]；$h_t$和$C_t$的形状均为[batch_size,out_channels,height,width]；$[h_{t-1},x_t]$的形状为[batch_size,in_channels&#43;out_channels,height,width]；$[h_{t-1},x_t,C_{t-1}]$的形状为[batch_size,in_channels&#43;out_channels*2,height,width]。
+同时，由于循环神经网络可以在时间维度和网络层数两个方向展开，因此在ConvLSTM记忆单元中每次卷积之前都会进行填充，以保证每次卷积后特征图的长和宽不发生改变，所以$f_t$、$i_t$和$o_t$的形状均为[batch_size, out_channels, height, width]。对于ConvLSTM来说，其同样类似于RNN模型，因此也可以根据7.1.4节中的结构来构造网络模型并完成相关下游任务。
+8.4.3 ConvLSTM实现# 在清楚ConvLSTM模型的相关原理之后，我们再来看如何借助PyTorch快速实现ConvLSTM模型。由于PyTorch框架中的nn模块并没有实现ConvLSTM模型，因此需要我们自己动手进行实现。以下完整示例代码可以参见Code/Chapter08/C05_ConvLSTM/ConvLSTM.py文件。
+1. ConvLSTMCell实现
+为了便于实现这里以不带窥视连接的结构进行介绍。首先，需要实现一个单独的ConvLSTM记忆单元的前向传播过程，示例代码如下所示：
+1 class ConvLSTMCell(nn.Module): 2 def __init__(self, in_channels, out_channels, kernel_size, bias): 3 super(ConvLSTMCell, self).__init__() 4 self.in_channels = in_channels 5 self.out_channels = out_channels 6 self.kernel_size = kernel_size 7 self.padding = kernel_size[0] // 2, kernel_size[1] // 2 8 self.bias = bias 9 self.conv = nn.Conv2d(in_channels=self.in_channels &#43; self.out_channels, 10 out_channels=4 * self.out_channels,kernel_size=self.kernel_size, 11 padding=self.padding,bias=self.bias)在上述代码中，第1行中in_channels表示输入特征图的通道数，out_channels表示输出特征图的通道数，kernel_size表示卷积核的窗口大小为一个元组。第7行用于计算填充的数量，以保证每次卷积后特征图的大小不发生变化，其计算规则可见4.3.2节内容；同时，为了提高计算效率，对于ConvLSTM中所有卷积操作可以在一个Conv2d实例中完成，第9~10行中in_channels和out_channels两个参数的传入值便是这一点的体现。">
+	<meta itemprop="wordCount" content="609">
+
+<title>8.4 ConvLSTM网络 • 《从零学AI指南手册》</title>
+<link rel="icon" href="/favicon.png" >
+<link rel="manifest" href="/manifest.json">
+<link rel="canonical" href="https://mlwithme.github.io/dl/chapter08/19c2b86e85f2461e/">
+<link rel="stylesheet" href="/book.min.6097ccf1d338ddfaa037d2f96478059a71fa573d0f917d128bab595efea338ca.css" integrity="sha256-YJfM8dM43fqgN9L5ZHgFmnH6Vz0PkX0Si6tZXv6jOMo=" crossorigin="anonymous">
+
+
+  <script defer type="module" src="/en.search.min.ffaad769e546b38d39820301bb9e5c193822f7bf0f46a855602e4e14707802e0.js" integrity="sha256-/6rXaeVGs405ggMBu55cGTgi978PRqhVYC5OFHB4AuA=" crossorigin="anonymous"></script>
+
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-23SZ6E8VY7"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-23SZ6E8VY7');
+</script>
+<script async src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
+
+</head>
+<body dir="ltr" class="book-kind-page book-type-dl">
+  <input type="checkbox" class="hidden toggle" id="menu-control" />
+  <input type="checkbox" class="hidden toggle" id="toc-control" />
+  <main class="container flex">
+    
+<aside class="book-menu">
+  <div class="book-menu-content">
+    
+  <nav>
+<h2 class="book-brand">
+  <a class="flex align-center" href="/"><span>《从零学AI指南手册》</span>
+  </a>
+</h2>
+
+
+<div class="book-search hidden">
+  <input id="book-search-input" type="text" 
+    placeholder="Search"
+    aria-label="Search"
+    maxlength="64" />
+  <div class="book-search-spinner hidden"></div>
+  <ul id="book-search-results"></ul>
+</div>
+<script>document.querySelector(".book-search").classList.remove("hidden")</script>
+
+
+
+
+
+
+
+
+
+
+  
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a>
+      大模型Agent开发</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-253e26e732e57a78f635dcf47df3d0a3" class="toggle"  />
+    <label for="section-253e26e732e57a78f635dcf47df3d0a3" class="flex">
+      <a role="button" class="">
+        第 1 章 RAG 基础概念</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/454f0942222e471e/" class="">
+      1.1 RAG 提出背景</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/d7623d619f884b25/" class="">
+      1.2 RAG 流程概览</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-810ee5a2a3a24c9b7c25ab5324ae7db7" class="toggle"  />
+    <label for="section-810ee5a2a3a24c9b7c25ab5324ae7db7" class="flex">
+      <a role="button" class="">
+        第 2 章 大模型接入与使用</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/d43adfc00df54515/" class="">
+      2.1 SDK 介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/8b9059fde1d644a4/" class="">
+      2.2 现代大模型中的 SDK</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/95d3214ab80b4769/" class="">
+      2.3 DashScope 接口体系</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/b9843c089d654494/" class="">
+      2.4 千问大模型接入与使用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ed1727f01d0e40dc9b7961b72e42160e" class="toggle"  />
+    <label for="section-ed1727f01d0e40dc9b7961b72e42160e" class="flex">
+      <a role="button" class="">
+        第 3 章 文档标准化与语义检索</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/7f4af6d48c5b425c/" class="">
+      3.1 文档加载与标准化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/572ba4c9cb114677/" class="">
+      3.2 常见文本切分策略</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/06e588cd33fa4454/" class="">
+      3.3 向量数据库选择</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/ff27306c0d7b4387/" class="">
+      3.4 Qwen3 Embedding 模型介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/303035851c5e42f2/" class="">
+      3.5 语义搜索引擎构建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/e1328cb23e8c412b/" class="">
+      3.6  Milvus 模块解析</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-caaf9d8eb5e5559f7ca8bb11c41da71a" class="toggle"  />
+    <label for="section-caaf9d8eb5e5559f7ca8bb11c41da71a" class="flex">
+      <a role="button" class="">
+        第 4 章 RAG 与 Agent</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/4c646aa07f3b4b74/" class="">
+      4.1 两步式 RAG 搭建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/5c35e934bab24ac3/" class="">
+      4.2 Function Calling 概念介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/88ff352fc22e4cd6/" class="">
+      4.3 LangChain 中的 Tool 修饰器</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/83fe26536a5d4b6e/" class="">
+      4.4 RAG Agent 原理与搭建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/b7e49268357a4bca/" class="">
+      4.5 复杂问题拆解与ReAct框架</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/469b5963f2ca4799/" class="">
+      4.6 RAG 中的两阶段索引</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/10fb92a6c5484039/" class="">
+      4.7 Qwen3 Reranking 原理与使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/45d286aec1bc4d66/" class="">
+      4.8 基于两阶段索引的 RAG Agent 搭建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/43af483460574e48/" class="">
+      4.9 LangGraph 基本概念介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/0def4564f3aa455d/" class="">
+      4.10  基于 LangGraph 构建自定义 RAG Agent</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a>
+      深度学习</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/70e5f9cdbedc4b2c/" class="">
+      学习思维导图</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-a9b664bcf9e1dab8add449268565f466" class="toggle"  />
+    <label for="section-a9b664bcf9e1dab8add449268565f466" class="flex">
+      <a role="button" class="">
+        第 1 章 深度学习简介</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/647eb9c607874e3a/" class="">
+      1.1 深度学习的发展阶段</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/f31da36a6f444afe/" class="">
+      1.2 深度学习中的关键人物</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/da9fa13021e64f3c/" class="">
+      1.3 深度学习框架介绍</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-e6e0db5d4bc28bd97dfe8d5210249e63" class="toggle"  />
+    <label for="section-e6e0db5d4bc28bd97dfe8d5210249e63" class="flex">
+      <a role="button" class="">
+        第 2 章 环境配置</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/a0c5d1e0de0140cb/" class="">
+      2.1 体系结构介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/04f07b9246984577/" class="">
+      2.2 深度学习环境安装</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/5bf6454673194c67/" class="">
+      2.3 开发环境安装配置</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-0a2ca47f15332c8b06ae83247328edb4" class="toggle"  />
+    <label for="section-0a2ca47f15332c8b06ae83247328edb4" class="flex">
+      <a role="button" class="">
+        第 3 章 深度学习基础</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/75c5fa7839174c16/" class="">
+      3.1 线性回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/ca16f8cb6df444a6/" class="">
+      3.2 线性回归简洁实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/97e1da1143cd4554/" class="">
+      3.3 梯度下降与反向传播</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/7b865de988ea422c/" class="">
+      3.4 从零实现回归模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/18fdd1deff424a16/" class="">
+      3.5 从逻辑回归到Softmax回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/55967b0f642b4509/" class="">
+      3.6 Softmax回归简洁实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/381bbd56509e4a6f/" class="">
+      3.7 从零实现分类模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/2c061df4435d4928/" class="">
+      3.8 回归模型评估指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/e3442eff254e473c/" class="">
+      3.9 分类模型评估指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/307f927c8a1245c5/" class="">
+      3.10 过拟合与正则化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/bcb64de5aa404f18/" class="">
+      3.11 超参数与交叉验证</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/66dd7425cdd04565/" class="">
+      3.12 激活函数</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/0d3dacfff4c04794/" class="">
+      3.13 多标签分类</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-95b7e7417bf2b821a1b760975d3acc22" class="toggle"  />
+    <label for="section-95b7e7417bf2b821a1b760975d3acc22" class="flex">
+      <a role="button" class="">
+        第 4 章 卷积神经网络</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/102e183e8be94f46/" class="">
+      4.1 卷积的概念</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/5b3e3152e9e54f4f/" class="">
+      4.2 卷积的计算过程</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/762f60de801a4ccd/" class="">
+      4.3 填充和池化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/c8af5d84174b4420/" class="">
+      4.4 LeNet5网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/de007462967e4701/" class="">
+      4.5 AlexNet网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/f084f181c3554082/" class="">
+      4.6 VGG网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/911b961cc5d949b6/" class="">
+      4.7 NIN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/47da186baf3e4a0b/" class="">
+      4.8 GoogLeNet网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/da16c61397454b2c/" class="">
+      4.9 ResNet网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/1c24468824274650/" class="">
+      4.10 DenseNet网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-17076fe90a2d84e207bbd0c829983325" class="toggle"  />
+    <label for="section-17076fe90a2d84e207bbd0c829983325" class="flex">
+      <a role="button" class="">
+        第 5 章 模型训练与复用</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/4557a6f03dec4475/" class="">
+      5.1 参数及日志管理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/e7c4c6da085148d0/" class="">
+      5.2 Tensorboard可视化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/27387966672c45ed/" class="">
+      5.3 模型的保存与复用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/211b26bdd8f248ac/" class="">
+      5.4 模型的迁移学习</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/345c1b72253043cb/" class="">
+      5.5 开源模型复用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/c912dda030c946d9/" class="">
+      5.6 多GPU训练</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/f065af80f3844b0b/" class="">
+      5.7 数据预处理与缓存</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-2d091d454d5c3f03f5e0a202c37cc226" class="toggle"  />
+    <label for="section-2d091d454d5c3f03f5e0a202c37cc226" class="flex">
+      <a role="button" class="">
+        第 6 章 模型优化方法</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/cc35bb112783410e/" class="">
+      6.1 学习率调度器</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/fc024c283f164849/" class="">
+      6.2 梯度裁剪</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/27ed3ed136e24092/" class="">
+      6.3 批归一化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/fdd5ba4b41f74a0e/" class="">
+      6.4 层归一化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/9246afed14eb436c/" class="">
+      6.5 组归一化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/fcbc66ad051a4336/" class="">
+      6.6 动量法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/8b83d654898c40a2/" class="">
+      6.7 AdaGrad算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/078f2394980d41d2/" class="">
+      6.8 AdaDelta算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/28ad7fb39987447e/" class="">
+      6.9 Adam算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/4b81b8d39721434d/" class="">
+      6.10 初始化方法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f2f78ba4851131558fc284d927542d28" class="toggle"  />
+    <label for="section-f2f78ba4851131558fc284d927542d28" class="flex">
+      <a role="button" class="">
+        第 7 章 循环神经网络</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/88ba4e03337b4233/" class="">
+      7.1 RNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/ec8ff069aadc49b9/" class="">
+      7.2 时序数据</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/b4c5ddcc9e904238/" class="">
+      7.3 LSTM网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/4112672112224dc1/" class="">
+      7.4 GRU网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/b6e5ccb6cd064f74/" class="">
+      7.5 BiRNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/4bf3ecf7b21e45fb/" class="">
+      7.6 CharRNN网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-49992cff6143e64ae5d7f2209dcfb054" class="toggle" checked />
+    <label for="section-49992cff6143e64ae5d7f2209dcfb054" class="flex">
+      <a role="button" class="">
+        第 8 章 时序与模型融合</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/2be88fbc08a5418f/" class="">
+      8.1 TextCNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/9023d1f822a54226/" class="">
+      8.2 TextRNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/9edd7db2d439402f/" class="">
+      8.3 CNN-RNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/19c2b86e85f2461e/" class="active">
+      8.4 ConvLSTM网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/1e6da79bf7b44c20/" class="">
+      8.5 3DCNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/5f426a9190e7454b/" class="">
+      8.6 STResNet网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ca07c572acb4d7fd40854f5b367c247b" class="toggle"  />
+    <label for="section-ca07c572acb4d7fd40854f5b367c247b" class="flex">
+      <a role="button" class="">
+        第 9 章 自然语言处理</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/e0cb9a7aae814045/" class="">
+      9.1 自然语言处理介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/d4703d990f8d4fed/" class="">
+      9.2 Word2Vec词向量</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/1bb6351b01a2479b/" class="">
+      9.3 Word2Vec训练与使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/40a8a1146d934c55/" class="">
+      9.4 GloVe词向量</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/c6aa1405b8cf46d8/" class="">
+      9.5 词向量的微调使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/48c26d04b342452d/" class="">
+      9.6 fastText网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/03a0166e195f443f/" class="">
+      9.7 Seq2Seq网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/271bda16904544af/" class="">
+      9.8 序列模型评价指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/fefa60e0bc854a17/" class="">
+      9.9 NMT网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/5bcd8b0920414f34/" class="">
+      9.10 注意力机制</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/8a78e8213ee04aac/" class="">
+      9.11 含注意力的NMT网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/474ac7a1867d4b5e/" class="">
+      9.12 含注意力的RNN网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-8cdec04c2fd8683c5c7373c78d943528" class="toggle"  />
+    <label for="section-8cdec04c2fd8683c5c7373c78d943528" class="flex">
+      <a role="button" class="">
+        第10章 现代神经网络</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/7523731afc0241c0/" class="">
+      10.1 ELMo网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/4987d1044939480d/" class="">
+      10.2 Transformer网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/a469ed1a25e1498f/" class="">
+      10.3 Transformer结构</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/d50c490eef3b4565/" class="">
+      10.4 Transformer实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/f6c507b3d2d74f03/" class="">
+      10.5 Transformer对联模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/3aedea1d3f3e48dd/" class="">
+      10.6 BERT网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/82a1cd0def084620/" class="">
+      10.7 从零实现BERT</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/e736d3974ed0484c/" class="">
+      10.8 BERT文本分类模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/f5076cbadda84d4e/" class="">
+      10.9 BERT问题选择模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/25d9ef3d9b34472a/" class="">
+      10.10 BERT问题回答模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/64d3ec5593ec4b94/" class="">
+      10.11 BERT命名体识别模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/90ea8d3e090d48b4/" class="">
+      10.12 BERT从零训练</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/e36878dad7a647d8/" class="">
+      10.13 GPT-1模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/94dda9bbbc994913/" class="">
+      10.14 GPT-2与GPT-3模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/4af57a29308840de/" class="">
+      10.15 基于GPT-2的中文预训练模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/9f5c00cadde14d31/" class="">
+      10.16 InstructGPT与ChatGPT</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/050b54fd34ca480a/" class="">
+      10.17 ChatGPT与提示词工程</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/a90b0d71389b4d69/" class="">
+      10.18 百川大模型使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/40c1c9ade70c4ce7/" class="">
+      10.19 百川大模型实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/ea1b4cf8b40c4b05/" class="">
+      10.20 GPT-4与GPTs使用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a>
+      机器学习</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/43fc00b3809d4be6/" class="">
+      学习思维导图</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-0a3254d1ca9963fd6975aa5bc0b3edcc" class="toggle"  />
+    <label for="section-0a3254d1ca9963fd6975aa5bc0b3edcc" class="flex">
+      <a role="button" class="">
+        第 1 章 环境配置</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/baafb91f0af14a84/" class="">
+      1.1 安装使用Conda</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/7a01c403acd6488a/" class="">
+      1.2 开发环境安装配置</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-4569258198323c16bc8a634ea44fd5db" class="toggle"  />
+    <label for="section-4569258198323c16bc8a634ea44fd5db" class="flex">
+      <a role="button" class="">
+        第 2 章 线性回归</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/2414d4b6648d405a/" class="">
+      2.1 模型的建立与求解</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/3e9ba14da71f4fd3/" class="">
+      2.2 多变量线性回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/4a16c0dc82a84e78/" class="">
+      2.3 多项式回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/f8dea699983c48c6/" class="">
+      2.4 回归模型评估</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/df41c2e97f554e68/" class="">
+      2.5 梯度下降</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/71ef816e0005492d/" class="">
+      2.6 正态分布</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/803bee4f70be4dca/" class="">
+      2.7 目标函数推导</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-a6ca5e2f846ebd900d1a868e6718dc82" class="toggle"  />
+    <label for="section-a6ca5e2f846ebd900d1a868e6718dc82" class="flex">
+      <a role="button" class="">
+        第 3 章 逻辑回归</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/96d46b53aee14c3b/" class="">
+      3.1 模型的建立与求解</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/fac70083dd764141/" class="">
+      3.2 多分类任务</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/6d7cfd79ef304cbd/" class="">
+      3.3 常见的分类评估指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/2fdc655d00c74548/" class="">
+      3.4 目标函数推导</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/a4b61c5bbadd43a6/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-9f462f716bd0e46ef79984b356eeb5a2" class="toggle"  />
+    <label for="section-9f462f716bd0e46ef79984b356eeb5a2" class="flex">
+      <a role="button" class="">
+        第 4 章 模型的改善与泛化</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/2089400b28f54dd9/" class="">
+      4.1 基本概念</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/56b788b624cd4971/" class="">
+      4.2 特征标准化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/ca091dc393a84518/" class="">
+      4.3过拟合</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/5097d3b8c1144427/" class="">
+      4.4 正则化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/3c7eee1621d4480b/" class="">
+      4.5 偏差、方差与交叉验证</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/c5957e0753d04746/" class="">
+      4.6 实例分析手写体识别</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/a915e49586eb4426/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-327db48e4f4df6236855078634147679" class="toggle"  />
+    <label for="section-327db48e4f4df6236855078634147679" class="flex">
+      <a role="button" class="">
+        第 5 章 K近邻</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/7c610e923e754259/" class="">
+      5.1 K近邻思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/1a97571e0a6447ef/" class="">
+      5.2 K近邻原理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/d245bda107034e65/" class="">
+      5.3 sklearn接口与示例代码</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/24378571ce404d9c/" class="">
+      5.4 kd树构建与搜索</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/40f253b916f24038/" class="">
+      5.5 从零实现K近邻</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/76818d9e48944f8c/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-94d0a5f5555d92c51e0903b148e34993" class="toggle"  />
+    <label for="section-94d0a5f5555d92c51e0903b148e34993" class="flex">
+      <a role="button" class="">
+        第 6 章 文本特征与模型复用</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/e05b5928c41d4841/" class="">
+      6.1 词袋模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/de59bf74d753457e/" class="">
+      6 .2 基于K近邻算法的垃圾邮件分类</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/c6fdc78b49d44453/" class="">
+      6.3 考虑权重的词袋模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/825fde8589654b16/" class="">
+      6.4 词云图</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/8451cffe49f5477c/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-544be5d1e48c4fd8b33ba2f91964c6dd" class="toggle"  />
+    <label for="section-544be5d1e48c4fd8b33ba2f91964c6dd" class="flex">
+      <a role="button" class="">
+        第 7 章 朴素贝叶斯</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/faf303eb93a241d1/" class="">
+      7.1 朴素贝叶斯算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/842c7b8684c747d2/" class="">
+      7.2 贝叶斯估计</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/724bf42b09bb440e/" class="">
+      7.3 朴素贝叶斯实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/1a9deee1d5f042b5/" class="">
+      7.4 多项式朴素贝叶斯原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/5c27cdd8b3264f50/" class="">
+      7.5 高斯朴素贝叶斯原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/715b8eaf245f45f1/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-d1884c6b3e8f1260019220c57d615371" class="toggle"  />
+    <label for="section-d1884c6b3e8f1260019220c57d615371" class="flex">
+      <a role="button" class="">
+        第 8 章 决策树</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/690fe2be21834c2a/" class="">
+      8.1 决策树的基本思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/ee9ada9729124049/" class="">
+      8.2 决策树建模与可视化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/5887cf1408dd4c7f/" class="">
+      8.3 决策树生成之ID3与C4.5</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/87ba589d6c17434d/" class="">
+      8.4 决策树剪枝过程</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/34bc962c974646f4/" class="">
+      8.5 从零实现ID3与C4.5算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/c44682dbb3364be4/" class="">
+      8.6 连续型特征变量下决策树实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/4eead717a84a4dbf/" class="">
+      8.7 CART生成与剪枝算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/1c72d67dffc64dc9/" class="">
+      8.8 从零实现CART算法及剪枝示例</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/ae452792b2604e84/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-1f0a2178f0a580ba251c7da2649aa52f" class="toggle"  />
+    <label for="section-1f0a2178f0a580ba251c7da2649aa52f" class="flex">
+      <a role="button" class="">
+        第 9 章 集成学习与提升算法</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/9eff4004fd6c437d/" class="">
+      9.1 集成学习算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/18980c9f757e42c8/" class="">
+      9.2 随机森林</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/8a91b358b2f74d56/" class="">
+      9.3 泰坦尼克号生还预测</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/73f6914844f549f1/" class="">
+      9.4 AdaBoost原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/71fd0e44294e4abb/" class="">
+      9.5 MultiAdaBoost原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/f3c2341ce7d64f70/" class="">
+      9.6 Gradient Boost 原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/4f9b26d5b65541f5/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f63defd924ef7373144c8643a39fd7b2" class="toggle"  />
+    <label for="section-f63defd924ef7373144c8643a39fd7b2" class="flex">
+      <a role="button" class="">
+        第 10 章 支持向量机</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/dce7180d4eb047d7/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/515b54e2307a4c8a/" class="">
+      10.1 SVM思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/9c3862bc843c4179/" class="">
+      10.2 SVM线性不可分</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/fbdb6f8adace457d/" class="">
+      10.3 SVM原理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/1a3ffa363b1d4f83/" class="">
+      10.4 SVM中的软间隔</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/8b7a06412a9f4267/" class="">
+      10.5 拉格朗日乘数法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/40e977f0a2f84ac0/" class="">
+      10.6 对偶性与KKT条件</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/b18d45a772574ddb/" class="">
+      10.7 SVM优化问题</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/c53ed12f7bc04405/" class="">
+      10.8 SVM核函数原理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/26d9b2b328a849c2/" class="">
+      10.9 SMO算法求解SVM</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/215a1e15c0f2470d/" class="">
+      10.10 从零实现SVM分类算法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bdcc54d1c295c5cc69c9c851c02886ea" class="toggle"  />
+    <label for="section-bdcc54d1c295c5cc69c9c851c02886ea" class="flex">
+      <a role="button" class="">
+        第 11 章 聚类分析</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/f9d9305a55a548a1/" class="">
+      11.1 聚类算法的思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/e635df24de32487a/" class="">
+      11.2 Kmeans聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/e75b8efa232249ab/" class="">
+      11.3 Kmeans算法求解</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/60e49a33d1aa4f50/" class="">
+      11.4 从零实现Kmeans聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/c8b45d8a3d8c4cf4/" class="">
+      11.5 Kmeans&#43;&#43;聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/1ede2f3557d0438f/" class="">
+      11.6 聚类外部评价指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/e6a75df19f85498c/" class="">
+      11.7 加权Kmeans聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/c52cf7920f1d4636/" class="">
+      11.8 聚类内部评价指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/f95259c359b146ba/" class="">
+      11.9 聚类K值选取与分析</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/b85c1a858f7c4686/" class="">
+      11.10 基于密度的聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/2f01ba751d914336/" class="">
+      11.11 基于层次的聚类算法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bafa8c48214ccf62d333a6d0457c5f72" class="toggle"  />
+    <label for="section-bafa8c48214ccf62d333a6d0457c5f72" class="flex">
+      <a role="button" class="">
+        第 12 章 降维算法</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/9478de824edd44c6/" class="">
+      12.1 主成分分析</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/909356aa90fe456a/" class="">
+      12.2 基于核函数的主成分分析</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-d5f143889a719ce66d602e75b72bffb9" class="toggle"  />
+    <label for="section-d5f143889a719ce66d602e75b72bffb9" class="flex">
+      <a role="button" class="">
+        第 13 章 自训练与标签传播</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/8d71301c2e414efe/" class="">
+      13.1 Self-Training 自训练算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/87fdcf0be1c34644/" class="">
+      13.2 Label Propagation算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/7fc8b0fc47d2427c/" class="">
+      13.3 Label Spreading 算法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+
+
+
+
+
+
+
+
+
+
+
+
+</nav>
+
+
+
+
+  <script>(function(){var e=document.querySelector("aside .book-menu-content");addEventListener("beforeunload",function(){localStorage.setItem("menu.scrollTop",e.scrollTop)}),e.scrollTop=localStorage.getItem("menu.scrollTop")})()</script>
+
+
+
+  </div>
+</aside>
+ 
+
+    <div class="book-page">
+      <header class="book-header hidden">
+        
+  <div class="flex align-center justify-between">
+  <label for="menu-control">
+    <img src="/icons/menu.svg" class="book-icon" alt="Menu" />
+  </label>
+
+  <h3>8.4 ConvLSTM网络</h3>
+
+  <label for="toc-control">
+    
+    <img src="/icons/toc.svg" class="book-icon" alt="Table of Contents" />
+    
+  </label>
+</div>
+
+
+  
+  <aside class="hidden">
+    
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#841-convlstm动机">8.4.1 ConvLSTM动机</a></li>
+    <li><a href="#842-convlstm结构">8.4.2 ConvLSTM结构</a></li>
+    <li><a href="#843-convlstm实现">8.4.3 ConvLSTM实现</a></li>
+    <li><a href="#844-kth数据集构建">8.4.4 KTH数据集构建</a></li>
+  </ul>
+</nav>
+
+
+
+  </aside>
+  
+ 
+      </header>
+
+      
+      
+  <article class="markdown book-article"><h1 id="84-convlstm网络">8.4 ConvLSTM网络<a class="anchor" href="#84-convlstm%e7%bd%91%e7%bb%9c">#</a></h1>
+<p>在<a href="dl/Chapter08/9edd7db2d439402f">8.3节</a>内容中，我们介绍了几种将CNN和RNN进行结合的时序模型，包括串行的方式将CNN和RNN进行结合、以并行的方式将CNN和RNN进行结合。同时，在这些任务场景中序列样本所拥有的一个共同特点便是对于每个序列中的每个时刻来说，其特征表示均为一个向量。但是在现实情况中，还有一类时序数据是以数据帧的形式而存在，即每一时刻均为一个三维（或二维）矩阵。这样的数据也被称为时空（Spatiotemporal）数据，例如最常见的视频数据。因此，在本节内容中，我们将会介绍另外一种结合CNN和RNN的深度学习模型ConvLSTM来解决这一问题[1]。</p>
+<h2 id="841-convlstm动机">8.4.1 ConvLSTM动机<a class="anchor" href="#841-convlstm%e5%8a%a8%e6%9c%ba">#</a></h2>
+<p>在气象学领域中，对于如何能够准确地预测未来短时间（如0~6小时）内的降雨情况一直以来就是一个热门的研究方向。通常，研究者会根据实时拍摄得到的雷达回波数据（Radar Echo Data）作为输入序列来预测接下来一段时间内的降雨情况。得益于深度学习的发展，有研究者提出了基于循环神经网络和卷积神经网络的预测模型。尽管通过这样的结合方式也能够建模完成这一预测任务，但是模型并没有充分考虑到时空数据中的空间依赖关系（Spatial Correlation）。</p>
+<p>基于这样的动机，施行健等人[1]在2015年提出了一种融合CNN和LSTM的时序预测模型ConvLSTM。ConvLSTM模型的动机是通过将CNN和LSTM结合起来克服传统RNN和CNN各自的局限性。ConvLSTM引入了空间上的卷积操作和时间上的循环操作，同时保留了LSTM中的记忆单元和门控机制，能够捕捉到时间和空间上的特征，考虑到时序数据的长期依赖性和空间结构的局部相关性。因此,ConvLSTM可以有效地用于处理时空数据，例如视频数据、雷达数据等。</p>
+<h2 id="842-convlstm结构">8.4.2 ConvLSTM结构<a class="anchor" href="#842-convlstm%e7%bb%93%e6%9e%84">#</a></h2>
+<p>从整体上看，ConvLSTM的模型结构主要分为两部分：在时序结构上遵循典型的RNN网络结构；在空间结构上遵循CNN的特征提取方式。简单来说，ConvLSTM模型就等价于将LSTM中的所有全连接结构替换为卷积结构，同时采用了基于窥视连接的结构（详见<a href="dl/Chapter07/4112672112224dc1">7.4.5节</a>内容）。如图8-5所示便是ConvLSTM的循环记忆单元。</p>
+<div align=center><img width="350" src="/images/dl/230611133922.jpg"/></div><center>图 8-5 ConvLSTM结构图</center>
+<p>如图8-5所示便是ConvLSTM的记忆单元结构图，总体上同LSTM类似包含有4个门结构，因此这部分内容不在赘述参考<a href="dl/Chapter07/b4c5ddcc9e904238">7.3节</a>内容即可。对于ConvLSTM来说，其唯一变化的地方在于各个门控单元的计算方式，具体计算过程如式(8-1)所示。
+</p>
+$$
+\begin{aligned}
+f_t&=\sigma([h_{t-1},x_t,C_{t-1}]\ast W_f+b_f)\\[2ex]
+i_t&=\sigma([h_{t-1},x_t,C_{t-1}]\ast W_i+b_i)\\[2ex]
+\tilde{C_t}&=\tanh([h_{t-1},x_t]\ast W_c+b_c)\\[2ex]
+C_t&=f_t\odot C_{t-1}\oplus  i_t\odot\tilde{C_t}\\[2ex]
+o_t&=\sigma([h_{t-1},x_t,C_{t}]\ast W_o+b_o)\\[2ex]
+h_t&=o_t\odot\tanh(C_t)
+\end{aligned}\tag{8-1}
+$$<p>在式(8-1)中，$\ast$ 表示卷积操作，$W_f$、$W_i$、$W_c$和$W_o$均为卷积核，因此ConvLSTM模型的输入将是一个5维张量，即<code>[batch_size,time_step,in_channels,height,width]</code>。由此可知，$x_t$的形状为<code>[batch_size,in_channels,height,width]</code>；$h_t$和$C_t$的形状均为<code>[batch_size,out_channels,height,width]</code>；$[h_{t-1},x_t]$的形状为<code>[batch_size,in_channels+out_channels,height,width]</code>；$[h_{t-1},x_t,C_{t-1}]$的形状为<code>[batch_size,in_channels+out_channels*2,height,width]</code>。</p>
+<p>同时，由于循环神经网络可以在时间维度和网络层数两个方向展开，因此在ConvLSTM记忆单元中每次卷积之前都会进行填充，以保证每次卷积后特征图的长和宽不发生改变，所以$f_t$、$i_t$和$o_t$的形状均为<code>[batch_size, out_channels, height, width]</code>。对于ConvLSTM来说，其同样类似于RNN模型，因此也可以根据<a href="dl/Chapter07/88ba4e03337b4233?id=_714-rnn%e7%b1%bb%e5%9e%8b">7.1.4节</a>中的结构来构造网络模型并完成相关下游任务。</p>
+<h2 id="843-convlstm实现">8.4.3 ConvLSTM实现<a class="anchor" href="#843-convlstm%e5%ae%9e%e7%8e%b0">#</a></h2>
+<p>在清楚ConvLSTM模型的相关原理之后，我们再来看如何借助PyTorch快速实现ConvLSTM模型。由于PyTorch框架中的<code>nn</code>模块并没有实现ConvLSTM模型，因此需要我们自己动手进行实现。以下完整示例代码可以参见<code>Code/Chapter08/C05_ConvLSTM/ConvLSTM.py</code>文件。</p>
+<p><strong>1. <code>ConvLSTMCell</code>实现</strong></p>
+<p>为了便于实现这里以不带窥视连接的结构进行介绍。首先，需要实现一个单独的ConvLSTM记忆单元的前向传播过程，示例代码如下所示：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#ae81ff">1</span> <span style="color:#66d9ef">class</span> <span style="color:#a6e22e">ConvLSTMCell</span>(nn<span style="color:#f92672">.</span>Module):
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">2</span>     <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">__init__</span>(self, in_channels, out_channels, kernel_size, bias):
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">3</span>         super(ConvLSTMCell, self)<span style="color:#f92672">.</span><span style="color:#a6e22e">__init__</span>()
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">4</span>         self<span style="color:#f92672">.</span>in_channels <span style="color:#f92672">=</span> in_channels
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">5</span>         self<span style="color:#f92672">.</span>out_channels <span style="color:#f92672">=</span> out_channels
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">6</span>         self<span style="color:#f92672">.</span>kernel_size <span style="color:#f92672">=</span> kernel_size
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">7</span>         self<span style="color:#f92672">.</span>padding <span style="color:#f92672">=</span> kernel_size[<span style="color:#ae81ff">0</span>] <span style="color:#f92672">//</span> <span style="color:#ae81ff">2</span>, kernel_size[<span style="color:#ae81ff">1</span>] <span style="color:#f92672">//</span> <span style="color:#ae81ff">2</span>
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">8</span>         self<span style="color:#f92672">.</span>bias <span style="color:#f92672">=</span> bias
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">9</span>         self<span style="color:#f92672">.</span>conv <span style="color:#f92672">=</span> nn<span style="color:#f92672">.</span>Conv2d(in_channels<span style="color:#f92672">=</span>self<span style="color:#f92672">.</span>in_channels <span style="color:#f92672">+</span> self<span style="color:#f92672">.</span>out_channels,
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">10</span> 								 out_channels<span style="color:#f92672">=</span><span style="color:#ae81ff">4</span> <span style="color:#f92672">*</span> self<span style="color:#f92672">.</span>out_channels,kernel_size<span style="color:#f92672">=</span>self<span style="color:#f92672">.</span>kernel_size,
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">11</span>                 padding<span style="color:#f92672">=</span>self<span style="color:#f92672">.</span>padding,bias<span style="color:#f92672">=</span>self<span style="color:#f92672">.</span>bias)</span></span></code></pre></div><p>在上述代码中，第1行中<code>in_channels</code>表示输入特征图的通道数，<code>out_channels</code>表示输出特征图的通道数，<code>kernel_size</code>表示卷积核的窗口大小为一个元组。第7行用于计算填充的数量，以保证每次卷积后特征图的大小不发生变化，其计算规则可见<a href="dl/Chapter04/762f60de801a4ccd?id=_432-%e5%bd%a2%e7%8a%b6%e8%ae%a1%e7%ae%97">4.3.2节</a>内容；同时，为了提高计算效率，对于ConvLSTM中所有卷积操作可以在一个<code>Conv2d</code>实例中完成，第9~10行中<code>in_channels</code>和<code>out_channels</code>两个参数的传入值便是这一点的体现。</p>
+<p>进一步，整个前向传播计算过程的示例代码如下所示：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#ae81ff">1</span>     <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">forward</span>(self, input_tensor, last_state):
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">2</span>         h_last, c_last <span style="color:#f92672">=</span> last_state
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">3</span>         combined_input <span style="color:#f92672">=</span> torch<span style="color:#f92672">.</span>cat([input_tensor, h_last], dim<span style="color:#f92672">=</span><span style="color:#ae81ff">1</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">4</span>         combined_conv <span style="color:#f92672">=</span> self<span style="color:#f92672">.</span>conv(combined_input)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">5</span>         cc_i, cc_f, cc_o, cc_g <span style="color:#f92672">=</span> torch<span style="color:#f92672">.</span>split(combined_conv, self<span style="color:#f92672">.</span>out_channels, dim<span style="color:#f92672">=</span><span style="color:#ae81ff">1</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">6</span>         i <span style="color:#f92672">=</span> torch<span style="color:#f92672">.</span>sigmoid(cc_i)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">7</span>         f <span style="color:#f92672">=</span> torch<span style="color:#f92672">.</span>sigmoid(cc_f)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">8</span>         o <span style="color:#f92672">=</span> torch<span style="color:#f92672">.</span>sigmoid(cc_o)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">9</span>         g <span style="color:#f92672">=</span> torch<span style="color:#f92672">.</span>tanh(cc_g)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">10</span>         c_next <span style="color:#f92672">=</span> f <span style="color:#f92672">*</span> c_last <span style="color:#f92672">+</span> i <span style="color:#f92672">*</span> g
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">11</span>         h_next <span style="color:#f92672">=</span> o <span style="color:#f92672">*</span> torch<span style="color:#f92672">.</span>tanh(c_next)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">12</span>         <span style="color:#66d9ef">return</span> h_next, c_next
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">13</span> 
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">14</span>     <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">init_hidden</span>(self, batch_size, image_size):
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">15</span>         height, width <span style="color:#f92672">=</span> image_size
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">16</span>         <span style="color:#66d9ef">return</span> (torch<span style="color:#f92672">.</span>zeros(batch_size, self<span style="color:#f92672">.</span>out_channels, 
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">17</span>         		height, width, device<span style="color:#f92672">=</span>self<span style="color:#f92672">.</span>conv<span style="color:#f92672">.</span>weight<span style="color:#f92672">.</span>device),
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">18</span>                 torch<span style="color:#f92672">.</span>zeros(batch_size, self<span style="color:#f92672">.</span>out_channels, 
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">19</span>                 height, width, device<span style="color:#f92672">=</span>self<span style="color:#f92672">.</span>conv<span style="color:#f92672">.</span>weight<span style="color:#f92672">.</span>device))</span></span></code></pre></div><p>在上述代码中，第1行<code>input_tensor</code>表示当前时刻的输入形状为<code>[batch_size, in_channels, height, width]</code>。第2行<code>last_state</code>表示上一个时刻的输出，包含$h_{t-1}$和$C_{t-1}$两个部分形状均为<code>[batch_size, out_channels, height, width]</code>。第3行表示将$h_{t-1}$和$x_t$进行拼接，形状为<code>[batch_size, in_channels+out_channels, height, width]</code>。第4行为同时计算4个部分的卷积运算。第5行是将卷积运算后的整体结果在<code>dim=1</code>这个维度上按照<code>self.out_channels</code>的大小分割，即分割成4个部分，因为卷积运算后的通道数为<code>4 * self.out_channels</code>。第6~12行则是进行相关状态的计算输出。第14~19行是定义一个方法来实现初始时刻的初始化过程。</p>
+<p><strong>2. ConvLSTM实现</strong></p>
+<p>在完成<code>ConvLSTMCell</code>模块的实现之后我们便可以基于此来完成<code>ConvLSTM</code>模块的实现，即完成在时间和网络层数两个维度的计算过程。在这之前需要实现两个辅助方法来完成相关参数的扩展与合法性检验，示例代码如下所示：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#ae81ff">1</span>     <span style="color:#a6e22e">@staticmethod</span>
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">2</span>     <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">_check_kernel_size_consistency</span>(kernel_size):
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">3</span>         <span style="color:#66d9ef">if</span> <span style="color:#f92672">not</span> (isinstance(kernel_size, tuple) <span style="color:#f92672">or</span>
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">4</span>                 (isinstance(kernel_size, list) <span style="color:#f92672">and</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">5</span>                 	all([isinstance(elem, tuple) <span style="color:#66d9ef">for</span> elem <span style="color:#f92672">in</span> kernel_size]))):
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">6</span>             <span style="color:#66d9ef">raise</span> <span style="color:#a6e22e">ValueError</span>(<span style="color:#e6db74">&#39;kernel_size must be tuple or list of tuples&#39;</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">7</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">8</span>     <span style="color:#a6e22e">@staticmethod</span>
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">9</span>     <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">_extend_for_multilayer</span>(param, num_layers):
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">10</span>         <span style="color:#66d9ef">if</span> <span style="color:#f92672">not</span> isinstance(param, list):
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">11</span>             param <span style="color:#f92672">=</span> [param] <span style="color:#f92672">*</span> num_layers
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">12</span>         <span style="color:#66d9ef">return</span> param</span></span></code></pre></div><p>在上述代码中，第2~6行<code>_check_kernel_size_consistency()</code>方法用来检验参数<code>kernel_size</code>的合法性，即对于多层的ConvLSTM来，传入的<code>kernel_size</code>要么是一个元组如<code>(3,3)</code>，要么是一个包含有多个元组的列表如<code>[(3,3),(5,5)]</code>，前者表示所有层的卷积核窗口大小均为<code>(3,3)</code>，后者表示在两层的ConvLSTM中卷积核的窗口大小分别为<code>(3,3)</code>和<code>(5,5)</code>。第9~12行则是对相关参数进行延展，例如<code>kernel_size=(3,3)</code>且<code>num_layers=2</code>，那么将会返回<code>[(3,3),(3,3)]</code>这样一个结果。</p>
+<p>进一步，可以开始实现<code>ConvLSTM</code>模块，示例代码如下所示：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#ae81ff">1</span> <span style="color:#66d9ef">class</span> <span style="color:#a6e22e">ConvLSTM</span>(nn<span style="color:#f92672">.</span>Module):
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">2</span>     <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">__init__</span>(self, in_channels, out_channels, kernel_size, num_layers,
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">3</span>                  batch_first<span style="color:#f92672">=</span><span style="color:#66d9ef">False</span>, bias<span style="color:#f92672">=</span><span style="color:#66d9ef">True</span>, return_all_layers<span style="color:#f92672">=</span><span style="color:#66d9ef">False</span>):
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">4</span>         super(ConvLSTM, self)<span style="color:#f92672">.</span><span style="color:#a6e22e">__init__</span>()
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">5</span>         self<span style="color:#f92672">.</span>_check_kernel_size_consistency(kernel_size)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">6</span>         kernel_size <span style="color:#f92672">=</span> self<span style="color:#f92672">.</span>_extend_for_multilayer(kernel_size, num_layers)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">7</span>         out_channels <span style="color:#f92672">=</span> self<span style="color:#f92672">.</span>_extend_for_multilayer(out_channels, num_layers)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">8</span>         <span style="color:#66d9ef">if</span> <span style="color:#f92672">not</span> len(kernel_size) <span style="color:#f92672">==</span> len(out_channels) <span style="color:#f92672">==</span> num_layers:
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">9</span>             <span style="color:#66d9ef">raise</span> <span style="color:#a6e22e">ValueError</span>(<span style="color:#e6db74">&#39;参数不合法&#39;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">10</span>         self<span style="color:#f92672">.</span>in_channels <span style="color:#f92672">=</span> in_channels
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">11</span>         self<span style="color:#f92672">.</span>out_channels <span style="color:#f92672">=</span> out_channels
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">12</span>         self<span style="color:#f92672">.</span>kernel_size <span style="color:#f92672">=</span> kernel_size
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">13</span>         self<span style="color:#f92672">.</span>num_layers <span style="color:#f92672">=</span> num_layers
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">14</span>         self<span style="color:#f92672">.</span>batch_first <span style="color:#f92672">=</span> batch_first
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">15</span>         self<span style="color:#f92672">.</span>bias <span style="color:#f92672">=</span> bias
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">16</span>         self<span style="color:#f92672">.</span>return_all_layers <span style="color:#f92672">=</span> return_all_layers
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">17</span>         cell_list <span style="color:#f92672">=</span> []
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">18</span>         <span style="color:#66d9ef">for</span> i <span style="color:#f92672">in</span> range(<span style="color:#ae81ff">0</span>, self<span style="color:#f92672">.</span>num_layers): 
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">19</span>             cur_in_channels <span style="color:#f92672">=</span> self<span style="color:#f92672">.</span>in_channels <span style="color:#66d9ef">if</span> i <span style="color:#f92672">==</span> <span style="color:#ae81ff">0</span> <span style="color:#66d9ef">else</span> self<span style="color:#f92672">.</span>out_channels[i <span style="color:#f92672">-</span> <span style="color:#ae81ff">1</span>]
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">20</span>             cell_list<span style="color:#f92672">.</span>append(ConvLSTMCell(in_channels<span style="color:#f92672">=</span>cur_in_channels,bias<span style="color:#f92672">=</span>self<span style="color:#f92672">.</span>bias, 
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">21</span>             									out_channels<span style="color:#f92672">=</span>self<span style="color:#f92672">.</span>out_channels[i],kernel_size<span style="color:#f92672">=</span>self<span style="color:#f92672">.</span>kernel_size[i]))
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">22</span>         self<span style="color:#f92672">.</span>cell_list <span style="color:#f92672">=</span> nn<span style="color:#f92672">.</span>ModuleList(cell_list)</span></span></code></pre></div><p>在上述代码中，第2行<code>in_channels</code>为输出样本的通道数为整型，<code>out_channels</code>为每一层的输出通道数可以是整型或者列表，<code>kernel_size</code>为每一层的卷积核窗口大小可以是元组或者为包含元组的列表，<code>num_layers</code>表示网络的层数。第2行<code>return_all_layers</code>表示是否返回每一层的计算结果。第5~9行是分别检验相关参数的合法性以及进行扩展。第18~22行则是开始实例化每一层对应的<code>ConvLSTM</code>记忆单元。</p>
+<p>紧接着，整个前向传播的计算过程示例代码如下所示：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#ae81ff">1</span>     <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">forward</span>(self, input_tensor, hidden_state<span style="color:#f92672">=</span><span style="color:#66d9ef">None</span>):
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">2</span>         <span style="color:#66d9ef">if</span> <span style="color:#f92672">not</span> self<span style="color:#f92672">.</span>batch_first:
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">3</span>             input_tensor <span style="color:#f92672">=</span> input_tensor<span style="color:#f92672">.</span>permute(<span style="color:#ae81ff">1</span>, <span style="color:#ae81ff">0</span>, <span style="color:#ae81ff">2</span>, <span style="color:#ae81ff">3</span>, <span style="color:#ae81ff">4</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">4</span>         batch_size, time_step, _, height, width <span style="color:#f92672">=</span> input_tensor<span style="color:#f92672">.</span>size()
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">5</span>         <span style="color:#66d9ef">if</span> hidden_state <span style="color:#f92672">is</span> <span style="color:#f92672">not</span> <span style="color:#66d9ef">None</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">6</span>             <span style="color:#66d9ef">raise</span> <span style="color:#a6e22e">NotImplementedError</span>()
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">7</span>         <span style="color:#66d9ef">else</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">8</span>             hidden_state <span style="color:#f92672">=</span> self<span style="color:#f92672">.</span>_init_hidden(batch_size,(height, width))
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">9</span>         layer_output_list, last_state_list <span style="color:#f92672">=</span> [], []
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">10</span>         cur_layer_input <span style="color:#f92672">=</span> input_tensor
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">11</span>         <span style="color:#66d9ef">for</span> layer_idx <span style="color:#f92672">in</span> range(self<span style="color:#f92672">.</span>num_layers):
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">12</span>             h, c <span style="color:#f92672">=</span> hidden_state[layer_idx]
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">13</span>             output_inner <span style="color:#f92672">=</span> []
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">14</span>             cur_layer_cell <span style="color:#f92672">=</span> self<span style="color:#f92672">.</span>cell_list[layer_idx]
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">15</span>             <span style="color:#66d9ef">for</span> t <span style="color:#f92672">in</span> range(time_step):
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">16</span>                 h, c <span style="color:#f92672">=</span> cur_layer_cell(cur_layer_input[:, t, :, :, :], [h, c])
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">17</span>                 output_inner<span style="color:#f92672">.</span>append(h)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">18</span>             layer_output <span style="color:#f92672">=</span> torch<span style="color:#f92672">.</span>stack(output_inner, dim<span style="color:#f92672">=</span><span style="color:#ae81ff">1</span>) 
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">19</span>             cur_layer_input <span style="color:#f92672">=</span> layer_output 
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">20</span>             layer_output_list<span style="color:#f92672">.</span>append(layer_output)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">21</span>             last_state_list<span style="color:#f92672">.</span>append([h, c])
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">22</span>         <span style="color:#66d9ef">if</span> <span style="color:#f92672">not</span> self<span style="color:#f92672">.</span>return_all_layers:
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">23</span>             layer_output_list <span style="color:#f92672">=</span> layer_output_list[<span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>:]
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">24</span>             last_state_list <span style="color:#f92672">=</span> last_state_list[<span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>:]
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">25</span>         <span style="color:#66d9ef">return</span> layer_output_list, last_state_list</span></span></code></pre></div><p>在上述代码中，第2~3行用于判断批大小是否为第1个维度，不是则进行维度交互。第4行是获取输出张量各个维度的数值。第5~8行是对初始状态进行初始化。第9行中，<code>layer_output_list</code>用于保存每一层的所有输出$h$，每个元素的形状均为<code>[batch_size, time_step, out_channels, height, width]</code>，<code>last_state_list</code>用于保存每一层最后一个时刻的输出$h$和$c$，即形容<code>[(h,c),(h,c)...]</code>。第11~12行开始遍历每一层的记忆单元并取对应的初始值。第14行当前层对应的<code>ConvLSTMCell</code>实例化对象。第15~17行开始在时间维度对当前层进行展开计算，其中<code>output_inner</code>用于报错当前时刻计算的得到的$h$值。第18行表示将当前层所有时刻的输出$h$进行堆叠以便作为下一层每个时刻的输入，形状为<code>[batch_size, time_step, out_channels, height, width]</code>。第20~21行则是分别保存对应的输出结果。第22~25行为按照条件返回部分或全部的计算结果，其中<code>last_states[-1][0]</code>表示最后一层最后一个时刻的输出$h$，形状为<code>[batch_size, out_channels, height, width]</code>。</p>
+<p>最后，可以通过如下方式进行使用：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#ae81ff">1</span> <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">example1</span>():
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">2</span>     out_channels <span style="color:#f92672">=</span> [<span style="color:#ae81ff">5</span>, <span style="color:#ae81ff">6</span>, <span style="color:#ae81ff">7</span>]
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">3</span>     kernel_size <span style="color:#f92672">=</span> [(<span style="color:#ae81ff">3</span>, <span style="color:#ae81ff">3</span>), (<span style="color:#ae81ff">5</span>, <span style="color:#ae81ff">5</span>), (<span style="color:#ae81ff">7</span>, <span style="color:#ae81ff">7</span>)]
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">4</span>     in_channels, num_layers <span style="color:#f92672">=</span> <span style="color:#ae81ff">3</span>, <span style="color:#ae81ff">3</span>
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">5</span>     batch_size, time_step <span style="color:#f92672">=</span> <span style="color:#ae81ff">1</span>, <span style="color:#ae81ff">4</span>
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">6</span>     height, width <span style="color:#f92672">=</span> <span style="color:#ae81ff">16</span>, <span style="color:#ae81ff">16</span>
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">7</span>     x <span style="color:#f92672">=</span> torch<span style="color:#f92672">.</span>rand((batch_size, time_step, in_channels, height, height))
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">8</span>     model <span style="color:#f92672">=</span> ConvLSTM(in_channels<span style="color:#f92672">=</span>in_channels,out_channels<span style="color:#f92672">=</span>out_channels,
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">9</span>                      kernel_size<span style="color:#f92672">=</span>kernel_size,num_layers<span style="color:#f92672">=</span>num_layers,
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">10</span>                      batch_first<span style="color:#f92672">=</span><span style="color:#66d9ef">True</span>,bias<span style="color:#f92672">=</span><span style="color:#66d9ef">True</span>,return_all_layers<span style="color:#f92672">=</span><span style="color:#66d9ef">True</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">11</span>     layer_output_list, last_states <span style="color:#f92672">=</span> model(x)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">12</span>     print(last_states[<span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>][<span style="color:#ae81ff">0</span>])
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">13</span>     print(layer_output_list[<span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>][:, <span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>])</span></span></code></pre></div><p>上述代码运行结束后，将会输出类似如下结果：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#ae81ff">1</span> tensor([[[[<span style="color:#f92672">-</span><span style="color:#ae81ff">0.0171</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.0154</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.0130</span>,  <span style="color:#f92672">...</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.0129</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.0135</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.0143</span>],
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">2</span>           [<span style="color:#f92672">-</span><span style="color:#ae81ff">0.0158</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.0149</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.0130</span>,  <span style="color:#f92672">...</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.0157</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.0164</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.0172</span>],
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">3</span>           [<span style="color:#f92672">-</span><span style="color:#ae81ff">0.0129</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.0133</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.0091</span>,  <span style="color:#f92672">...</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.0123</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.0132</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.0146</span>],
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">4</span>           <span style="color:#f92672">...</span>,]]]])
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">5</span> 
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">6</span> tensor([[[[<span style="color:#f92672">-</span><span style="color:#ae81ff">0.0171</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.0154</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.0130</span>,  <span style="color:#f92672">...</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.0129</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.0135</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.0143</span>],
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">7</span>           [<span style="color:#f92672">-</span><span style="color:#ae81ff">0.0158</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.0149</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.0130</span>,  <span style="color:#f92672">...</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.0157</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.0164</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.0172</span>],
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">8</span>           [<span style="color:#f92672">-</span><span style="color:#ae81ff">0.0129</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.0133</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.0091</span>,  <span style="color:#f92672">...</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.0123</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.0132</span>, <span style="color:#f92672">-</span><span style="color:#ae81ff">0.0146</span>],
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">9</span>           <span style="color:#f92672">...</span>,]]]])</span></span></code></pre></div><h2 id="844-kth数据集构建">8.4.4 KTH数据集构建<a class="anchor" href="#844-kth%e6%95%b0%e6%8d%ae%e9%9b%86%e6%9e%84%e5%bb%ba">#</a></h2>
+<p>在完成ConvLSTM模型的实现之后，我们再来看如何基于ConvLSTM网络模型完成KTH数据集这一视频分类任务。以下完整示例代码可以参见[Code/utils/data_helper.py`文件。</p>
+<p><strong>1. 数据集介绍</strong></p>
+<p>KTH数据集是一个广泛应用于动作识别和行为分析的计算机视觉数据集，它是由瑞典皇家工学院（KTH Royal Institute of Technology）收集和发布的，旨在提供用于动作识别和行为分析的标准测试数据[2]。KTH数据集包含有6个不同的动作类别，包括Boxing（拳击）、Handclapping（鼓掌）、Handwaving（挥手）、Jogging（慢跑）、Running（快跑）和Walking（行走），由 25 名受试者在4种不同的场景中进行多次拍摄得到，即一共包含有$25\times6\times4=600$个视频文件。</p>
+<p><subscribe>51</subscribe></p>
+<br>
+<br>
+<br>
+</article>
+ 
+      
+
+      <footer class="book-footer">
+        
+  <div class="flex flex-wrap justify-between">
+
+<div>
+
+</div>
+
+<div>
+
+</div>
+
+</div>
+
+<div class="flex flex-wrap justify-between">
+    <span>
+    
+      <a href="/dl/chapter08/9edd7db2d439402f/" class="flex align-center">
+        <img src="/icons/backward.svg" class="book-icon" alt="Backward" />
+        <span>8.3 CNN-RNN网络</span>
+      </a>
+    
+    </span>
+    <span>
+    
+      <a href="/dl/chapter08/1e6da79bf7b44c20/" class="flex align-center">
+        <span>8.5 3DCNN网络</span>
+        <img src="/icons/forward.svg" class="book-icon" alt="Forward" />
+      </a>
+    
+    </span>
+  </div>
+
+ 
+        
+  
+  <div class="book-comments">
+
+</div>
+  
+ 
+        
+  <link rel="stylesheet" href="/katex/katex.min.css" />
+  <script defer src="/katex/katex.min.js"></script>
+  <script defer src="/katex/auto-render.min.js"></script>
+  
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        if (window.renderMathInElement) {
+          renderMathInElement(
+            document.querySelector(".book-page"),
+            Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
+          );
+        }
+      });
+    </script>
+  
+
+
+        
+  
+ 
+        
+  
+    <script>(function(){document.querySelectorAll("pre:has(code)").forEach(e=>{e.addEventListener("click",e.focus),e.addEventListener("copy",function(t){if(t.preventDefault(),navigator.clipboard){const t=window.getSelection().toString()||e.textContent;navigator.clipboard.writeText(t)}})})})()</script>
+  
+
+      </footer>
+
+      <label for="menu-control" class="hidden book-menu-overlay"></label>
+    </div>
+
+    
+  
+  <aside class="book-toc">
+    <div class="book-toc-content">
+      
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#841-convlstm动机">8.4.1 ConvLSTM动机</a></li>
+    <li><a href="#842-convlstm结构">8.4.2 ConvLSTM结构</a></li>
+    <li><a href="#843-convlstm实现">8.4.3 ConvLSTM实现</a></li>
+    <li><a href="#844-kth数据集构建">8.4.4 KTH数据集构建</a></li>
+  </ul>
+</nav>
+
+
+
+    </div>
+  </aside>
+  
+ 
+  </main>
+
+  
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

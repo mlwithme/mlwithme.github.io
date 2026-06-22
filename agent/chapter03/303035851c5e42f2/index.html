@@ -1,0 +1,3910 @@
+<!DOCTYPE html>
+<html lang="zh_CN" dir="ltr">
+<head>
+  <!--
+Made with Book Theme
+https://github.com/alex-shpak/hugo-book
+-->
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="3.5 语义搜索引擎构建# 在完成 Milvus 向量数据库的安装以后，下一步将开始介绍如何使用千问 Qwen3 Embedding 系列词嵌入模型来对文本进行向量化，并构建我们自己的文本语义检索系统。
+由第3.1节内容可知，构建语义检索系统整体可分为读取文档、文档切块、文本向量化、存储与检索这四步，并且前三步我们已经进行了详细介绍。下面我们将以金庸先生的武侠小说作为原始文档，重点讲解最后一步：如何将文本向量存入 Milvus，并构建完整的语义检索系统。
+3.5.1 读取文档并切块# 在对文档进行向量化之前，首先需要将原始文本读取到程序中，并按照一定规则进行切分。这一步的核心目标是将长文本拆分为适合 embedding 模型处理的文本块。在实际工程中，一般需要先确定两个问题：① 文档的类型（txt / pdf / markdown / html 等）；② 对应的加载方式与切块策略。不同的文档类型通常需要使用不同的 Document Loader，同时还要选择合适的文本切分方式。
+当然，最为复杂的便是如果原始文档是较为复杂的 PDF，或者干脆是扫描件的 PDF，那这部分的工作量相对来说就更大了，甚至可以专门部署一些 OCR 模型（例如最近大火的DeepSeek-OCR2、GLM-OCR、PaddleOCR-VL-1.5等）来做这件事。不过这并不属于本书的核心内容，所以假定拿到的文档相对来说是比较标准的。
+在本示例中，我们选择了金庸先生武侠小说 TXT 文本 （一部小说一个文本）作为原始语料。这类文本的特点是：纯文本格式、体量较大、整体按章节组织（部分做了手动调整），因此可以直接使用 LangChain 中的 TextLoader 来进行加载。
+如下所示便是语料的示例格式：
+“金庸作品集”新序 小说是写给人看的。小说的内容是人。 第一回 天涯思君不可忘 春游浩荡，是年年寒食，梨花时节。白锦无纹香烂漫，玉树琼苞堆雪。静夜沉沉，浮光霭霭，冷浸溶溶月。人间天上，烂银霞照通彻。 浑似姑射真人，天姿灵秀，意气殊高洁。万蕊参差谁信道，不与群芳同列。浩气清英，仙才卓荦，下土难分别。瑶台归去，洞天方看清绝。 第二回 武当山顶松柏长 两人缓步上山，直走到寺门外，竟不见一个人影。 附录 陈世骧先生书函 一九六六·四·廿二 后记 《倚天屠龙记》是“射雕三部曲”的第三部。从上述示例内容可以看出，每部小说的章节标题都是换行后以“第XX回”、“附录”、“后记”等关键词开头，因此我们也可以通过正则表达式来按章节内容匹配。
+对于原始 TXT 文本的载入，直接使用第3.1节中介绍的 TextLoader 即可，示例代码如下：
+1 def load_txt_file(file_path=None): 2 loader = TextLoader(file_path) 3 docs = loader.load() 4 return docs最后，第4行代码返回的 docs 便是一个仅包含一个 Document 类对象的列表，代表对应的一部小说。
+">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
+<meta name="color-scheme" content="light dark"><meta property="og:url" content="https://mlwithme.github.io/agent/chapter03/303035851c5e42f2/">
+	<meta property="og:site_name" content="《从零学AI指南手册》">
+	<meta property="og:title" content="3.5 语义搜索引擎构建">
+	<meta property="og:description" content="3.5 语义搜索引擎构建# 在完成 Milvus 向量数据库的安装以后，下一步将开始介绍如何使用千问 Qwen3 Embedding 系列词嵌入模型来对文本进行向量化，并构建我们自己的文本语义检索系统。
+由第3.1节内容可知，构建语义检索系统整体可分为读取文档、文档切块、文本向量化、存储与检索这四步，并且前三步我们已经进行了详细介绍。下面我们将以金庸先生的武侠小说作为原始文档，重点讲解最后一步：如何将文本向量存入 Milvus，并构建完整的语义检索系统。
+3.5.1 读取文档并切块# 在对文档进行向量化之前，首先需要将原始文本读取到程序中，并按照一定规则进行切分。这一步的核心目标是将长文本拆分为适合 embedding 模型处理的文本块。在实际工程中，一般需要先确定两个问题：① 文档的类型（txt / pdf / markdown / html 等）；② 对应的加载方式与切块策略。不同的文档类型通常需要使用不同的 Document Loader，同时还要选择合适的文本切分方式。
+当然，最为复杂的便是如果原始文档是较为复杂的 PDF，或者干脆是扫描件的 PDF，那这部分的工作量相对来说就更大了，甚至可以专门部署一些 OCR 模型（例如最近大火的DeepSeek-OCR2、GLM-OCR、PaddleOCR-VL-1.5等）来做这件事。不过这并不属于本书的核心内容，所以假定拿到的文档相对来说是比较标准的。
+在本示例中，我们选择了金庸先生武侠小说 TXT 文本 （一部小说一个文本）作为原始语料。这类文本的特点是：纯文本格式、体量较大、整体按章节组织（部分做了手动调整），因此可以直接使用 LangChain 中的 TextLoader 来进行加载。
+如下所示便是语料的示例格式：
+“金庸作品集”新序 小说是写给人看的。小说的内容是人。 第一回 天涯思君不可忘 春游浩荡，是年年寒食，梨花时节。白锦无纹香烂漫，玉树琼苞堆雪。静夜沉沉，浮光霭霭，冷浸溶溶月。人间天上，烂银霞照通彻。 浑似姑射真人，天姿灵秀，意气殊高洁。万蕊参差谁信道，不与群芳同列。浩气清英，仙才卓荦，下土难分别。瑶台归去，洞天方看清绝。 第二回 武当山顶松柏长 两人缓步上山，直走到寺门外，竟不见一个人影。 附录 陈世骧先生书函 一九六六·四·廿二 后记 《倚天屠龙记》是“射雕三部曲”的第三部。从上述示例内容可以看出，每部小说的章节标题都是换行后以“第XX回”、“附录”、“后记”等关键词开头，因此我们也可以通过正则表达式来按章节内容匹配。
+对于原始 TXT 文本的载入，直接使用第3.1节中介绍的 TextLoader 即可，示例代码如下：
+1 def load_txt_file(file_path=None): 2 loader = TextLoader(file_path) 3 docs = loader.load() 4 return docs最后，第4行代码返回的 docs 便是一个仅包含一个 Document 类对象的列表，代表对应的一部小说。">
+	<meta property="og:locale" content="zh_CN">
+	<meta property="og:type" content="article">
+		<meta property="article:section" content="agent">
+
+
+	<meta itemprop="name" content="3.5 语义搜索引擎构建">
+	<meta itemprop="description" content="3.5 语义搜索引擎构建# 在完成 Milvus 向量数据库的安装以后，下一步将开始介绍如何使用千问 Qwen3 Embedding 系列词嵌入模型来对文本进行向量化，并构建我们自己的文本语义检索系统。
+由第3.1节内容可知，构建语义检索系统整体可分为读取文档、文档切块、文本向量化、存储与检索这四步，并且前三步我们已经进行了详细介绍。下面我们将以金庸先生的武侠小说作为原始文档，重点讲解最后一步：如何将文本向量存入 Milvus，并构建完整的语义检索系统。
+3.5.1 读取文档并切块# 在对文档进行向量化之前，首先需要将原始文本读取到程序中，并按照一定规则进行切分。这一步的核心目标是将长文本拆分为适合 embedding 模型处理的文本块。在实际工程中，一般需要先确定两个问题：① 文档的类型（txt / pdf / markdown / html 等）；② 对应的加载方式与切块策略。不同的文档类型通常需要使用不同的 Document Loader，同时还要选择合适的文本切分方式。
+当然，最为复杂的便是如果原始文档是较为复杂的 PDF，或者干脆是扫描件的 PDF，那这部分的工作量相对来说就更大了，甚至可以专门部署一些 OCR 模型（例如最近大火的DeepSeek-OCR2、GLM-OCR、PaddleOCR-VL-1.5等）来做这件事。不过这并不属于本书的核心内容，所以假定拿到的文档相对来说是比较标准的。
+在本示例中，我们选择了金庸先生武侠小说 TXT 文本 （一部小说一个文本）作为原始语料。这类文本的特点是：纯文本格式、体量较大、整体按章节组织（部分做了手动调整），因此可以直接使用 LangChain 中的 TextLoader 来进行加载。
+如下所示便是语料的示例格式：
+“金庸作品集”新序 小说是写给人看的。小说的内容是人。 第一回 天涯思君不可忘 春游浩荡，是年年寒食，梨花时节。白锦无纹香烂漫，玉树琼苞堆雪。静夜沉沉，浮光霭霭，冷浸溶溶月。人间天上，烂银霞照通彻。 浑似姑射真人，天姿灵秀，意气殊高洁。万蕊参差谁信道，不与群芳同列。浩气清英，仙才卓荦，下土难分别。瑶台归去，洞天方看清绝。 第二回 武当山顶松柏长 两人缓步上山，直走到寺门外，竟不见一个人影。 附录 陈世骧先生书函 一九六六·四·廿二 后记 《倚天屠龙记》是“射雕三部曲”的第三部。从上述示例内容可以看出，每部小说的章节标题都是换行后以“第XX回”、“附录”、“后记”等关键词开头，因此我们也可以通过正则表达式来按章节内容匹配。
+对于原始 TXT 文本的载入，直接使用第3.1节中介绍的 TextLoader 即可，示例代码如下：
+1 def load_txt_file(file_path=None): 2 loader = TextLoader(file_path) 3 docs = loader.load() 4 return docs最后，第4行代码返回的 docs 便是一个仅包含一个 Document 类对象的列表，代表对应的一部小说。">
+	<meta itemprop="wordCount" content="949">
+
+<title>3.5 语义搜索引擎构建 • 《从零学AI指南手册》</title>
+<link rel="icon" href="/favicon.png" >
+<link rel="manifest" href="/manifest.json">
+<link rel="canonical" href="https://mlwithme.github.io/agent/chapter03/303035851c5e42f2/">
+<link rel="stylesheet" href="/book.min.6097ccf1d338ddfaa037d2f96478059a71fa573d0f917d128bab595efea338ca.css" integrity="sha256-YJfM8dM43fqgN9L5ZHgFmnH6Vz0PkX0Si6tZXv6jOMo=" crossorigin="anonymous">
+
+
+  <script defer type="module" src="/en.search.min.ffaad769e546b38d39820301bb9e5c193822f7bf0f46a855602e4e14707802e0.js" integrity="sha256-/6rXaeVGs405ggMBu55cGTgi978PRqhVYC5OFHB4AuA=" crossorigin="anonymous"></script>
+
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-23SZ6E8VY7"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-23SZ6E8VY7');
+</script>
+<script async src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
+
+</head>
+<body dir="ltr" class="book-kind-page book-type-agent">
+  <input type="checkbox" class="hidden toggle" id="menu-control" />
+  <input type="checkbox" class="hidden toggle" id="toc-control" />
+  <main class="container flex">
+    
+<aside class="book-menu">
+  <div class="book-menu-content">
+    
+  <nav>
+<h2 class="book-brand">
+  <a class="flex align-center" href="/"><span>《从零学AI指南手册》</span>
+  </a>
+</h2>
+
+
+<div class="book-search hidden">
+  <input id="book-search-input" type="text" 
+    placeholder="Search"
+    aria-label="Search"
+    maxlength="64" />
+  <div class="book-search-spinner hidden"></div>
+  <ul id="book-search-results"></ul>
+</div>
+<script>document.querySelector(".book-search").classList.remove("hidden")</script>
+
+
+
+
+
+
+
+
+
+
+  
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a>
+      大模型Agent开发</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-253e26e732e57a78f635dcf47df3d0a3" class="toggle"  />
+    <label for="section-253e26e732e57a78f635dcf47df3d0a3" class="flex">
+      <a role="button" class="">
+        第 1 章 RAG 基础概念</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/454f0942222e471e/" class="">
+      1.1 RAG 提出背景</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/d7623d619f884b25/" class="">
+      1.2 RAG 流程概览</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-810ee5a2a3a24c9b7c25ab5324ae7db7" class="toggle"  />
+    <label for="section-810ee5a2a3a24c9b7c25ab5324ae7db7" class="flex">
+      <a role="button" class="">
+        第 2 章 大模型接入与使用</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/d43adfc00df54515/" class="">
+      2.1 SDK 介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/8b9059fde1d644a4/" class="">
+      2.2 现代大模型中的 SDK</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/95d3214ab80b4769/" class="">
+      2.3 DashScope 接口体系</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/b9843c089d654494/" class="">
+      2.4 千问大模型接入与使用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ed1727f01d0e40dc9b7961b72e42160e" class="toggle" checked />
+    <label for="section-ed1727f01d0e40dc9b7961b72e42160e" class="flex">
+      <a role="button" class="">
+        第 3 章 文档标准化与语义检索</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/7f4af6d48c5b425c/" class="">
+      3.1 文档加载与标准化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/572ba4c9cb114677/" class="">
+      3.2 常见文本切分策略</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/06e588cd33fa4454/" class="">
+      3.3 向量数据库选择</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/ff27306c0d7b4387/" class="">
+      3.4 Qwen3 Embedding 模型介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/303035851c5e42f2/" class="active">
+      3.5 语义搜索引擎构建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/e1328cb23e8c412b/" class="">
+      3.6  Milvus 模块解析</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-caaf9d8eb5e5559f7ca8bb11c41da71a" class="toggle"  />
+    <label for="section-caaf9d8eb5e5559f7ca8bb11c41da71a" class="flex">
+      <a role="button" class="">
+        第 4 章 RAG 与 Agent</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/4c646aa07f3b4b74/" class="">
+      4.1 两步式 RAG 搭建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/5c35e934bab24ac3/" class="">
+      4.2 Function Calling 概念介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/88ff352fc22e4cd6/" class="">
+      4.3 LangChain 中的 Tool 修饰器</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/83fe26536a5d4b6e/" class="">
+      4.4 RAG Agent 原理与搭建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/b7e49268357a4bca/" class="">
+      4.5 复杂问题拆解与ReAct框架</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/469b5963f2ca4799/" class="">
+      4.6 RAG 中的两阶段索引</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/10fb92a6c5484039/" class="">
+      4.7 Qwen3 Reranking 原理与使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/45d286aec1bc4d66/" class="">
+      4.8 基于两阶段索引的 RAG Agent 搭建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/43af483460574e48/" class="">
+      4.9 LangGraph 基本概念介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/0def4564f3aa455d/" class="">
+      4.10  基于 LangGraph 构建自定义 RAG Agent</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a>
+      深度学习</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/70e5f9cdbedc4b2c/" class="">
+      学习思维导图</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-a9b664bcf9e1dab8add449268565f466" class="toggle"  />
+    <label for="section-a9b664bcf9e1dab8add449268565f466" class="flex">
+      <a role="button" class="">
+        第 1 章 深度学习简介</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/647eb9c607874e3a/" class="">
+      1.1 深度学习的发展阶段</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/f31da36a6f444afe/" class="">
+      1.2 深度学习中的关键人物</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/da9fa13021e64f3c/" class="">
+      1.3 深度学习框架介绍</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-e6e0db5d4bc28bd97dfe8d5210249e63" class="toggle"  />
+    <label for="section-e6e0db5d4bc28bd97dfe8d5210249e63" class="flex">
+      <a role="button" class="">
+        第 2 章 环境配置</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/a0c5d1e0de0140cb/" class="">
+      2.1 体系结构介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/04f07b9246984577/" class="">
+      2.2 深度学习环境安装</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/5bf6454673194c67/" class="">
+      2.3 开发环境安装配置</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-0a2ca47f15332c8b06ae83247328edb4" class="toggle"  />
+    <label for="section-0a2ca47f15332c8b06ae83247328edb4" class="flex">
+      <a role="button" class="">
+        第 3 章 深度学习基础</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/75c5fa7839174c16/" class="">
+      3.1 线性回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/ca16f8cb6df444a6/" class="">
+      3.2 线性回归简洁实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/97e1da1143cd4554/" class="">
+      3.3 梯度下降与反向传播</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/7b865de988ea422c/" class="">
+      3.4 从零实现回归模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/18fdd1deff424a16/" class="">
+      3.5 从逻辑回归到Softmax回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/55967b0f642b4509/" class="">
+      3.6 Softmax回归简洁实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/381bbd56509e4a6f/" class="">
+      3.7 从零实现分类模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/2c061df4435d4928/" class="">
+      3.8 回归模型评估指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/e3442eff254e473c/" class="">
+      3.9 分类模型评估指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/307f927c8a1245c5/" class="">
+      3.10 过拟合与正则化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/bcb64de5aa404f18/" class="">
+      3.11 超参数与交叉验证</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/66dd7425cdd04565/" class="">
+      3.12 激活函数</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/0d3dacfff4c04794/" class="">
+      3.13 多标签分类</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-95b7e7417bf2b821a1b760975d3acc22" class="toggle"  />
+    <label for="section-95b7e7417bf2b821a1b760975d3acc22" class="flex">
+      <a role="button" class="">
+        第 4 章 卷积神经网络</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/102e183e8be94f46/" class="">
+      4.1 卷积的概念</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/5b3e3152e9e54f4f/" class="">
+      4.2 卷积的计算过程</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/762f60de801a4ccd/" class="">
+      4.3 填充和池化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/c8af5d84174b4420/" class="">
+      4.4 LeNet5网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/de007462967e4701/" class="">
+      4.5 AlexNet网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/f084f181c3554082/" class="">
+      4.6 VGG网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/911b961cc5d949b6/" class="">
+      4.7 NIN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/47da186baf3e4a0b/" class="">
+      4.8 GoogLeNet网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/da16c61397454b2c/" class="">
+      4.9 ResNet网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/1c24468824274650/" class="">
+      4.10 DenseNet网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-17076fe90a2d84e207bbd0c829983325" class="toggle"  />
+    <label for="section-17076fe90a2d84e207bbd0c829983325" class="flex">
+      <a role="button" class="">
+        第 5 章 模型训练与复用</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/4557a6f03dec4475/" class="">
+      5.1 参数及日志管理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/e7c4c6da085148d0/" class="">
+      5.2 Tensorboard可视化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/27387966672c45ed/" class="">
+      5.3 模型的保存与复用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/211b26bdd8f248ac/" class="">
+      5.4 模型的迁移学习</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/345c1b72253043cb/" class="">
+      5.5 开源模型复用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/c912dda030c946d9/" class="">
+      5.6 多GPU训练</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/f065af80f3844b0b/" class="">
+      5.7 数据预处理与缓存</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-2d091d454d5c3f03f5e0a202c37cc226" class="toggle"  />
+    <label for="section-2d091d454d5c3f03f5e0a202c37cc226" class="flex">
+      <a role="button" class="">
+        第 6 章 模型优化方法</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/cc35bb112783410e/" class="">
+      6.1 学习率调度器</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/fc024c283f164849/" class="">
+      6.2 梯度裁剪</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/27ed3ed136e24092/" class="">
+      6.3 批归一化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/fdd5ba4b41f74a0e/" class="">
+      6.4 层归一化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/9246afed14eb436c/" class="">
+      6.5 组归一化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/fcbc66ad051a4336/" class="">
+      6.6 动量法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/8b83d654898c40a2/" class="">
+      6.7 AdaGrad算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/078f2394980d41d2/" class="">
+      6.8 AdaDelta算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/28ad7fb39987447e/" class="">
+      6.9 Adam算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/4b81b8d39721434d/" class="">
+      6.10 初始化方法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f2f78ba4851131558fc284d927542d28" class="toggle"  />
+    <label for="section-f2f78ba4851131558fc284d927542d28" class="flex">
+      <a role="button" class="">
+        第 7 章 循环神经网络</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/88ba4e03337b4233/" class="">
+      7.1 RNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/ec8ff069aadc49b9/" class="">
+      7.2 时序数据</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/b4c5ddcc9e904238/" class="">
+      7.3 LSTM网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/4112672112224dc1/" class="">
+      7.4 GRU网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/b6e5ccb6cd064f74/" class="">
+      7.5 BiRNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/4bf3ecf7b21e45fb/" class="">
+      7.6 CharRNN网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-49992cff6143e64ae5d7f2209dcfb054" class="toggle"  />
+    <label for="section-49992cff6143e64ae5d7f2209dcfb054" class="flex">
+      <a role="button" class="">
+        第 8 章 时序与模型融合</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/2be88fbc08a5418f/" class="">
+      8.1 TextCNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/9023d1f822a54226/" class="">
+      8.2 TextRNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/9edd7db2d439402f/" class="">
+      8.3 CNN-RNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/19c2b86e85f2461e/" class="">
+      8.4 ConvLSTM网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/1e6da79bf7b44c20/" class="">
+      8.5 3DCNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/5f426a9190e7454b/" class="">
+      8.6 STResNet网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ca07c572acb4d7fd40854f5b367c247b" class="toggle"  />
+    <label for="section-ca07c572acb4d7fd40854f5b367c247b" class="flex">
+      <a role="button" class="">
+        第 9 章 自然语言处理</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/e0cb9a7aae814045/" class="">
+      9.1 自然语言处理介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/d4703d990f8d4fed/" class="">
+      9.2 Word2Vec词向量</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/1bb6351b01a2479b/" class="">
+      9.3 Word2Vec训练与使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/40a8a1146d934c55/" class="">
+      9.4 GloVe词向量</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/c6aa1405b8cf46d8/" class="">
+      9.5 词向量的微调使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/48c26d04b342452d/" class="">
+      9.6 fastText网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/03a0166e195f443f/" class="">
+      9.7 Seq2Seq网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/271bda16904544af/" class="">
+      9.8 序列模型评价指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/fefa60e0bc854a17/" class="">
+      9.9 NMT网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/5bcd8b0920414f34/" class="">
+      9.10 注意力机制</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/8a78e8213ee04aac/" class="">
+      9.11 含注意力的NMT网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/474ac7a1867d4b5e/" class="">
+      9.12 含注意力的RNN网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-8cdec04c2fd8683c5c7373c78d943528" class="toggle"  />
+    <label for="section-8cdec04c2fd8683c5c7373c78d943528" class="flex">
+      <a role="button" class="">
+        第10章 现代神经网络</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/7523731afc0241c0/" class="">
+      10.1 ELMo网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/4987d1044939480d/" class="">
+      10.2 Transformer网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/a469ed1a25e1498f/" class="">
+      10.3 Transformer结构</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/d50c490eef3b4565/" class="">
+      10.4 Transformer实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/f6c507b3d2d74f03/" class="">
+      10.5 Transformer对联模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/3aedea1d3f3e48dd/" class="">
+      10.6 BERT网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/82a1cd0def084620/" class="">
+      10.7 从零实现BERT</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/e736d3974ed0484c/" class="">
+      10.8 BERT文本分类模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/f5076cbadda84d4e/" class="">
+      10.9 BERT问题选择模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/25d9ef3d9b34472a/" class="">
+      10.10 BERT问题回答模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/64d3ec5593ec4b94/" class="">
+      10.11 BERT命名体识别模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/90ea8d3e090d48b4/" class="">
+      10.12 BERT从零训练</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/e36878dad7a647d8/" class="">
+      10.13 GPT-1模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/94dda9bbbc994913/" class="">
+      10.14 GPT-2与GPT-3模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/4af57a29308840de/" class="">
+      10.15 基于GPT-2的中文预训练模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/9f5c00cadde14d31/" class="">
+      10.16 InstructGPT与ChatGPT</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/050b54fd34ca480a/" class="">
+      10.17 ChatGPT与提示词工程</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/a90b0d71389b4d69/" class="">
+      10.18 百川大模型使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/40c1c9ade70c4ce7/" class="">
+      10.19 百川大模型实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/ea1b4cf8b40c4b05/" class="">
+      10.20 GPT-4与GPTs使用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a>
+      机器学习</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/43fc00b3809d4be6/" class="">
+      学习思维导图</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-0a3254d1ca9963fd6975aa5bc0b3edcc" class="toggle"  />
+    <label for="section-0a3254d1ca9963fd6975aa5bc0b3edcc" class="flex">
+      <a role="button" class="">
+        第 1 章 环境配置</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/baafb91f0af14a84/" class="">
+      1.1 安装使用Conda</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/7a01c403acd6488a/" class="">
+      1.2 开发环境安装配置</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-4569258198323c16bc8a634ea44fd5db" class="toggle"  />
+    <label for="section-4569258198323c16bc8a634ea44fd5db" class="flex">
+      <a role="button" class="">
+        第 2 章 线性回归</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/2414d4b6648d405a/" class="">
+      2.1 模型的建立与求解</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/3e9ba14da71f4fd3/" class="">
+      2.2 多变量线性回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/4a16c0dc82a84e78/" class="">
+      2.3 多项式回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/f8dea699983c48c6/" class="">
+      2.4 回归模型评估</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/df41c2e97f554e68/" class="">
+      2.5 梯度下降</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/71ef816e0005492d/" class="">
+      2.6 正态分布</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/803bee4f70be4dca/" class="">
+      2.7 目标函数推导</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-a6ca5e2f846ebd900d1a868e6718dc82" class="toggle"  />
+    <label for="section-a6ca5e2f846ebd900d1a868e6718dc82" class="flex">
+      <a role="button" class="">
+        第 3 章 逻辑回归</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/96d46b53aee14c3b/" class="">
+      3.1 模型的建立与求解</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/fac70083dd764141/" class="">
+      3.2 多分类任务</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/6d7cfd79ef304cbd/" class="">
+      3.3 常见的分类评估指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/2fdc655d00c74548/" class="">
+      3.4 目标函数推导</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/a4b61c5bbadd43a6/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-9f462f716bd0e46ef79984b356eeb5a2" class="toggle"  />
+    <label for="section-9f462f716bd0e46ef79984b356eeb5a2" class="flex">
+      <a role="button" class="">
+        第 4 章 模型的改善与泛化</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/2089400b28f54dd9/" class="">
+      4.1 基本概念</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/56b788b624cd4971/" class="">
+      4.2 特征标准化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/ca091dc393a84518/" class="">
+      4.3过拟合</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/5097d3b8c1144427/" class="">
+      4.4 正则化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/3c7eee1621d4480b/" class="">
+      4.5 偏差、方差与交叉验证</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/c5957e0753d04746/" class="">
+      4.6 实例分析手写体识别</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/a915e49586eb4426/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-327db48e4f4df6236855078634147679" class="toggle"  />
+    <label for="section-327db48e4f4df6236855078634147679" class="flex">
+      <a role="button" class="">
+        第 5 章 K近邻</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/7c610e923e754259/" class="">
+      5.1 K近邻思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/1a97571e0a6447ef/" class="">
+      5.2 K近邻原理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/d245bda107034e65/" class="">
+      5.3 sklearn接口与示例代码</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/24378571ce404d9c/" class="">
+      5.4 kd树构建与搜索</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/40f253b916f24038/" class="">
+      5.5 从零实现K近邻</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/76818d9e48944f8c/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-94d0a5f5555d92c51e0903b148e34993" class="toggle"  />
+    <label for="section-94d0a5f5555d92c51e0903b148e34993" class="flex">
+      <a role="button" class="">
+        第 6 章 文本特征与模型复用</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/e05b5928c41d4841/" class="">
+      6.1 词袋模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/de59bf74d753457e/" class="">
+      6 .2 基于K近邻算法的垃圾邮件分类</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/c6fdc78b49d44453/" class="">
+      6.3 考虑权重的词袋模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/825fde8589654b16/" class="">
+      6.4 词云图</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/8451cffe49f5477c/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-544be5d1e48c4fd8b33ba2f91964c6dd" class="toggle"  />
+    <label for="section-544be5d1e48c4fd8b33ba2f91964c6dd" class="flex">
+      <a role="button" class="">
+        第 7 章 朴素贝叶斯</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/faf303eb93a241d1/" class="">
+      7.1 朴素贝叶斯算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/842c7b8684c747d2/" class="">
+      7.2 贝叶斯估计</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/724bf42b09bb440e/" class="">
+      7.3 朴素贝叶斯实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/1a9deee1d5f042b5/" class="">
+      7.4 多项式朴素贝叶斯原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/5c27cdd8b3264f50/" class="">
+      7.5 高斯朴素贝叶斯原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/715b8eaf245f45f1/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-d1884c6b3e8f1260019220c57d615371" class="toggle"  />
+    <label for="section-d1884c6b3e8f1260019220c57d615371" class="flex">
+      <a role="button" class="">
+        第 8 章 决策树</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/690fe2be21834c2a/" class="">
+      8.1 决策树的基本思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/ee9ada9729124049/" class="">
+      8.2 决策树建模与可视化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/5887cf1408dd4c7f/" class="">
+      8.3 决策树生成之ID3与C4.5</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/87ba589d6c17434d/" class="">
+      8.4 决策树剪枝过程</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/34bc962c974646f4/" class="">
+      8.5 从零实现ID3与C4.5算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/c44682dbb3364be4/" class="">
+      8.6 连续型特征变量下决策树实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/4eead717a84a4dbf/" class="">
+      8.7 CART生成与剪枝算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/1c72d67dffc64dc9/" class="">
+      8.8 从零实现CART算法及剪枝示例</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/ae452792b2604e84/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-1f0a2178f0a580ba251c7da2649aa52f" class="toggle"  />
+    <label for="section-1f0a2178f0a580ba251c7da2649aa52f" class="flex">
+      <a role="button" class="">
+        第 9 章 集成学习与提升算法</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/9eff4004fd6c437d/" class="">
+      9.1 集成学习算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/18980c9f757e42c8/" class="">
+      9.2 随机森林</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/8a91b358b2f74d56/" class="">
+      9.3 泰坦尼克号生还预测</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/73f6914844f549f1/" class="">
+      9.4 AdaBoost原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/71fd0e44294e4abb/" class="">
+      9.5 MultiAdaBoost原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/f3c2341ce7d64f70/" class="">
+      9.6 Gradient Boost 原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/4f9b26d5b65541f5/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f63defd924ef7373144c8643a39fd7b2" class="toggle"  />
+    <label for="section-f63defd924ef7373144c8643a39fd7b2" class="flex">
+      <a role="button" class="">
+        第 10 章 支持向量机</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/dce7180d4eb047d7/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/515b54e2307a4c8a/" class="">
+      10.1 SVM思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/9c3862bc843c4179/" class="">
+      10.2 SVM线性不可分</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/fbdb6f8adace457d/" class="">
+      10.3 SVM原理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/1a3ffa363b1d4f83/" class="">
+      10.4 SVM中的软间隔</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/8b7a06412a9f4267/" class="">
+      10.5 拉格朗日乘数法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/40e977f0a2f84ac0/" class="">
+      10.6 对偶性与KKT条件</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/b18d45a772574ddb/" class="">
+      10.7 SVM优化问题</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/c53ed12f7bc04405/" class="">
+      10.8 SVM核函数原理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/26d9b2b328a849c2/" class="">
+      10.9 SMO算法求解SVM</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/215a1e15c0f2470d/" class="">
+      10.10 从零实现SVM分类算法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bdcc54d1c295c5cc69c9c851c02886ea" class="toggle"  />
+    <label for="section-bdcc54d1c295c5cc69c9c851c02886ea" class="flex">
+      <a role="button" class="">
+        第 11 章 聚类分析</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/f9d9305a55a548a1/" class="">
+      11.1 聚类算法的思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/e635df24de32487a/" class="">
+      11.2 Kmeans聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/e75b8efa232249ab/" class="">
+      11.3 Kmeans算法求解</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/60e49a33d1aa4f50/" class="">
+      11.4 从零实现Kmeans聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/c8b45d8a3d8c4cf4/" class="">
+      11.5 Kmeans&#43;&#43;聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/1ede2f3557d0438f/" class="">
+      11.6 聚类外部评价指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/e6a75df19f85498c/" class="">
+      11.7 加权Kmeans聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/c52cf7920f1d4636/" class="">
+      11.8 聚类内部评价指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/f95259c359b146ba/" class="">
+      11.9 聚类K值选取与分析</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/b85c1a858f7c4686/" class="">
+      11.10 基于密度的聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/2f01ba751d914336/" class="">
+      11.11 基于层次的聚类算法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bafa8c48214ccf62d333a6d0457c5f72" class="toggle"  />
+    <label for="section-bafa8c48214ccf62d333a6d0457c5f72" class="flex">
+      <a role="button" class="">
+        第 12 章 降维算法</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/9478de824edd44c6/" class="">
+      12.1 主成分分析</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/909356aa90fe456a/" class="">
+      12.2 基于核函数的主成分分析</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-d5f143889a719ce66d602e75b72bffb9" class="toggle"  />
+    <label for="section-d5f143889a719ce66d602e75b72bffb9" class="flex">
+      <a role="button" class="">
+        第 13 章 自训练与标签传播</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/8d71301c2e414efe/" class="">
+      13.1 Self-Training 自训练算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/87fdcf0be1c34644/" class="">
+      13.2 Label Propagation算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/7fc8b0fc47d2427c/" class="">
+      13.3 Label Spreading 算法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+
+
+
+
+
+
+
+
+
+
+
+
+</nav>
+
+
+
+
+  <script>(function(){var e=document.querySelector("aside .book-menu-content");addEventListener("beforeunload",function(){localStorage.setItem("menu.scrollTop",e.scrollTop)}),e.scrollTop=localStorage.getItem("menu.scrollTop")})()</script>
+
+
+
+  </div>
+</aside>
+ 
+
+    <div class="book-page">
+      <header class="book-header hidden">
+        
+  <div class="flex align-center justify-between">
+  <label for="menu-control">
+    <img src="/icons/menu.svg" class="book-icon" alt="Menu" />
+  </label>
+
+  <h3>3.5 语义搜索引擎构建</h3>
+
+  <label for="toc-control">
+    
+    <img src="/icons/toc.svg" class="book-icon" alt="Table of Contents" />
+    
+  </label>
+</div>
+
+
+  
+  <aside class="hidden">
+    
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#351-读取文档并切块">3.5.1 读取文档并切块</a></li>
+    <li><a href="#352-混合策略切块">3.5.2 混合策略切块</a></li>
+    <li><a href="#353-向量库及-embedding-模型初始化">3.5.3 向量库及 Embedding 模型初始化</a></li>
+    <li><a href="#354-文本向量入库">3.5.4 文本向量入库</a></li>
+    <li><a href="#355-测试与搜索">3.5.5 测试与搜索</a></li>
+    <li><a href="#356-基于原生向量库检索">3.5.6 基于原生向量库检索</a></li>
+  </ul>
+</nav>
+
+
+
+  </aside>
+  
+ 
+      </header>
+
+      
+      
+  <article class="markdown book-article"><h1 id="35-语义搜索引擎构建">3.5 语义搜索引擎构建<a class="anchor" href="#35-%e8%af%ad%e4%b9%89%e6%90%9c%e7%b4%a2%e5%bc%95%e6%93%8e%e6%9e%84%e5%bb%ba">#</a></h1>
+<p>在完成 Milvus 向量数据库的安装以后，下一步将开始介绍如何使用千问 Qwen3 Embedding 系列词嵌入模型来对文本进行向量化，并构建我们自己的文本语义检索系统。</p>
+<p>由第3.1节内容可知，构建语义检索系统整体可分为读取文档、文档切块、文本向量化、存储与检索这四步，并且前三步我们已经进行了详细介绍。下面我们将以金庸先生的武侠小说作为原始文档，重点讲解最后一步：如何将文本向量存入 Milvus，并构建完整的语义检索系统。</p>
+<h2 id="351-读取文档并切块">3.5.1 读取文档并切块<a class="anchor" href="#351-%e8%af%bb%e5%8f%96%e6%96%87%e6%a1%a3%e5%b9%b6%e5%88%87%e5%9d%97">#</a></h2>
+<p>在对文档进行向量化之前，首先需要将原始文本读取到程序中，并按照一定规则进行切分。这一步的核心目标是将长文本拆分为适合 embedding 模型处理的文本块。在实际工程中，一般需要先确定两个问题：① 文档的类型（txt / pdf / markdown / html 等）；② 对应的加载方式与切块策略。不同的文档类型通常需要使用不同的 <code>Document Loader</code>，同时还要选择合适的文本切分方式。</p>
+<p>当然，最为复杂的便是如果原始文档是较为复杂的 PDF，或者干脆是扫描件的 PDF，那这部分的工作量相对来说就更大了，甚至可以专门部署一些 OCR 模型（例如最近大火的DeepSeek-OCR2、GLM-OCR、PaddleOCR-VL-1.5等）来做这件事。不过这并不属于本书的核心内容，所以假定拿到的文档相对来说是比较标准的。</p>
+<p>在本示例中，我们选择了金庸先生武侠小说 TXT 文本 （一部小说一个文本）作为原始语料。这类文本的特点是：纯文本格式、体量较大、整体按章节组织（部分做了手动调整），因此可以直接使用 LangChain 中的 <code>TextLoader</code> 来进行加载。</p>
+<p>如下所示便是语料的示例格式：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-shell" data-lang="shell"><span style="display:flex;"><span>“金庸作品集”新序
+</span></span><span style="display:flex;"><span>　　小说是写给人看的。小说的内容是人。
+</span></span><span style="display:flex;"><span>第一回 天涯思君不可忘
+</span></span><span style="display:flex;"><span>　　春游浩荡，是年年寒食，梨花时节。白锦无纹香烂漫，玉树琼苞堆雪。静夜沉沉，浮光霭霭，冷浸溶溶月。人间天上，烂银霞照通彻。
+</span></span><span style="display:flex;"><span>　　浑似姑射真人，天姿灵秀，意气殊高洁。万蕊参差谁信道，不与群芳同列。浩气清英，仙才卓荦，下土难分别。瑶台归去，洞天方看清绝。
+</span></span><span style="display:flex;"><span>第二回 武当山顶松柏长
+</span></span><span style="display:flex;"><span>　　两人缓步上山，直走到寺门外，竟不见一个人影。
+</span></span><span style="display:flex;"><span>附录 陈世骧先生书函
+</span></span><span style="display:flex;"><span>　　一九六六·四·廿二
+</span></span><span style="display:flex;"><span>后记
+</span></span><span style="display:flex;"><span>　　《倚天屠龙记》是“射雕三部曲”的第三部。</span></span></code></pre></div><p>从上述示例内容可以看出，每部小说的章节标题都是换行后以“第XX回”、“附录”、“后记”等关键词开头，因此我们也可以通过正则表达式来按章节内容匹配。</p>
+<p>对于原始 TXT 文本的载入，直接使用第3.1节中介绍的 <code>TextLoader</code> 即可，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#ae81ff">1</span> <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">load_txt_file</span>(file_path<span style="color:#f92672">=</span><span style="color:#66d9ef">None</span>):
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">2</span>     loader <span style="color:#f92672">=</span> TextLoader(file_path)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">3</span>     docs <span style="color:#f92672">=</span> loader<span style="color:#f92672">.</span>load() 
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">4</span>     <span style="color:#66d9ef">return</span> docs</span></span></code></pre></div><p>最后，第4行代码返回的 <code>docs</code> 便是一个仅包含一个 <code>Document</code> 类对象的列表，代表对应的一部小说。</p>
+<p>上述代码运行结束后的结果类似为：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span>[Document(metadata<span style="color:#f92672">=</span>{<span style="color:#e6db74">&#39;source&#39;</span>: <span style="color:#e6db74">&#39;RAGWithMe/data/jinyong/test.txt&#39;</span>}, page_content<span style="color:#f92672">=</span><span style="color:#e6db74">&#39;“金庸作品集”新序</span><span style="color:#ae81ff">\n\u3000\u3000</span><span style="color:#e6db74">小说是写给人看的。小说的内容是人。</span><span style="color:#ae81ff">\n\u3000\u3000</span><span style="color:#e6db74">在中世纪的欧洲，基督教的势力及于一切，所以我们到欧美的博物院去参观，见到所有中世纪的绘画都以圣经故事为题材，表现女性的人也必须通过圣母的形象。直到文艺复兴之后，凡人的形象才在绘画和文学中表现出来，所谓文艺复兴，是在文艺上复兴希腊、罗马时代对“人”的描写，...&#39;</span>)]</span></span></code></pre></div><h2 id="352-混合策略切块">3.5.2 混合策略切块<a class="anchor" href="#352-%e6%b7%b7%e5%90%88%e7%ad%96%e7%95%a5%e5%88%87%e5%9d%97">#</a></h2>
+<p>此时文本仍然是整本小说级别的长文本，因此接下来需要进行文本切块。当然，此时并不能简单按照固定长度切分文本，因为这会破坏原有语义结构。例如：一个段落被拆成两部分、一个完整对话被截断等。</p>
+<p>根据第3.2节内容的介绍，更合理的做法是采用混合策略切块，即：优先按照语义结构切分（例如章节、段落），再按照固定长度进行补充切分。</p>
+<p>（1）按段落结构切分</p>
+<p>进一步，首先按段落结构切分，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#ae81ff">1</span> <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">text_splitter_regex</span>(docs, header_patterns<span style="color:#f92672">=</span><span style="color:#66d9ef">None</span>):
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">2</span>     <span style="color:#66d9ef">if</span> header_patterns <span style="color:#f92672">is</span> <span style="color:#66d9ef">None</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">3</span>         header_patterns <span style="color:#f92672">=</span> [
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">4</span>             (<span style="color:#ae81ff">1</span>,<span style="color:#e6db74">r</span><span style="color:#e6db74">&#34;^(序言|附录|释名|后记|“金庸|第[一二三四五六七八九十百千0-9]+回|</span><span style="color:#ae81ff">\
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74"> 5             									第[一二三四五六七八九十百千0-9]+章).*$&#34;</span>)]
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">6</span>     text_splitter <span style="color:#f92672">=</span> RegexTextSplitter(header_patterns)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">7</span>     all_split_objs <span style="color:#f92672">=</span> []
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">8</span>     <span style="color:#66d9ef">for</span> doc <span style="color:#f92672">in</span> docs:
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">9</span>         print(<span style="color:#e6db74">f</span><span style="color:#e6db74">&#34;正在切块文件: </span><span style="color:#e6db74">{</span>doc<span style="color:#f92672">.</span>metadata<span style="color:#e6db74">}</span><span style="color:#e6db74">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">10</span>         all_splits <span style="color:#f92672">=</span> text_splitter<span style="color:#f92672">.</span>split_text(doc<span style="color:#f92672">.</span>page_content)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">11</span>         <span style="color:#66d9ef">for</span> i <span style="color:#f92672">in</span> range(len(all_splits)):
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">12</span>             all_splits[i]<span style="color:#f92672">.</span>metadata[<span style="color:#e6db74">&#39;source&#39;</span>] <span style="color:#f92672">=</span> doc<span style="color:#f92672">.</span>metadata[<span style="color:#e6db74">&#39;source&#39;</span>]
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">13</span>             data <span style="color:#f92672">=</span> all_splits[i]
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">14</span>             print(<span style="color:#e6db74">f</span><span style="color:#e6db74">&#34;</span><span style="color:#ae81ff">\t</span><span style="color:#e6db74">数据源信息:</span><span style="color:#e6db74">{</span>data<span style="color:#f92672">.</span>metadata<span style="color:#e6db74">}</span><span style="color:#e6db74">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">15</span>         all_split_objs <span style="color:#f92672">+=</span> all_splits
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">16</span>     <span style="color:#66d9ef">return</span> all_split_objs</span></span></code></pre></div><p>在上述代码中，第1行 <code>docs</code> 是一个列表，每个元素代表一个 <code>Document</code> 类对象，即一部小说的所有内容。第4~5行便是定义能够匹配小说中标题的正则表达式。第8~10行是根据正则表达式来对每一部小说进行段落结构提取，其中第10行 <code>all_splits</code> 表示每一部小说（一个<code>Document</code> 类对象）被按段落结构再次划分成多个<code>Document</code> 类对象。第11~12行则是把原始每部小说的来源信息加入到 <code>all_splits</code> 中的每个<code>Document</code> 类对象里。第15行则是将所有文章的所有段落结构对应的<code>Document</code> 类对象放到一个列表中。</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span>正在切块文件: {<span style="color:#e6db74">&#39;source&#39;</span>: <span style="color:#e6db74">&#39;RAGWithMe/data/jinyong/金庸-雪山飞狐精校版.txt&#39;</span>}
+</span></span><span style="display:flex;"><span>	数据源信息:{<span style="color:#e6db74">&#39;level_1&#39;</span>: <span style="color:#e6db74">&#39;“金庸作品集”新序&#39;</span>, <span style="color:#e6db74">&#39;source&#39;</span>: <span style="color:#e6db74">&#39;RAGWithMe/data/jinyong/金庸-雪山飞狐精校版.txt&#39;</span>}
+</span></span><span style="display:flex;"><span>	数据源信息:{<span style="color:#e6db74">&#39;level_1&#39;</span>: <span style="color:#e6db74">&#39;第一回&#39;</span>, <span style="color:#e6db74">&#39;source&#39;</span>: <span style="color:#e6db74">&#39;RAGWithMe/data/jinyong/金庸-雪山飞狐精校版.txt&#39;</span>}
+</span></span><span style="display:flex;"><span>	<span style="color:#f92672">...</span>
+</span></span><span style="display:flex;"><span>正在切块文件: {<span style="color:#e6db74">&#39;source&#39;</span>: <span style="color:#e6db74">&#39;RAGWithMe/data/jinyong/金庸-射雕英雄传精校版.txt&#39;</span>}
+</span></span><span style="display:flex;"><span>	数据源信息:{<span style="color:#e6db74">&#39;level_1&#39;</span>: <span style="color:#e6db74">&#39;“金庸作品集”新序&#39;</span>, <span style="color:#e6db74">&#39;source&#39;</span>: <span style="color:#e6db74">&#39;RAGWithMe/data/jinyong/金庸-射雕英雄传精校版.txt&#39;</span>}
+</span></span><span style="display:flex;"><span>	数据源信息:{<span style="color:#e6db74">&#39;level_1&#39;</span>: <span style="color:#e6db74">&#39;第一回 风雪惊变&#39;</span>, <span style="color:#e6db74">&#39;source&#39;</span>: <span style="color:#e6db74">&#39;RAGWithMe/data/jinyong/金庸-射雕英雄传精校版.txt&#39;</span>}
+</span></span><span style="display:flex;"><span>	数据源信息:{<span style="color:#e6db74">&#39;level_1&#39;</span>: <span style="color:#e6db74">&#39;第二回 江南七怪&#39;</span>, <span style="color:#e6db74">&#39;source&#39;</span>: <span style="color:#e6db74">&#39;RAGWithMe/data/jinyong/金庸-射雕英雄传精校版.txt&#39;</span>}
+</span></span><span style="display:flex;"><span>	<span style="color:#f92672">...</span>
+</span></span><span style="display:flex;"><span>正在切块文件: {<span style="color:#e6db74">&#39;source&#39;</span>: <span style="color:#e6db74">&#39;RAGWithMe/data/jinyong/金庸-笑傲江湖精校版.txt&#39;</span>}
+</span></span><span style="display:flex;"><span>	数据源信息:{<span style="color:#e6db74">&#39;level_1&#39;</span>: <span style="color:#e6db74">&#39;“金庸作品集”新序&#39;</span>, <span style="color:#e6db74">&#39;source&#39;</span>: <span style="color:#e6db74">&#39;RAGWithMe/data/jinyong/金庸-笑傲江湖精校版.txt&#39;</span>}
+</span></span><span style="display:flex;"><span>	数据源信息:{<span style="color:#e6db74">&#39;level_1&#39;</span>: <span style="color:#e6db74">&#39;第一回 灭门&#39;</span>, <span style="color:#e6db74">&#39;source&#39;</span>: <span style="color:#e6db74">&#39;RAGWithMe/data/jinyong/金庸-笑傲江湖精校版.txt&#39;</span>}
+</span></span><span style="display:flex;"><span>	数据源信息:{<span style="color:#e6db74">&#39;level_1&#39;</span>: <span style="color:#e6db74">&#39;第二回 聆秘&#39;</span>, <span style="color:#e6db74">&#39;source&#39;</span>: <span style="color:#e6db74">&#39;RAGWithMe/data/jinyong/金庸-笑傲江湖精校版.txt&#39;</span>}
+</span></span><span style="display:flex;"><span>	<span style="color:#f92672">...</span></span></span></code></pre></div><p>在上面的输出结果中，每一行&quot;数据源信息&quot;都代表着一个 <code>Document</code> 类对象。</p>
+<p>（2）按语义进行切分</p>
+<p>在按段落及章节切分完成以后，下一步我们再按语义对每个章节内的内容进行切分，形成我们最终需要对其进行向量化转换的 Chunk 块。这里，直接使用第3.2节中介绍的 <code>RecursiveCharacterTextSplitter</code> 模块来进行切分，同时再结合上面的切分过程整体示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#ae81ff">1</span> <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">get_all_chunks</span>():
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">2</span>     jinyong_dir <span style="color:#f92672">=</span> os<span style="color:#f92672">.</span>path<span style="color:#f92672">.</span>join(data_info<span style="color:#f92672">.</span>DATA_DIR, <span style="color:#e6db74">&#39;jinyong&#39;</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">3</span>     all_files <span style="color:#f92672">=</span> os<span style="color:#f92672">.</span>listdir(jinyong_dir)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">4</span>     all_file_objects <span style="color:#f92672">=</span> []
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">5</span>     <span style="color:#75715e"># for file in all_files: </span>
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">6</span>     <span style="color:#66d9ef">for</span> file <span style="color:#f92672">in</span> [<span style="color:#e6db74">&#39;金庸-射雕英雄传精校版.txt&#39;</span>]: 
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">7</span>         file_path <span style="color:#f92672">=</span> os<span style="color:#f92672">.</span>path<span style="color:#f92672">.</span>join(jinyong_dir, file)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">8</span>         all_file_objects <span style="color:#f92672">+=</span> load_txt_file(file_path)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">9</span>         print(<span style="color:#e6db74">f</span><span style="color:#e6db74">&#34;正在加载文件: </span><span style="color:#e6db74">{</span>file_path<span style="color:#e6db74">}</span><span style="color:#e6db74">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">10</span>     print(<span style="color:#e6db74">f</span><span style="color:#e6db74">&#34;文件加载完毕，一个 </span><span style="color:#e6db74">{</span>len(all_file_objects)<span style="color:#e6db74">}</span><span style="color:#e6db74"> 个，开始对文件进行切块。&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">11</span>     all_split_objs <span style="color:#f92672">=</span> text_splitter_regex(all_file_objects)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">12</span>     text_splitter_rec <span style="color:#f92672">=</span> RecursiveCharacterTextSplitter(
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">13</span>         chunk_size<span style="color:#f92672">=</span><span style="color:#ae81ff">500</span>,  chunk_overlap<span style="color:#f92672">=</span><span style="color:#ae81ff">100</span>, add_start_index<span style="color:#f92672">=</span><span style="color:#66d9ef">True</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">14</span>     all_chunk_objs <span style="color:#f92672">=</span> text_splitter_rec<span style="color:#f92672">.</span>split_documents(all_split_objs)[:<span style="color:#ae81ff">300</span>] 
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">15</span>     chunk_lens <span style="color:#f92672">=</span> [len(doc<span style="color:#f92672">.</span>page_content) <span style="color:#66d9ef">for</span> doc <span style="color:#f92672">in</span> all_chunk_objs]
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">16</span>     print(<span style="color:#e6db74">f</span><span style="color:#e6db74">&#34;Chunk 块切分完成，一共 </span><span style="color:#e6db74">{</span>len(all_chunk_objs)<span style="color:#e6db74">}</span><span style="color:#e6db74"> 个，&#34;</span>
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">17</span>           <span style="color:#e6db74">f</span><span style="color:#e6db74">&#34;字符最小长度为: </span><span style="color:#e6db74">{</span>min(chunk_lens)<span style="color:#e6db74">}</span><span style="color:#e6db74">, 最大长度为: </span><span style="color:#e6db74">{</span>max(chunk_lens)<span style="color:#e6db74">}</span><span style="color:#e6db74">, 总字符为: </span><span style="color:#e6db74">{</span>sum(chunk_lens)<span style="color:#e6db74">}</span><span style="color:#e6db74">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">18</span>     <span style="color:#66d9ef">return</span> all_chunk_objs</span></span></code></pre></div><p>在上述代码中，第5行是遍历给定目录下的所有文件，一共15个总计约900万字，我们在测试时可以使用一个文件就行（大约100万字），即使用第6行。第6~11行便是上面介绍的按章节段落进行切分及返回的结果。第12~14行则是按照语义来对前一步的章节段落进行切分，且最大块长度为500个字符，其中第14行这里开发测试时可仅使用前300个 chunk 调试，约122496万字。最终，第18行代码返回的便是所有文章先按章节段落切分，再对章节按语义切分后的 Chunk 块，即 <code>all_chunk_objs</code> 中的每个元素对应的都是某一篇文章中某个章节下的一个块，也是一个 <code>Document</code> 类对象。</p>
+<p>上述代码执行完毕以后，输出最后一个<code>Document</code> 类对象（<code>all_chunk_objs[-1]</code>）会得到类似如下输出结果，：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-shell" data-lang="shell"><span style="display:flex;"><span>page_content<span style="color:#f92672">=</span><span style="color:#e6db74">&#39;柯镇恶沉吟道：“那姓杨的孩子是男孩？他叫杨康？”尹志平道：“是。”柯镇恶道：“那么他是你师弟了？”尹志平道：“是我师兄。弟子虽年长一岁，但杨师哥入门比弟子早了两年。”
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">江南六怪适才见了他的功夫，郭靖实非对手，师弟已是如此，他师兄当然是更加了得，这一来身上都不免凉了半截；而己方的行踪丘处机知道得一清二楚，张阿生的逝世他也已知晓，更感到己方已全处下风。
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">柯镇恶冷冷地道：“适才你与他过招，是试他本事来着？”尹志平听他语气甚恶，心惶恐，忙道：“弟子不敢！”柯镇恶道：“你去对你师父说，江南六怪虽然不济，醉仙楼之会决不失约，叫你师父放心吧。我们也不写回信啦！”
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">尹志平听了这几句话，答应又不是，不答应又不是，十分尴尬。他奉师命北上投书，丘处机确是叫他设法查察一下郭靖的为人与武功。长春子关心故人之子，原是一片好意，但尹志平少年好事，到了蒙古斡难河畔之后，不即求见六怪，却在半夜里先与郭靖交一交手，考较一下他的功夫。这时见六怪神情不善，心生惧意，不敢多呆，向各人行了个礼，说道：“弟子告辞了。”&#39;</span> metadata<span style="color:#f92672">={</span><span style="color:#e6db74">&#39;level_1&#39;</span>: <span style="color:#e6db74">&#39;第五回 弯弓射雕&#39;</span>, <span style="color:#e6db74">&#39;source&#39;</span>: <span style="color:#e6db74">&#39;RAGWithMe/data/jinyong/金庸-射雕英雄传精校版.txt&#39;</span>, <span style="color:#e6db74">&#39;start_index&#39;</span>: 9378<span style="color:#f92672">}</span>
+</span></span><span style="display:flex;"><span>Chunk 块切分完成，一共 <span style="color:#ae81ff">300</span> 个，字符最小长度为: 173, 最大长度为: 499, 总字符为: <span style="color:#ae81ff">122496</span></span></span></code></pre></div><h2 id="353-向量库及-embedding-模型初始化">3.5.3 向量库及 Embedding 模型初始化<a class="anchor" href="#353-%e5%90%91%e9%87%8f%e5%ba%93%e5%8f%8a-embedding-%e6%a8%a1%e5%9e%8b%e5%88%9d%e5%a7%8b%e5%8c%96">#</a></h2>
+<p>在完成文本切块之后，接下来需要完成三个关键步骤：① 向量库及 Embedding 模型的初始化；② 使用 Embedding 模型将文本转换为向量并存储到 Milvus 向量数据库；③ 测试向量数据是否成功入库。</p>
+<p>首先需要初始化 Milvus 向量库。在这里可以直接使用 LangChain 封装的 <code>Milvus</code> 模块来完成。相比直接使用原生的 <code>MilvusClient</code> ， <code>Milvus</code> 模块能更好的完成后续基于  LangChain  框架的操作。</p>
+<p>具体地，我们可以通过定义下面这个函数来完成：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#ae81ff">1</span> <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">init_vector_store</span>(uri<span style="color:#f92672">=</span><span style="color:#66d9ef">None</span>,collection_name<span style="color:#f92672">=</span><span style="color:#66d9ef">None</span>):
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">2</span>     embeddings <span style="color:#f92672">=</span> DashScopeEmbeddings(model<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;text-embedding-v4&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">3</span>     vector_store <span style="color:#f92672">=</span> Milvus(embedding_function<span style="color:#f92672">=</span>embeddings,
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">4</span>         connection_args<span style="color:#f92672">=</span>{<span style="color:#e6db74">&#34;uri&#34;</span>: uri}, auto_id<span style="color:#f92672">=</span><span style="color:#66d9ef">True</span>,
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">5</span>         collection_name<span style="color:#f92672">=</span>collection_name,collection_description<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;jinyong&#34;</span>,
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">6</span>         index_params<span style="color:#f92672">=</span>{<span style="color:#e6db74">&#34;index_type&#34;</span>: <span style="color:#e6db74">&#34;FLAT&#34;</span>, <span style="color:#e6db74">&#34;metric_type&#34;</span>: <span style="color:#e6db74">&#34;L2&#34;</span>})
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">7</span>     <span style="color:#66d9ef">return</span> vector_store</span></span></code></pre></div><p>在上述代码中，第2行是实例化一个 Embedding 模型，相关使用示例和原理可以参见第2.4节和第2.4节内容，其中<code>model</code>指定为 <code>&quot;text-embedding-v3&quot;</code> 和 <code>&quot;text-embedding-v4&quot;</code> 在注册百炼时90天内均有100万免费 Token 额度。第3~6行则是实例化一个 Milvus 数据库客户端实例化类对象，里面封装了原生 <code>MilvusClient</code>模块的逻辑，相关参数含义可参见第3.3节内容，整体内部流程梳理参见第3.6节内容。</p>
+<h2 id="354-文本向量入库">3.5.4 文本向量入库<a class="anchor" href="#354-%e6%96%87%e6%9c%ac%e5%90%91%e9%87%8f%e5%85%a5%e5%ba%93">#</a></h2>
+<p>在完成向量库初始化以后，就可以将之前切分好的文本块写入向量数据库。因为是基于 LangChain 框架，所以我们只需要通过一个方法就可以实现文本转向量，再将向量入库的整个过程，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#ae81ff">1</span> <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">add_docs_to_collection</span>(docs, vector_store):
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">2</span>     ids <span style="color:#f92672">=</span> vector_store<span style="color:#f92672">.</span>add_documents(documents<span style="color:#f92672">=</span>docs)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">3</span>     <span style="color:#66d9ef">return</span> ids</span></span></code></pre></div><p>在上述代码中，第1行<code>docs</code> 便是上面 <code>get_all_chunks()</code> 函数处理后返回的结果 <code>all_chunk_objs</code>；<code>vector_store</code> 则是对应 <code>init_vector_store()</code> 函数返回的 <code>Milvus</code> 类对象。第2行代码则是添加 Chunk 块到向量库中。</p>
+<p>所以，在执行这一行代码时实际上完成了两件事情：① 调用 Embedding 模型，将文本转换为向量；② 将向量及对应文本存储到 Milvus 中，其中每一条数据包含文本内容、文本向量、metadata 信息和向量 ID等内容。</p>
+<p>至此，我们的向量数据库就构建完成了。</p>
+<h2 id="355-测试与搜索">3.5.5 测试与搜索<a class="anchor" href="#355-%e6%b5%8b%e8%af%95%e4%b8%8e%e6%90%9c%e7%b4%a2">#</a></h2>
+<p>在完成向量入库之后，我们可以通过一下简单的方式来查看对应集合的字段信息，以及进行简单地搜索来测试向量数据库是否工作正常。</p>
+<p>（1）集合查看</p>
+<p>这里，我们使用 Milvus 原生的 <code>MilvusClient</code> 来加载数据库并输出集合的信息，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#ae81ff">1</span> client <span style="color:#f92672">=</span> MilvusClient(uri<span style="color:#f92672">=</span>uri)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">2</span> client<span style="color:#f92672">.</span>load_collection(collection_name<span style="color:#f92672">=</span>collection_name)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">3</span> res <span style="color:#f92672">=</span> client<span style="color:#f92672">.</span>describe_collection(collection_name<span style="color:#f92672">=</span>collection_name)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">4</span> print(<span style="color:#e6db74">f</span><span style="color:#e6db74">&#34;describe collectionres: </span><span style="color:#e6db74">{</span>res<span style="color:#e6db74">}</span><span style="color:#e6db74">&#34;</span>)</span></span></code></pre></div><p>上述代码运行后输出结果为：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-shell" data-lang="shell"><span style="display:flex;"><span><span style="color:#f92672">{</span> <span style="color:#e6db74">&#39;collection_name&#39;</span>: <span style="color:#e6db74">&#39;LangChainCollection&#39;</span>,<span style="color:#e6db74">&#39;auto_id&#39;</span>: True, <span style="color:#e6db74">&#39;num_shards&#39;</span>: 0, <span style="color:#e6db74">&#39;description&#39;</span>: <span style="color:#e6db74">&#39;jinyong&#39;</span>,
+</span></span><span style="display:flex;"><span>	<span style="color:#e6db74">&#39;fields&#39;</span>: <span style="color:#f92672">[{</span><span style="color:#e6db74">&#39;field_id&#39;</span>: 100, <span style="color:#e6db74">&#39;name&#39;</span>: <span style="color:#e6db74">&#39;text&#39;</span>,<span style="color:#e6db74">&#39;description&#39;</span>: <span style="color:#e6db74">&#39;&#39;</span>, <span style="color:#e6db74">&#39;type&#39;</span>: &lt; DataType.VARCHAR: <span style="color:#ae81ff">21</span> &gt; ,
+</span></span><span style="display:flex;"><span>		<span style="color:#e6db74">&#39;params&#39;</span>: <span style="color:#f92672">{</span><span style="color:#e6db74">&#39;max_length&#39;</span>: 65535<span style="color:#f92672">}}</span>, 
+</span></span><span style="display:flex;"><span> <span style="color:#f92672">{</span><span style="color:#e6db74">&#39;field_id&#39;</span>: 101,<span style="color:#e6db74">&#39;name&#39;</span>: <span style="color:#e6db74">&#39;pk&#39;</span>, <span style="color:#e6db74">&#39;description&#39;</span>: <span style="color:#e6db74">&#39;&#39;</span>, <span style="color:#e6db74">&#39;type&#39;</span>: &lt; DataType.INT64: <span style="color:#ae81ff">5</span> &gt; , <span style="color:#e6db74">&#39;params&#39;</span>: <span style="color:#f92672">{}</span>,
+</span></span><span style="display:flex;"><span>		<span style="color:#e6db74">&#39;auto_id&#39;</span>: True, <span style="color:#e6db74">&#39;is_primary&#39;</span>: True<span style="color:#f92672">}</span>, 
+</span></span><span style="display:flex;"><span> <span style="color:#f92672">{</span><span style="color:#e6db74">&#39;field_id&#39;</span>: 102, <span style="color:#e6db74">&#39;name&#39;</span>: <span style="color:#e6db74">&#39;vector&#39;</span>, <span style="color:#e6db74">&#39;description&#39;</span>: <span style="color:#e6db74">&#39;&#39;</span>, <span style="color:#e6db74">&#39;type&#39;</span>: &lt; DataType.FLOAT_VECTOR: <span style="color:#ae81ff">101</span> &gt; ,
+</span></span><span style="display:flex;"><span>		<span style="color:#e6db74">&#39;params&#39;</span>: <span style="color:#f92672">{</span><span style="color:#e6db74">&#39;dim&#39;</span>: 1024<span style="color:#f92672">}}</span>, 
+</span></span><span style="display:flex;"><span> <span style="color:#f92672">{</span><span style="color:#e6db74">&#39;field_id&#39;</span>: 103, <span style="color:#e6db74">&#39;name&#39;</span>: <span style="color:#e6db74">&#39;level_1&#39;</span>, <span style="color:#e6db74">&#39;description&#39;</span>: <span style="color:#e6db74">&#39;&#39;</span>, <span style="color:#e6db74">&#39;type&#39;</span>: &lt; DataType.VARCHAR: <span style="color:#ae81ff">21</span> &gt; ,
+</span></span><span style="display:flex;"><span>		<span style="color:#e6db74">&#39;params&#39;</span>: <span style="color:#f92672">{</span><span style="color:#e6db74">&#39;max_length&#39;</span>: 65535<span style="color:#f92672">}}</span>, 
+</span></span><span style="display:flex;"><span> <span style="color:#f92672">{</span><span style="color:#e6db74">&#39;field_id&#39;</span>: 104, <span style="color:#e6db74">&#39;name&#39;</span>: <span style="color:#e6db74">&#39;source&#39;</span>, <span style="color:#e6db74">&#39;description&#39;</span>: <span style="color:#e6db74">&#39;&#39;</span>, <span style="color:#e6db74">&#39;type&#39;</span>: &lt; DataType.VARCHAR: <span style="color:#ae81ff">21</span> &gt; ,
+</span></span><span style="display:flex;"><span>		<span style="color:#e6db74">&#39;params&#39;</span>: <span style="color:#f92672">{</span><span style="color:#e6db74">&#39;max_length&#39;</span>: 65535<span style="color:#f92672">}}</span>, 
+</span></span><span style="display:flex;"><span> <span style="color:#f92672">{</span><span style="color:#e6db74">&#39;field_id&#39;</span>: 105, <span style="color:#e6db74">&#39;name&#39;</span>: <span style="color:#e6db74">&#39;start_index&#39;</span>, <span style="color:#e6db74">&#39;description&#39;</span>: <span style="color:#e6db74">&#39;&#39;</span>, <span style="color:#e6db74">&#39;type&#39;</span>: &lt; DataType.INT64: <span style="color:#ae81ff">5</span> &gt; ,
+</span></span><span style="display:flex;"><span>		<span style="color:#e6db74">&#39;params&#39;</span>: <span style="color:#f92672">{}}]</span>,
+</span></span><span style="display:flex;"><span>	<span style="color:#e6db74">&#39;functions&#39;</span>: <span style="color:#f92672">[]</span>, <span style="color:#e6db74">&#39;aliases&#39;</span>: <span style="color:#f92672">[]</span>, <span style="color:#e6db74">&#39;collection_id&#39;</span>: 0, <span style="color:#e6db74">&#39;consistency_level&#39;</span>: 0,
+</span></span><span style="display:flex;"><span>	<span style="color:#e6db74">&#39;properties&#39;</span>: <span style="color:#f92672">{}</span>, <span style="color:#e6db74">&#39;num_partitions&#39;</span>: 0, <span style="color:#e6db74">&#39;enable_dynamic_field&#39;</span>: False, <span style="color:#e6db74">&#39;enable_namespace&#39;</span>: False<span style="color:#f92672">}</span></span></span></code></pre></div><p>从上述输出结果可以看到，集合 LangChainCollection 中一共有6个字段，分别是 <code>text</code> 用于保存原始 Chunk 块，对应 <code>Document</code> 对象中的 <code>page_content</code> 内容；<code>pk</code> 自增主键；<code>vector</code> 用于保存 Chunk 块对应的向量；<code>level_1</code> 用于保存章节标题，对应<code>Document</code> 对象 <code>metadata</code>中的 <code>level_1</code> 内容；<code>source</code> 、<code>start_index</code> 字段同理。</p>
+<p>（2）查看索引</p>
+<p>进一步，可以通过如下代码来查看集合的索引名称和信息：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#ae81ff">1</span> index_name <span style="color:#f92672">=</span> client<span style="color:#f92672">.</span>list_indexes(collection_name)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">2</span> index_info <span style="color:#f92672">=</span> client<span style="color:#f92672">.</span>describe_index(collection_name, index_name[<span style="color:#ae81ff">0</span>])
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">3</span> print(<span style="color:#e6db74">f</span><span style="color:#e6db74">&#34;index_name: </span><span style="color:#e6db74">{</span>index_name<span style="color:#e6db74">}</span><span style="color:#e6db74">&#34;</span>) 
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">4</span> print(<span style="color:#e6db74">f</span><span style="color:#e6db74">&#34;index_info: </span><span style="color:#e6db74">{</span>index_info<span style="color:#e6db74">}</span><span style="color:#e6db74">&#34;</span>)</span></span></code></pre></div><p>上述代码运行后输出结果为：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-shell" data-lang="shell"><span style="display:flex;"><span>index_name: <span style="color:#f92672">[</span><span style="color:#e6db74">&#39;vector&#39;</span><span style="color:#f92672">]</span>
+</span></span><span style="display:flex;"><span>index_info: <span style="color:#f92672">{</span><span style="color:#e6db74">&#39;index_type&#39;</span>: <span style="color:#e6db74">&#39;FLAT&#39;</span>, <span style="color:#e6db74">&#39;metric_type&#39;</span>: <span style="color:#e6db74">&#39;L2&#39;</span>, <span style="color:#e6db74">&#39;dim&#39;</span>: <span style="color:#e6db74">&#39;1024&#39;</span>, <span style="color:#e6db74">&#39;field_name&#39;</span>: <span style="color:#e6db74">&#39;vector&#39;</span>, <span style="color:#e6db74">&#39;index_name&#39;</span>: <span style="color:#e6db74">&#39;vector&#39;</span>, <span style="color:#e6db74">&#39;total_rows&#39;</span>: 0, <span style="color:#e6db74">&#39;indexed_rows&#39;</span>: 0, <span style="color:#e6db74">&#39;pending_index_rows&#39;</span>: 0, <span style="color:#e6db74">&#39;state&#39;</span>: <span style="color:#e6db74">&#39;Finished&#39;</span><span style="color:#f92672">}</span></span></span></code></pre></div><p>（3） 数据查询</p>
+<p>最后，我们可以通过如下语句来查询集合中的实体和数量：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#ae81ff">1</span> res <span style="color:#f92672">=</span> client<span style="color:#f92672">.</span>query(collection_name<span style="color:#f92672">=</span>collection_name, filter<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;pk == 464859367376683008&#34;</span>,  <span style="color:#75715e"># 必须有条件</span>
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">2</span>                    output_fields<span style="color:#f92672">=</span>[<span style="color:#e6db74">&#34;source&#34;</span>,<span style="color:#e6db74">&#34;vector&#34;</span>, <span style="color:#e6db74">&#34;text&#34;</span>, <span style="color:#e6db74">&#34;start_index&#34;</span>, <span style="color:#e6db74">&#34;level_1&#34;</span>])
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">3</span> print(<span style="color:#e6db74">f</span><span style="color:#e6db74">&#34;query: </span><span style="color:#e6db74">{</span>res<span style="color:#e6db74">}</span><span style="color:#e6db74">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">4</span> res <span style="color:#f92672">=</span> client<span style="color:#f92672">.</span>query(collection_name<span style="color:#f92672">=</span>collection_name, filter<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;&#34;</span>,
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">5</span>                    output_fields<span style="color:#f92672">=</span>[<span style="color:#e6db74">&#34;count(*)&#34;</span>])
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">6</span> print(<span style="color:#e6db74">f</span><span style="color:#e6db74">&#34;一共有数据: </span><span style="color:#e6db74">{</span>res<span style="color:#e6db74">}</span><span style="color:#e6db74"> 条&#34;</span>)</span></span></code></pre></div><p>上述代码运行后输出结果类似为：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-shell" data-lang="shell"><span style="display:flex;"><span>query: data: <span style="color:#f92672">[</span><span style="color:#e6db74">&#34;{&#39;pk&#39;: 464859367376683008, &#39;level_1&#39;: &#39;“金庸作品集”新序&#39;, &#39;source&#39;: &#39;RAGWithMe/data/jinyong/金庸-射雕英雄传精校版.txt&#39;, &#39;start_index&#39;: 0, &#39;text&#39;: &#39;小说是写给人看的。小说的内容是人。\\n小说写一个人、几个人、一群人、或成千成万人的性格和感情。他们的性格和感情从横面的环境中反映出来，从纵面的遭遇中反映出来，从人与人之间的交往与关系中反映出来。长篇小说中似乎只有《鲁滨逊飘流记》...&#39;, &#39;vector&#39;: [-0.0650412589, 0.01044313237, -0.0374443903, ....]}&#34;</span><span style="color:#f92672">]</span>, extra_info: <span style="color:#f92672">{}</span>
+</span></span><span style="display:flex;"><span>一共有数据: data: <span style="color:#f92672">[</span><span style="color:#e6db74">&#34;{&#39;count(*)&#39;: 300}&#34;</span><span style="color:#f92672">]</span>, extra_info: <span style="color:#f92672">{}</span> 条</span></span></code></pre></div><h2 id="356-基于原生向量库检索">3.5.6 基于原生向量库检索<a class="anchor" href="#356-%e5%9f%ba%e4%ba%8e%e5%8e%9f%e7%94%9f%e5%90%91%e9%87%8f%e5%ba%93%e6%a3%80%e7%b4%a2">#</a></h2>
+<p>在完成上述测试工作以后，接下来就可以来根据输入文本区向量库里检索与之相关的内容。这里介绍两种方式，一种是基于原生向量库检索，另一种是基于统一检索接口检索。</p>
+<p>（1）基于原生向量库检索</p>
+<p>基于原生向量库检索指的是通过 <code>Milvus()</code> 类对象中的 <code>similarity_search()</code> 方法来完成向量检索过程，示例代码如下所示：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#ae81ff">1</span> <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">similarity_search</span>(vector_store, query):
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">2</span>     results <span style="color:#f92672">=</span> vector_store<span style="color:#f92672">.</span>similarity_search(query<span style="color:#f92672">=</span>query, k<span style="color:#f92672">=</span><span style="color:#ae81ff">3</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">3</span>     <span style="color:#66d9ef">for</span> i, doc <span style="color:#f92672">in</span> enumerate(results):
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">4</span>         print(<span style="color:#e6db74">f</span><span style="color:#e6db74">&#34;</span><span style="color:#ae81ff">\n</span><span style="color:#e6db74">排名第 </span><span style="color:#e6db74">{</span>i <span style="color:#f92672">+</span> <span style="color:#ae81ff">1</span><span style="color:#e6db74">}</span><span style="color:#e6db74"> 的答案为:&#34;</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">5</span>         print(<span style="color:#e6db74">f</span><span style="color:#e6db74">&#34;</span><span style="color:#ae81ff">\t</span><span style="color:#e6db74"> 内容: </span><span style="color:#e6db74">{</span>doc<span style="color:#f92672">.</span>page_content<span style="color:#e6db74">}</span><span style="color:#e6db74">&#34;</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">6</span>         print(<span style="color:#e6db74">f</span><span style="color:#e6db74">&#34;</span><span style="color:#ae81ff">\t</span><span style="color:#e6db74"> 来源: </span><span style="color:#e6db74">{</span>doc<span style="color:#f92672">.</span>metadata<span style="color:#e6db74">}</span><span style="color:#e6db74">&#34;</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">7</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">8</span>     results <span style="color:#f92672">=</span> vector_store<span style="color:#f92672">.</span>similarity_search_with_score(query<span style="color:#f92672">=</span>query, k<span style="color:#f92672">=</span><span style="color:#ae81ff">3</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">9</span>     <span style="color:#66d9ef">for</span> i, item <span style="color:#f92672">in</span> enumerate(results):
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">10</span>         doc, score <span style="color:#f92672">=</span> item
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">11</span>         print(<span style="color:#e6db74">f</span><span style="color:#e6db74">&#34;</span><span style="color:#ae81ff">\n</span><span style="color:#e6db74">排名第 </span><span style="color:#e6db74">{</span>i <span style="color:#f92672">+</span> <span style="color:#ae81ff">1</span><span style="color:#e6db74">}</span><span style="color:#e6db74"> 的答案为(相似度评分=</span><span style="color:#e6db74">{</span>score<span style="color:#e6db74">}</span><span style="color:#e6db74">):&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">12</span>         print(<span style="color:#e6db74">f</span><span style="color:#e6db74">&#34;</span><span style="color:#ae81ff">\t</span><span style="color:#e6db74"> 内容: </span><span style="color:#e6db74">{</span>doc<span style="color:#f92672">.</span>page_content<span style="color:#e6db74">}</span><span style="color:#e6db74">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">13</span>         print(<span style="color:#e6db74">f</span><span style="color:#e6db74">&#34;</span><span style="color:#ae81ff">\t</span><span style="color:#e6db74"> 来源: </span><span style="color:#e6db74">{</span>doc<span style="color:#f92672">.</span>metadata<span style="color:#e6db74">}</span><span style="color:#e6db74">&#34;</span>)</span></span></code></pre></div><p>这里需要注意的是，不同的距离度量方式，第10行中相似度含义不一样。例如这里因为我们在上面构建索引的时候 指定了 <code>&quot;metric_type&quot;: &quot;L2&quot;</code>，所以这里相似度返回的是距离值，距离越小越相似。</p>
+<p>上述代码运行后输出结果类似为：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-shell" data-lang="shell"><span style="display:flex;"><span>排名第 <span style="color:#ae81ff">1</span> 的答案为:
+</span></span><span style="display:flex;"><span>内容: 武侠小说虽说是通俗作品，以大众化、娱乐性强...
+</span></span><span style="display:flex;"><span>来源: <span style="color:#f92672">{</span><span style="color:#e6db74">&#39;level_1&#39;</span>: <span style="color:#e6db74">&#39;“金庸作品集”新序&#39;</span>, <span style="color:#e6db74">&#39;pk&#39;</span>: 464859367376683013, <span style="color:#e6db74">&#39;source&#39;</span>: <span style="color:#e6db74">&#39;RAGWithMe/data/jinyong/金庸-射雕英雄传精校版.txt&#39;</span>, <span style="color:#e6db74">&#39;start_index&#39;</span>: 1856<span style="color:#f92672">}</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>排名第 <span style="color:#ae81ff">2</span> 的答案为:
+</span></span><span style="display:flex;"><span>内容: 柯镇恶听到这里，皱着的眉头稍稍舒...
+</span></span><span style="display:flex;"><span>来源: <span style="color:#f92672">{</span><span style="color:#e6db74">&#39;level_1&#39;</span>: <span style="color:#e6db74">&#39;第五回 弯弓射雕&#39;</span>, <span style="color:#e6db74">&#39;pk&#39;</span>: 464859367376683306, <span style="color:#e6db74">&#39;source&#39;</span>: <span style="color:#e6db74">&#39;RAGWithMe/data/jinyong/金庸-射雕英雄传精校版.txt&#39;</span>, <span style="color:#e6db74">&#39;start_index&#39;</span>: 8982<span style="color:#f92672">}</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>排名第 <span style="color:#ae81ff">3</span> 的答案为:
+</span></span><span style="display:flex;"><span>内容: 翻版本不付版税，还在其...
+</span></span><span style="display:flex;"><span>来源: <span style="color:#f92672">{</span><span style="color:#e6db74">&#39;level_1&#39;</span>: <span style="color:#e6db74">&#39;“金庸作品集”新序&#39;</span>, <span style="color:#e6db74">&#39;pk&#39;</span>: 464859367376683016, <span style="color:#e6db74">&#39;source&#39;</span>: <span style="color:#e6db74">&#39;RAGWithMe/data/jinyong/金庸-射雕英雄传精校版.txt&#39;</span>, <span style="color:#e6db74">&#39;start_index&#39;</span>: 2754<span style="color:#f92672">}</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>排名第 <span style="color:#ae81ff">1</span> 的答案为<span style="color:#f92672">(</span>相似度评分<span style="color:#f92672">=</span>0.8554366230964661<span style="color:#f92672">)</span>:
+</span></span><span style="display:flex;"><span>内容: 武侠小说虽说是通俗作品，以大众化、娱乐性强...
+</span></span><span style="display:flex;"><span>来源: <span style="color:#f92672">{</span><span style="color:#e6db74">&#39;level_1&#39;</span>: <span style="color:#e6db74">&#39;“金庸作品集”新序&#39;</span>, <span style="color:#e6db74">&#39;pk&#39;</span>: 464859367376683013, <span style="color:#e6db74">&#39;source&#39;</span>: <span style="color:#e6db74">&#39;RAGWithMe/data/jinyong/金庸-射雕英雄传精校版.txt&#39;</span>, <span style="color:#e6db74">&#39;start_index&#39;</span>: 1856<span style="color:#f92672">}</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>排名第 <span style="color:#ae81ff">2</span> 的答案为<span style="color:#f92672">(</span>相似度评分<span style="color:#f92672">=</span>0.8602303266525269<span style="color:#f92672">)</span>:
+</span></span><span style="display:flex;"><span>内容: 柯镇恶听到这里，皱着的眉头稍稍舒...
+</span></span><span style="display:flex;"><span>来源: <span style="color:#f92672">{</span><span style="color:#e6db74">&#39;level_1&#39;</span>: <span style="color:#e6db74">&#39;第五回 弯弓射雕&#39;</span>, <span style="color:#e6db74">&#39;pk&#39;</span>: 464859367376683306, <span style="color:#e6db74">&#39;source&#39;</span>: <span style="color:#e6db74">&#39;RAGWithMe/data/jinyong/金庸-射雕英雄传精校版.txt&#39;</span>, <span style="color:#e6db74">&#39;start_index&#39;</span>: 8982<span style="color:#f92672">}</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>排名第 <span style="color:#ae81ff">3</span> 的答案为<span style="color:#f92672">(</span>相似度评分<span style="color:#f92672">=</span>0.8788247108459473<span style="color:#f92672">)</span>:
+</span></span><span style="display:flex;"><span>内容: 翻版本不付版税，还在其...
+</span></span><span style="display:flex;"><span>来源: <span style="color:#f92672">{</span><span style="color:#e6db74">&#39;level_1&#39;</span>: <span style="color:#e6db74">&#39;“金庸作品集”新序&#39;</span>, <span style="color:#e6db74">&#39;pk&#39;</span>: 464859367376683016, <span style="color:#e6db74">&#39;source&#39;</span>: <span style="color:#e6db74">&#39;RAGWithMe/data/jinyong/金庸-射雕英雄传精校版.txt&#39;</span>, <span style="color:#e6db74">&#39;start_index&#39;</span>: 2754<span style="color:#f92672">}</span></span></span></code></pre></div><p>从上述结果可以看出，<code>similarity_search()</code> 方法做了三件事：① 把 query 转换为向量；② 在向量数据库中进行相似度搜索；③ 返回最相似的文本块。</p>
+<p>（2）基于统一检索接口检索</p>
+<p>从上面代码可以看出， 类 <code>VectorStore</code> 的实例化对象 <code>vector_store</code> 的职责主要是存储向量并进行相似度搜索，所以 <code>VectorStore</code> 的本质是“数据存储 + 向量检索引擎”。然而，在 LangChain 框架中，检索来源不一定都是依赖于向量数据库，例如关键词搜索引擎、外部 API、数据库和文件系统等，因此 LangChain 提供了一套统一的检索抽象层（Retrieval Interface）来解决。</p>
+<p>因此，在后续的 RAG 系统开发中，我们也将看到像 “用户问题 → Retriever → 检索相关文档 → Prompt 模板 → LLM → 生成答案”这样的典型流程结构。</p>
+<p>具体地，对于第3.1节中的示例，还可以通过如下标准化方式对用户提问进行相关语料的检索：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#ae81ff">1</span> <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">retriever</span>(vector_store, queryies):
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">2</span>     retriever <span style="color:#f92672">=</span> vector_store<span style="color:#f92672">.</span>as_retriever(
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">3</span>         search_type<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;similarity&#34;</span>, search_kwargs<span style="color:#f92672">=</span>{<span style="color:#e6db74">&#34;k&#34;</span>: <span style="color:#ae81ff">2</span>})
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">4</span>     result <span style="color:#f92672">=</span> retriever<span style="color:#f92672">.</span>batch(inputs<span style="color:#f92672">=</span>queryies)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">5</span>     print(result)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">6</span> queries <span style="color:#f92672">=</span> [<span style="color:#e6db74">&#34;郭靖是谁？&#34;</span>, <span style="color:#e6db74">&#34;郭靖这个人物在这部小说当中是谁？它的出生背景是什么？&#34;</span>]
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">7</span> retriever(vector_store<span style="color:#f92672">=</span>vector_store, queryies<span style="color:#f92672">=</span>queries)</span></span></code></pre></div><p>在上述代码中，<code>as_retriever() </code>的作用便是将 <code>VectorStore</code> 封装成一个符合 LangChain 标准接口的 <code>Retriever</code>，使其能够被 RAG、Chain、Agent 等组件直接使用。</p>
+<p>上述代码运行后输出结果类似为：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-shell" data-lang="shell"><span style="display:flex;"><span><span style="color:#f92672">[</span>Document<span style="color:#f92672">(</span>metadata<span style="color:#f92672">={</span><span style="color:#e6db74">&#39;level_1&#39;</span>: <span style="color:#e6db74">&#39;第五回 弯弓射雕&#39;</span>, <span style="color:#e6db74">&#39;pk&#39;</span>: 464836204334678307, <span style="color:#e6db74">&#39;source&#39;</span>: <span style="color:#e6db74">&#39;RAGWithMe/data/jinyong/金庸-射雕英雄传精校版.txt&#39;</span>, <span style="color:#e6db74">&#39;start_index&#39;</span>: 6652<span style="color:#f92672">}</span>, page_content<span style="color:#f92672">=</span><span style="color:#e6db74">&#39;...当晚郭靖睡到中夜，忽听得帐外有人轻轻拍了三下手掌，他坐起身来，只听得有人以汉语轻声道：“郭靖，你出来。”郭靖微感诧异，听声音不熟，揭开帐幕一角往外张望，月光下只见左前方大树之旁站着一人。\n郭靖出帐近前，只见那人宽袍大袖，头发打成髻子，不男不女，面貌看来年纪尚轻。原来这人是个道士，郭靖却从没见过中土的道士，问道：“你是谁？找我干什么？”那人道：“你是郭靖，是不是？”郭靖道：“是。”那人道：“你那柄削铁如泥的短剑呢？拿来给我瞧瞧！”身子微晃，蓦地欺近，发掌便往他胸口按去。\n郭靖见对方没...&#39;</span><span style="color:#f92672">)</span>,
+</span></span><span style="display:flex;"><span>Document<span style="color:#f92672">(</span>metadata<span style="color:#f92672">={</span><span style="color:#e6db74">&#39;level_1&#39;</span>: <span style="color:#e6db74">&#39;第四回 黑风双煞&#39;</span>, <span style="color:#e6db74">&#39;pk&#39;</span>: 464836204334678245, <span style="color:#e6db74">&#39;source&#39;</span>: <span style="color:#e6db74">&#39;RAGWithMe/data/jinyong/金庸-射雕英雄传精校版.txt&#39;</span>, <span style="color:#e6db74">&#39;start_index&#39;</span>: 6678<span style="color:#f92672">}</span>, page_content<span style="color:#f92672">=</span><span style="color:#e6db74">&#39;..柯镇恶耳音锐敏之极，听到“郭靖”两字，全身大震，立即提缰回马，问道：“孩子，你姓郭？你是汉人，不是蒙古人？”郭靖道：“是啊！”柯镇恶大喜，急问：“你妈妈叫什么名字？”郭靖道：“妈妈就是妈妈。”柯镇恶搔头，问道：“你带我去见你妈妈，好么？”郭靖道：“妈妈不在这里。”柯镇恶听他语气中似乎含敌意，...温言道：“你爹爹呢？”郭靖道：“我爹爹给坏人害死了，等我长大了。郭靖又摇了摇头，柯镇恶道：“害死你爹爹的坏人叫什么名字？”郭靖咬牙切齿地道：“他……名叫段天德！”\n原来李萍身处荒漠绝域之地，知道随时都会遭遇不测...&#39;</span><span style="color:#f92672">)]</span>,
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>Document<span style="color:#f92672">(</span>metadata<span style="color:#f92672">={</span><span style="color:#e6db74">&#39;level_1&#39;</span>: <span style="color:#e6db74">&#39;第四回 黑风双煞&#39;</span>, <span style="color:#e6db74">&#39;pk&#39;</span>: 464836204334678245, ......<span style="color:#f92672">)</span>,
+</span></span><span style="display:flex;"><span>Document<span style="color:#f92672">(</span>metadata<span style="color:#f92672">={</span><span style="color:#e6db74">&#39;level_1&#39;</span>: <span style="color:#e6db74">&#39;第五回 弯弓射雕&#39;</span>, <span style="color:#e6db74">&#39;pk&#39;</span>: 464836204334678307, ......<span style="color:#f92672">)]]</span></span></span></code></pre></div><p>这里值得一提的是，从最后检索的结果来看，第二个问题 &ldquo;郭靖这个人物在这部小说当中是谁？它的出生背景是什么？&rdquo; 排序第二的答案，要明显好于第一个问题排序第一的答案。原因之一在于，我们可以明显看出第二个问题的描述比第一个更清晰，因此 RAG 中的一个关键步骤就是对用户的提问进行重写。</p>
+<p>到此，对于如何从零开始构建一个语义检索系统就介绍完了，在下一章内容中我们将开始正式买入 RAG 开发的学习过程。</p>
+</article>
+ 
+      
+
+      <footer class="book-footer">
+        
+  <div class="flex flex-wrap justify-between">
+
+<div>
+
+</div>
+
+<div>
+
+</div>
+
+</div>
+
+<div class="flex flex-wrap justify-between">
+    <span>
+    
+      <a href="/agent/chapter03/ff27306c0d7b4387/" class="flex align-center">
+        <img src="/icons/backward.svg" class="book-icon" alt="Backward" />
+        <span>3.4 Qwen3 Embedding 模型介绍</span>
+      </a>
+    
+    </span>
+    <span>
+    
+      <a href="/agent/chapter03/e1328cb23e8c412b/" class="flex align-center">
+        <span>3.6  Milvus 模块解析</span>
+        <img src="/icons/forward.svg" class="book-icon" alt="Forward" />
+      </a>
+    
+    </span>
+  </div>
+
+ 
+        
+  
+  <div class="book-comments">
+
+</div>
+  
+ 
+        
+  <link rel="stylesheet" href="/katex/katex.min.css" />
+  <script defer src="/katex/katex.min.js"></script>
+  <script defer src="/katex/auto-render.min.js"></script>
+  
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        if (window.renderMathInElement) {
+          renderMathInElement(
+            document.querySelector(".book-page"),
+            Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
+          );
+        }
+      });
+    </script>
+  
+
+
+        
+  
+ 
+        
+  
+    <script>(function(){document.querySelectorAll("pre:has(code)").forEach(e=>{e.addEventListener("click",e.focus),e.addEventListener("copy",function(t){if(t.preventDefault(),navigator.clipboard){const t=window.getSelection().toString()||e.textContent;navigator.clipboard.writeText(t)}})})})()</script>
+  
+
+      </footer>
+
+      <label for="menu-control" class="hidden book-menu-overlay"></label>
+    </div>
+
+    
+  
+  <aside class="book-toc">
+    <div class="book-toc-content">
+      
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#351-读取文档并切块">3.5.1 读取文档并切块</a></li>
+    <li><a href="#352-混合策略切块">3.5.2 混合策略切块</a></li>
+    <li><a href="#353-向量库及-embedding-模型初始化">3.5.3 向量库及 Embedding 模型初始化</a></li>
+    <li><a href="#354-文本向量入库">3.5.4 文本向量入库</a></li>
+    <li><a href="#355-测试与搜索">3.5.5 测试与搜索</a></li>
+    <li><a href="#356-基于原生向量库检索">3.5.6 基于原生向量库检索</a></li>
+  </ul>
+</nav>
+
+
+
+    </div>
+  </aside>
+  
+ 
+  </main>
+
+  
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

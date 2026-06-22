@@ -1,0 +1,3843 @@
+<!DOCTYPE html>
+<html lang="zh_CN" dir="ltr">
+<head>
+  <!--
+Made with Book Theme
+https://github.com/alex-shpak/hugo-book
+-->
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="13.3 Label Spreading 算法# 在上一节内容中，我们介绍了一种基于图结构的标签传播算法。标签传播算法的核心思想认为，在样本空间中距离越相近的样本点越有可能具有相同的标签。因此，对于样本空间中的所有样本点，可以通过构建一个有向完全图来表示样本点之间的位置关系，并以此为基础构建一个概率迁移矩阵来确定未知标签的所属类别。在本节内容中，我们将继续学习另外一种同样也是基于图结构的标签扩散算法（Label Spreading）[1]。
+如图13-10所示便是标签扩散算法的学习路线图，我们将先介绍其对应的思想以及sklearn的建模过程，然后再来介绍其背后的原理、计算示例和收敛性证明等过程，最后再一步步来从零实现整个算法。
+图 13-10 标签扩散算法学习路线图 13.3.1 Label Spreading算法思想# 从本质上来讲，标签传播和标签扩散这两种算法在思想上并没有太大的差别，都是基于样本点的空间位置来构造得到概率迁移矩阵，然后通过概率迁移矩阵用已知标签的样本点来确定未知标签样本点的类别。相比较于标签传播算法来说，标签扩散算法的改进点表现在两个方面：①使用了标准化的拉普拉斯矩阵（Laplace Matrix ）来作为概率迁移矩阵，其目的是能够使得在迭代过程中标签的传播更加平滑；②加入了类似于正则化策略的惩罚参数来增加模型的泛化能力。由于标签扩散算法在思想上与标签传播算法并没有什么本质区别，下面首先直接来看标签扩散算法的示例用法。
+13.3.2 Label Spreading 示例代码# 在sklearn中，可以从sklearn.semi_supervised中来导入标签传播算法LabelSpreading模块。接下来，需要构造半监督学习所需要使用到的训练集，即将部分样本的标签置为-1，示例代码如下：
+1 def load_data(): 2 x, y = load_iris(return_X_y=True) 3 x_train, x_test, y_train, y_test = \ 4 train_test_split(x, y, test_size=0.3, random_state=2022) 5 rng = np.random.RandomState(20) 6 random_unlabeled_points = rng.rand(y_train.shape[0]) &lt; 0.8 7 y_mixed = deepcopy(y_train) 8 y_mixed[random_unlabeled_points] = -1 9 return x_train, x_test, y_train, y_test, y_mixed在上述代码中，第2~4行是导入原始并进行训练集和测试集的划分。第5~8行则是将训练集中$80\%$样本的标签重置为-1，同时也保留了原始重置之前的标签便于后续在训练集上测试模型的效果。第9行是返回最后各个部分的结果。
+进一步，便可以导入LabelSpreading进行模型训练和测试，示例代码如下：
+1 def test_label_spreding(): 2 x_train, x_test, y_train, y_test, y_mixed = load_data() 3 ls = LabelSpreading(alpha=0.2) 4 ls.fit(x_train, y_mixed) 5 print(&#34;Label Spreading&#34;) 6 print(f&#34;训练集上的准确率为：{ls.score(x_train, y_train)}&#34;) 7 print(f&#34;测试集上的准确率为：{ls.score(x_test, y_test)}&#34;)上述代码运行结束后便会得到类似如下所示的结果：
+">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
+<meta name="color-scheme" content="light dark"><meta property="og:url" content="https://mlwithme.github.io/ml/chapter13/7fc8b0fc47d2427c/">
+	<meta property="og:site_name" content="《从零学AI指南手册》">
+	<meta property="og:title" content="13.3 Label Spreading 算法">
+	<meta property="og:description" content="13.3 Label Spreading 算法# 在上一节内容中，我们介绍了一种基于图结构的标签传播算法。标签传播算法的核心思想认为，在样本空间中距离越相近的样本点越有可能具有相同的标签。因此，对于样本空间中的所有样本点，可以通过构建一个有向完全图来表示样本点之间的位置关系，并以此为基础构建一个概率迁移矩阵来确定未知标签的所属类别。在本节内容中，我们将继续学习另外一种同样也是基于图结构的标签扩散算法（Label Spreading）[1]。
+如图13-10所示便是标签扩散算法的学习路线图，我们将先介绍其对应的思想以及sklearn的建模过程，然后再来介绍其背后的原理、计算示例和收敛性证明等过程，最后再一步步来从零实现整个算法。
+图 13-10 标签扩散算法学习路线图 13.3.1 Label Spreading算法思想# 从本质上来讲，标签传播和标签扩散这两种算法在思想上并没有太大的差别，都是基于样本点的空间位置来构造得到概率迁移矩阵，然后通过概率迁移矩阵用已知标签的样本点来确定未知标签样本点的类别。相比较于标签传播算法来说，标签扩散算法的改进点表现在两个方面：①使用了标准化的拉普拉斯矩阵（Laplace Matrix ）来作为概率迁移矩阵，其目的是能够使得在迭代过程中标签的传播更加平滑；②加入了类似于正则化策略的惩罚参数来增加模型的泛化能力。由于标签扩散算法在思想上与标签传播算法并没有什么本质区别，下面首先直接来看标签扩散算法的示例用法。
+13.3.2 Label Spreading 示例代码# 在sklearn中，可以从sklearn.semi_supervised中来导入标签传播算法LabelSpreading模块。接下来，需要构造半监督学习所需要使用到的训练集，即将部分样本的标签置为-1，示例代码如下：
+1 def load_data(): 2 x, y = load_iris(return_X_y=True) 3 x_train, x_test, y_train, y_test = \ 4 train_test_split(x, y, test_size=0.3, random_state=2022) 5 rng = np.random.RandomState(20) 6 random_unlabeled_points = rng.rand(y_train.shape[0]) &lt; 0.8 7 y_mixed = deepcopy(y_train) 8 y_mixed[random_unlabeled_points] = -1 9 return x_train, x_test, y_train, y_test, y_mixed在上述代码中，第2~4行是导入原始并进行训练集和测试集的划分。第5~8行则是将训练集中$80\%$样本的标签重置为-1，同时也保留了原始重置之前的标签便于后续在训练集上测试模型的效果。第9行是返回最后各个部分的结果。
+进一步，便可以导入LabelSpreading进行模型训练和测试，示例代码如下：
+1 def test_label_spreding(): 2 x_train, x_test, y_train, y_test, y_mixed = load_data() 3 ls = LabelSpreading(alpha=0.2) 4 ls.fit(x_train, y_mixed) 5 print(&#34;Label Spreading&#34;) 6 print(f&#34;训练集上的准确率为：{ls.score(x_train, y_train)}&#34;) 7 print(f&#34;测试集上的准确率为：{ls.score(x_test, y_test)}&#34;)上述代码运行结束后便会得到类似如下所示的结果：">
+	<meta property="og:locale" content="zh_CN">
+	<meta property="og:type" content="article">
+		<meta property="article:section" content="ml">
+
+
+	<meta itemprop="name" content="13.3 Label Spreading 算法">
+	<meta itemprop="description" content="13.3 Label Spreading 算法# 在上一节内容中，我们介绍了一种基于图结构的标签传播算法。标签传播算法的核心思想认为，在样本空间中距离越相近的样本点越有可能具有相同的标签。因此，对于样本空间中的所有样本点，可以通过构建一个有向完全图来表示样本点之间的位置关系，并以此为基础构建一个概率迁移矩阵来确定未知标签的所属类别。在本节内容中，我们将继续学习另外一种同样也是基于图结构的标签扩散算法（Label Spreading）[1]。
+如图13-10所示便是标签扩散算法的学习路线图，我们将先介绍其对应的思想以及sklearn的建模过程，然后再来介绍其背后的原理、计算示例和收敛性证明等过程，最后再一步步来从零实现整个算法。
+图 13-10 标签扩散算法学习路线图 13.3.1 Label Spreading算法思想# 从本质上来讲，标签传播和标签扩散这两种算法在思想上并没有太大的差别，都是基于样本点的空间位置来构造得到概率迁移矩阵，然后通过概率迁移矩阵用已知标签的样本点来确定未知标签样本点的类别。相比较于标签传播算法来说，标签扩散算法的改进点表现在两个方面：①使用了标准化的拉普拉斯矩阵（Laplace Matrix ）来作为概率迁移矩阵，其目的是能够使得在迭代过程中标签的传播更加平滑；②加入了类似于正则化策略的惩罚参数来增加模型的泛化能力。由于标签扩散算法在思想上与标签传播算法并没有什么本质区别，下面首先直接来看标签扩散算法的示例用法。
+13.3.2 Label Spreading 示例代码# 在sklearn中，可以从sklearn.semi_supervised中来导入标签传播算法LabelSpreading模块。接下来，需要构造半监督学习所需要使用到的训练集，即将部分样本的标签置为-1，示例代码如下：
+1 def load_data(): 2 x, y = load_iris(return_X_y=True) 3 x_train, x_test, y_train, y_test = \ 4 train_test_split(x, y, test_size=0.3, random_state=2022) 5 rng = np.random.RandomState(20) 6 random_unlabeled_points = rng.rand(y_train.shape[0]) &lt; 0.8 7 y_mixed = deepcopy(y_train) 8 y_mixed[random_unlabeled_points] = -1 9 return x_train, x_test, y_train, y_test, y_mixed在上述代码中，第2~4行是导入原始并进行训练集和测试集的划分。第5~8行则是将训练集中$80\%$样本的标签重置为-1，同时也保留了原始重置之前的标签便于后续在训练集上测试模型的效果。第9行是返回最后各个部分的结果。
+进一步，便可以导入LabelSpreading进行模型训练和测试，示例代码如下：
+1 def test_label_spreding(): 2 x_train, x_test, y_train, y_test, y_mixed = load_data() 3 ls = LabelSpreading(alpha=0.2) 4 ls.fit(x_train, y_mixed) 5 print(&#34;Label Spreading&#34;) 6 print(f&#34;训练集上的准确率为：{ls.score(x_train, y_train)}&#34;) 7 print(f&#34;测试集上的准确率为：{ls.score(x_test, y_test)}&#34;)上述代码运行结束后便会得到类似如下所示的结果：">
+	<meta itemprop="wordCount" content="411">
+
+<title>13.3 Label Spreading 算法 • 《从零学AI指南手册》</title>
+<link rel="icon" href="/favicon.png" >
+<link rel="manifest" href="/manifest.json">
+<link rel="canonical" href="https://mlwithme.github.io/ml/chapter13/7fc8b0fc47d2427c/">
+<link rel="stylesheet" href="/book.min.6097ccf1d338ddfaa037d2f96478059a71fa573d0f917d128bab595efea338ca.css" integrity="sha256-YJfM8dM43fqgN9L5ZHgFmnH6Vz0PkX0Si6tZXv6jOMo=" crossorigin="anonymous">
+
+
+  <script defer type="module" src="/en.search.min.ffaad769e546b38d39820301bb9e5c193822f7bf0f46a855602e4e14707802e0.js" integrity="sha256-/6rXaeVGs405ggMBu55cGTgi978PRqhVYC5OFHB4AuA=" crossorigin="anonymous"></script>
+
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-23SZ6E8VY7"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-23SZ6E8VY7');
+</script>
+<script async src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
+
+</head>
+<body dir="ltr" class="book-kind-page book-type-ml">
+  <input type="checkbox" class="hidden toggle" id="menu-control" />
+  <input type="checkbox" class="hidden toggle" id="toc-control" />
+  <main class="container flex">
+    
+<aside class="book-menu">
+  <div class="book-menu-content">
+    
+  <nav>
+<h2 class="book-brand">
+  <a class="flex align-center" href="/"><span>《从零学AI指南手册》</span>
+  </a>
+</h2>
+
+
+<div class="book-search hidden">
+  <input id="book-search-input" type="text" 
+    placeholder="Search"
+    aria-label="Search"
+    maxlength="64" />
+  <div class="book-search-spinner hidden"></div>
+  <ul id="book-search-results"></ul>
+</div>
+<script>document.querySelector(".book-search").classList.remove("hidden")</script>
+
+
+
+
+
+
+
+
+
+
+  
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a>
+      大模型Agent开发</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-253e26e732e57a78f635dcf47df3d0a3" class="toggle"  />
+    <label for="section-253e26e732e57a78f635dcf47df3d0a3" class="flex">
+      <a role="button" class="">
+        第 1 章 RAG 基础概念</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/454f0942222e471e/" class="">
+      1.1 RAG 提出背景</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/d7623d619f884b25/" class="">
+      1.2 RAG 流程概览</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-810ee5a2a3a24c9b7c25ab5324ae7db7" class="toggle"  />
+    <label for="section-810ee5a2a3a24c9b7c25ab5324ae7db7" class="flex">
+      <a role="button" class="">
+        第 2 章 大模型接入与使用</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/d43adfc00df54515/" class="">
+      2.1 SDK 介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/8b9059fde1d644a4/" class="">
+      2.2 现代大模型中的 SDK</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/95d3214ab80b4769/" class="">
+      2.3 DashScope 接口体系</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/b9843c089d654494/" class="">
+      2.4 千问大模型接入与使用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ed1727f01d0e40dc9b7961b72e42160e" class="toggle"  />
+    <label for="section-ed1727f01d0e40dc9b7961b72e42160e" class="flex">
+      <a role="button" class="">
+        第 3 章 文档标准化与语义检索</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/7f4af6d48c5b425c/" class="">
+      3.1 文档加载与标准化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/572ba4c9cb114677/" class="">
+      3.2 常见文本切分策略</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/06e588cd33fa4454/" class="">
+      3.3 向量数据库选择</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/ff27306c0d7b4387/" class="">
+      3.4 Qwen3 Embedding 模型介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/303035851c5e42f2/" class="">
+      3.5 语义搜索引擎构建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/e1328cb23e8c412b/" class="">
+      3.6  Milvus 模块解析</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-caaf9d8eb5e5559f7ca8bb11c41da71a" class="toggle"  />
+    <label for="section-caaf9d8eb5e5559f7ca8bb11c41da71a" class="flex">
+      <a role="button" class="">
+        第 4 章 RAG 与 Agent</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/4c646aa07f3b4b74/" class="">
+      4.1 两步式 RAG 搭建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/5c35e934bab24ac3/" class="">
+      4.2 Function Calling 概念介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/88ff352fc22e4cd6/" class="">
+      4.3 LangChain 中的 Tool 修饰器</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/83fe26536a5d4b6e/" class="">
+      4.4 RAG Agent 原理与搭建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/b7e49268357a4bca/" class="">
+      4.5 复杂问题拆解与ReAct框架</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/469b5963f2ca4799/" class="">
+      4.6 RAG 中的两阶段索引</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/10fb92a6c5484039/" class="">
+      4.7 Qwen3 Reranking 原理与使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/45d286aec1bc4d66/" class="">
+      4.8 基于两阶段索引的 RAG Agent 搭建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/43af483460574e48/" class="">
+      4.9 LangGraph 基本概念介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/0def4564f3aa455d/" class="">
+      4.10  基于 LangGraph 构建自定义 RAG Agent</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a>
+      深度学习</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/70e5f9cdbedc4b2c/" class="">
+      学习思维导图</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-a9b664bcf9e1dab8add449268565f466" class="toggle"  />
+    <label for="section-a9b664bcf9e1dab8add449268565f466" class="flex">
+      <a role="button" class="">
+        第 1 章 深度学习简介</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/647eb9c607874e3a/" class="">
+      1.1 深度学习的发展阶段</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/f31da36a6f444afe/" class="">
+      1.2 深度学习中的关键人物</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/da9fa13021e64f3c/" class="">
+      1.3 深度学习框架介绍</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-e6e0db5d4bc28bd97dfe8d5210249e63" class="toggle"  />
+    <label for="section-e6e0db5d4bc28bd97dfe8d5210249e63" class="flex">
+      <a role="button" class="">
+        第 2 章 环境配置</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/a0c5d1e0de0140cb/" class="">
+      2.1 体系结构介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/04f07b9246984577/" class="">
+      2.2 深度学习环境安装</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/5bf6454673194c67/" class="">
+      2.3 开发环境安装配置</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-0a2ca47f15332c8b06ae83247328edb4" class="toggle"  />
+    <label for="section-0a2ca47f15332c8b06ae83247328edb4" class="flex">
+      <a role="button" class="">
+        第 3 章 深度学习基础</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/75c5fa7839174c16/" class="">
+      3.1 线性回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/ca16f8cb6df444a6/" class="">
+      3.2 线性回归简洁实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/97e1da1143cd4554/" class="">
+      3.3 梯度下降与反向传播</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/7b865de988ea422c/" class="">
+      3.4 从零实现回归模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/18fdd1deff424a16/" class="">
+      3.5 从逻辑回归到Softmax回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/55967b0f642b4509/" class="">
+      3.6 Softmax回归简洁实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/381bbd56509e4a6f/" class="">
+      3.7 从零实现分类模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/2c061df4435d4928/" class="">
+      3.8 回归模型评估指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/e3442eff254e473c/" class="">
+      3.9 分类模型评估指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/307f927c8a1245c5/" class="">
+      3.10 过拟合与正则化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/bcb64de5aa404f18/" class="">
+      3.11 超参数与交叉验证</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/66dd7425cdd04565/" class="">
+      3.12 激活函数</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/0d3dacfff4c04794/" class="">
+      3.13 多标签分类</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-95b7e7417bf2b821a1b760975d3acc22" class="toggle"  />
+    <label for="section-95b7e7417bf2b821a1b760975d3acc22" class="flex">
+      <a role="button" class="">
+        第 4 章 卷积神经网络</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/102e183e8be94f46/" class="">
+      4.1 卷积的概念</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/5b3e3152e9e54f4f/" class="">
+      4.2 卷积的计算过程</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/762f60de801a4ccd/" class="">
+      4.3 填充和池化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/c8af5d84174b4420/" class="">
+      4.4 LeNet5网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/de007462967e4701/" class="">
+      4.5 AlexNet网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/f084f181c3554082/" class="">
+      4.6 VGG网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/911b961cc5d949b6/" class="">
+      4.7 NIN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/47da186baf3e4a0b/" class="">
+      4.8 GoogLeNet网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/da16c61397454b2c/" class="">
+      4.9 ResNet网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/1c24468824274650/" class="">
+      4.10 DenseNet网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-17076fe90a2d84e207bbd0c829983325" class="toggle"  />
+    <label for="section-17076fe90a2d84e207bbd0c829983325" class="flex">
+      <a role="button" class="">
+        第 5 章 模型训练与复用</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/4557a6f03dec4475/" class="">
+      5.1 参数及日志管理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/e7c4c6da085148d0/" class="">
+      5.2 Tensorboard可视化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/27387966672c45ed/" class="">
+      5.3 模型的保存与复用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/211b26bdd8f248ac/" class="">
+      5.4 模型的迁移学习</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/345c1b72253043cb/" class="">
+      5.5 开源模型复用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/c912dda030c946d9/" class="">
+      5.6 多GPU训练</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/f065af80f3844b0b/" class="">
+      5.7 数据预处理与缓存</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-2d091d454d5c3f03f5e0a202c37cc226" class="toggle"  />
+    <label for="section-2d091d454d5c3f03f5e0a202c37cc226" class="flex">
+      <a role="button" class="">
+        第 6 章 模型优化方法</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/cc35bb112783410e/" class="">
+      6.1 学习率调度器</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/fc024c283f164849/" class="">
+      6.2 梯度裁剪</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/27ed3ed136e24092/" class="">
+      6.3 批归一化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/fdd5ba4b41f74a0e/" class="">
+      6.4 层归一化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/9246afed14eb436c/" class="">
+      6.5 组归一化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/fcbc66ad051a4336/" class="">
+      6.6 动量法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/8b83d654898c40a2/" class="">
+      6.7 AdaGrad算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/078f2394980d41d2/" class="">
+      6.8 AdaDelta算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/28ad7fb39987447e/" class="">
+      6.9 Adam算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/4b81b8d39721434d/" class="">
+      6.10 初始化方法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f2f78ba4851131558fc284d927542d28" class="toggle"  />
+    <label for="section-f2f78ba4851131558fc284d927542d28" class="flex">
+      <a role="button" class="">
+        第 7 章 循环神经网络</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/88ba4e03337b4233/" class="">
+      7.1 RNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/ec8ff069aadc49b9/" class="">
+      7.2 时序数据</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/b4c5ddcc9e904238/" class="">
+      7.3 LSTM网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/4112672112224dc1/" class="">
+      7.4 GRU网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/b6e5ccb6cd064f74/" class="">
+      7.5 BiRNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/4bf3ecf7b21e45fb/" class="">
+      7.6 CharRNN网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-49992cff6143e64ae5d7f2209dcfb054" class="toggle"  />
+    <label for="section-49992cff6143e64ae5d7f2209dcfb054" class="flex">
+      <a role="button" class="">
+        第 8 章 时序与模型融合</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/2be88fbc08a5418f/" class="">
+      8.1 TextCNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/9023d1f822a54226/" class="">
+      8.2 TextRNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/9edd7db2d439402f/" class="">
+      8.3 CNN-RNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/19c2b86e85f2461e/" class="">
+      8.4 ConvLSTM网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/1e6da79bf7b44c20/" class="">
+      8.5 3DCNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/5f426a9190e7454b/" class="">
+      8.6 STResNet网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ca07c572acb4d7fd40854f5b367c247b" class="toggle"  />
+    <label for="section-ca07c572acb4d7fd40854f5b367c247b" class="flex">
+      <a role="button" class="">
+        第 9 章 自然语言处理</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/e0cb9a7aae814045/" class="">
+      9.1 自然语言处理介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/d4703d990f8d4fed/" class="">
+      9.2 Word2Vec词向量</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/1bb6351b01a2479b/" class="">
+      9.3 Word2Vec训练与使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/40a8a1146d934c55/" class="">
+      9.4 GloVe词向量</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/c6aa1405b8cf46d8/" class="">
+      9.5 词向量的微调使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/48c26d04b342452d/" class="">
+      9.6 fastText网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/03a0166e195f443f/" class="">
+      9.7 Seq2Seq网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/271bda16904544af/" class="">
+      9.8 序列模型评价指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/fefa60e0bc854a17/" class="">
+      9.9 NMT网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/5bcd8b0920414f34/" class="">
+      9.10 注意力机制</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/8a78e8213ee04aac/" class="">
+      9.11 含注意力的NMT网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/474ac7a1867d4b5e/" class="">
+      9.12 含注意力的RNN网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-8cdec04c2fd8683c5c7373c78d943528" class="toggle"  />
+    <label for="section-8cdec04c2fd8683c5c7373c78d943528" class="flex">
+      <a role="button" class="">
+        第10章 现代神经网络</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/7523731afc0241c0/" class="">
+      10.1 ELMo网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/4987d1044939480d/" class="">
+      10.2 Transformer网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/a469ed1a25e1498f/" class="">
+      10.3 Transformer结构</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/d50c490eef3b4565/" class="">
+      10.4 Transformer实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/f6c507b3d2d74f03/" class="">
+      10.5 Transformer对联模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/3aedea1d3f3e48dd/" class="">
+      10.6 BERT网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/82a1cd0def084620/" class="">
+      10.7 从零实现BERT</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/e736d3974ed0484c/" class="">
+      10.8 BERT文本分类模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/f5076cbadda84d4e/" class="">
+      10.9 BERT问题选择模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/25d9ef3d9b34472a/" class="">
+      10.10 BERT问题回答模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/64d3ec5593ec4b94/" class="">
+      10.11 BERT命名体识别模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/90ea8d3e090d48b4/" class="">
+      10.12 BERT从零训练</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/e36878dad7a647d8/" class="">
+      10.13 GPT-1模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/94dda9bbbc994913/" class="">
+      10.14 GPT-2与GPT-3模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/4af57a29308840de/" class="">
+      10.15 基于GPT-2的中文预训练模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/9f5c00cadde14d31/" class="">
+      10.16 InstructGPT与ChatGPT</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/050b54fd34ca480a/" class="">
+      10.17 ChatGPT与提示词工程</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/a90b0d71389b4d69/" class="">
+      10.18 百川大模型使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/40c1c9ade70c4ce7/" class="">
+      10.19 百川大模型实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/ea1b4cf8b40c4b05/" class="">
+      10.20 GPT-4与GPTs使用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a>
+      机器学习</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/43fc00b3809d4be6/" class="">
+      学习思维导图</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-0a3254d1ca9963fd6975aa5bc0b3edcc" class="toggle"  />
+    <label for="section-0a3254d1ca9963fd6975aa5bc0b3edcc" class="flex">
+      <a role="button" class="">
+        第 1 章 环境配置</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/baafb91f0af14a84/" class="">
+      1.1 安装使用Conda</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/7a01c403acd6488a/" class="">
+      1.2 开发环境安装配置</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-4569258198323c16bc8a634ea44fd5db" class="toggle"  />
+    <label for="section-4569258198323c16bc8a634ea44fd5db" class="flex">
+      <a role="button" class="">
+        第 2 章 线性回归</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/2414d4b6648d405a/" class="">
+      2.1 模型的建立与求解</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/3e9ba14da71f4fd3/" class="">
+      2.2 多变量线性回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/4a16c0dc82a84e78/" class="">
+      2.3 多项式回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/f8dea699983c48c6/" class="">
+      2.4 回归模型评估</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/df41c2e97f554e68/" class="">
+      2.5 梯度下降</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/71ef816e0005492d/" class="">
+      2.6 正态分布</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/803bee4f70be4dca/" class="">
+      2.7 目标函数推导</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-a6ca5e2f846ebd900d1a868e6718dc82" class="toggle"  />
+    <label for="section-a6ca5e2f846ebd900d1a868e6718dc82" class="flex">
+      <a role="button" class="">
+        第 3 章 逻辑回归</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/96d46b53aee14c3b/" class="">
+      3.1 模型的建立与求解</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/fac70083dd764141/" class="">
+      3.2 多分类任务</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/6d7cfd79ef304cbd/" class="">
+      3.3 常见的分类评估指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/2fdc655d00c74548/" class="">
+      3.4 目标函数推导</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/a4b61c5bbadd43a6/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-9f462f716bd0e46ef79984b356eeb5a2" class="toggle"  />
+    <label for="section-9f462f716bd0e46ef79984b356eeb5a2" class="flex">
+      <a role="button" class="">
+        第 4 章 模型的改善与泛化</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/2089400b28f54dd9/" class="">
+      4.1 基本概念</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/56b788b624cd4971/" class="">
+      4.2 特征标准化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/ca091dc393a84518/" class="">
+      4.3过拟合</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/5097d3b8c1144427/" class="">
+      4.4 正则化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/3c7eee1621d4480b/" class="">
+      4.5 偏差、方差与交叉验证</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/c5957e0753d04746/" class="">
+      4.6 实例分析手写体识别</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/a915e49586eb4426/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-327db48e4f4df6236855078634147679" class="toggle"  />
+    <label for="section-327db48e4f4df6236855078634147679" class="flex">
+      <a role="button" class="">
+        第 5 章 K近邻</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/7c610e923e754259/" class="">
+      5.1 K近邻思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/1a97571e0a6447ef/" class="">
+      5.2 K近邻原理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/d245bda107034e65/" class="">
+      5.3 sklearn接口与示例代码</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/24378571ce404d9c/" class="">
+      5.4 kd树构建与搜索</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/40f253b916f24038/" class="">
+      5.5 从零实现K近邻</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/76818d9e48944f8c/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-94d0a5f5555d92c51e0903b148e34993" class="toggle"  />
+    <label for="section-94d0a5f5555d92c51e0903b148e34993" class="flex">
+      <a role="button" class="">
+        第 6 章 文本特征与模型复用</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/e05b5928c41d4841/" class="">
+      6.1 词袋模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/de59bf74d753457e/" class="">
+      6 .2 基于K近邻算法的垃圾邮件分类</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/c6fdc78b49d44453/" class="">
+      6.3 考虑权重的词袋模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/825fde8589654b16/" class="">
+      6.4 词云图</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/8451cffe49f5477c/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-544be5d1e48c4fd8b33ba2f91964c6dd" class="toggle"  />
+    <label for="section-544be5d1e48c4fd8b33ba2f91964c6dd" class="flex">
+      <a role="button" class="">
+        第 7 章 朴素贝叶斯</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/faf303eb93a241d1/" class="">
+      7.1 朴素贝叶斯算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/842c7b8684c747d2/" class="">
+      7.2 贝叶斯估计</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/724bf42b09bb440e/" class="">
+      7.3 朴素贝叶斯实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/1a9deee1d5f042b5/" class="">
+      7.4 多项式朴素贝叶斯原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/5c27cdd8b3264f50/" class="">
+      7.5 高斯朴素贝叶斯原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/715b8eaf245f45f1/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-d1884c6b3e8f1260019220c57d615371" class="toggle"  />
+    <label for="section-d1884c6b3e8f1260019220c57d615371" class="flex">
+      <a role="button" class="">
+        第 8 章 决策树</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/690fe2be21834c2a/" class="">
+      8.1 决策树的基本思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/ee9ada9729124049/" class="">
+      8.2 决策树建模与可视化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/5887cf1408dd4c7f/" class="">
+      8.3 决策树生成之ID3与C4.5</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/87ba589d6c17434d/" class="">
+      8.4 决策树剪枝过程</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/34bc962c974646f4/" class="">
+      8.5 从零实现ID3与C4.5算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/c44682dbb3364be4/" class="">
+      8.6 连续型特征变量下决策树实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/4eead717a84a4dbf/" class="">
+      8.7 CART生成与剪枝算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/1c72d67dffc64dc9/" class="">
+      8.8 从零实现CART算法及剪枝示例</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/ae452792b2604e84/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-1f0a2178f0a580ba251c7da2649aa52f" class="toggle"  />
+    <label for="section-1f0a2178f0a580ba251c7da2649aa52f" class="flex">
+      <a role="button" class="">
+        第 9 章 集成学习与提升算法</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/9eff4004fd6c437d/" class="">
+      9.1 集成学习算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/18980c9f757e42c8/" class="">
+      9.2 随机森林</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/8a91b358b2f74d56/" class="">
+      9.3 泰坦尼克号生还预测</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/73f6914844f549f1/" class="">
+      9.4 AdaBoost原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/71fd0e44294e4abb/" class="">
+      9.5 MultiAdaBoost原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/f3c2341ce7d64f70/" class="">
+      9.6 Gradient Boost 原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/4f9b26d5b65541f5/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f63defd924ef7373144c8643a39fd7b2" class="toggle"  />
+    <label for="section-f63defd924ef7373144c8643a39fd7b2" class="flex">
+      <a role="button" class="">
+        第 10 章 支持向量机</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/dce7180d4eb047d7/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/515b54e2307a4c8a/" class="">
+      10.1 SVM思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/9c3862bc843c4179/" class="">
+      10.2 SVM线性不可分</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/fbdb6f8adace457d/" class="">
+      10.3 SVM原理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/1a3ffa363b1d4f83/" class="">
+      10.4 SVM中的软间隔</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/8b7a06412a9f4267/" class="">
+      10.5 拉格朗日乘数法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/40e977f0a2f84ac0/" class="">
+      10.6 对偶性与KKT条件</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/b18d45a772574ddb/" class="">
+      10.7 SVM优化问题</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/c53ed12f7bc04405/" class="">
+      10.8 SVM核函数原理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/26d9b2b328a849c2/" class="">
+      10.9 SMO算法求解SVM</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/215a1e15c0f2470d/" class="">
+      10.10 从零实现SVM分类算法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bdcc54d1c295c5cc69c9c851c02886ea" class="toggle"  />
+    <label for="section-bdcc54d1c295c5cc69c9c851c02886ea" class="flex">
+      <a role="button" class="">
+        第 11 章 聚类分析</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/f9d9305a55a548a1/" class="">
+      11.1 聚类算法的思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/e635df24de32487a/" class="">
+      11.2 Kmeans聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/e75b8efa232249ab/" class="">
+      11.3 Kmeans算法求解</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/60e49a33d1aa4f50/" class="">
+      11.4 从零实现Kmeans聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/c8b45d8a3d8c4cf4/" class="">
+      11.5 Kmeans&#43;&#43;聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/1ede2f3557d0438f/" class="">
+      11.6 聚类外部评价指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/e6a75df19f85498c/" class="">
+      11.7 加权Kmeans聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/c52cf7920f1d4636/" class="">
+      11.8 聚类内部评价指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/f95259c359b146ba/" class="">
+      11.9 聚类K值选取与分析</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/b85c1a858f7c4686/" class="">
+      11.10 基于密度的聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/2f01ba751d914336/" class="">
+      11.11 基于层次的聚类算法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bafa8c48214ccf62d333a6d0457c5f72" class="toggle"  />
+    <label for="section-bafa8c48214ccf62d333a6d0457c5f72" class="flex">
+      <a role="button" class="">
+        第 12 章 降维算法</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/9478de824edd44c6/" class="">
+      12.1 主成分分析</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/909356aa90fe456a/" class="">
+      12.2 基于核函数的主成分分析</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-d5f143889a719ce66d602e75b72bffb9" class="toggle" checked />
+    <label for="section-d5f143889a719ce66d602e75b72bffb9" class="flex">
+      <a role="button" class="">
+        第 13 章 自训练与标签传播</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/8d71301c2e414efe/" class="">
+      13.1 Self-Training 自训练算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/87fdcf0be1c34644/" class="">
+      13.2 Label Propagation算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/7fc8b0fc47d2427c/" class="active">
+      13.3 Label Spreading 算法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+
+
+
+
+
+
+
+
+
+
+
+
+</nav>
+
+
+
+
+  <script>(function(){var e=document.querySelector("aside .book-menu-content");addEventListener("beforeunload",function(){localStorage.setItem("menu.scrollTop",e.scrollTop)}),e.scrollTop=localStorage.getItem("menu.scrollTop")})()</script>
+
+
+
+  </div>
+</aside>
+ 
+
+    <div class="book-page">
+      <header class="book-header hidden">
+        
+  <div class="flex align-center justify-between">
+  <label for="menu-control">
+    <img src="/icons/menu.svg" class="book-icon" alt="Menu" />
+  </label>
+
+  <h3>13.3 Label Spreading 算法</h3>
+
+  <label for="toc-control">
+    
+    <img src="/icons/toc.svg" class="book-icon" alt="Table of Contents" />
+    
+  </label>
+</div>
+
+
+  
+  <aside class="hidden">
+    
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#1331-label-spreading算法思想">13.3.1 Label Spreading算法思想</a></li>
+    <li><a href="#1332-label-spreading-示例代码">13.3.2 Label Spreading 示例代码</a></li>
+    <li><a href="#1333-label-spreading算法原理">13.3.3 Label Spreading算法原理</a></li>
+    <li><a href="#1334-label-spreading-收敛性证明">13.3.4 Label Spreading 收敛性证明</a></li>
+    <li><a href="#1335-从零实现label-spreading算法迭代法">13.3.5 从零实现Label Spreading算法迭代法</a></li>
+    <li><a href="#1336-从零实现label-spreading算法非迭代法">13.3.6 从零实现Label Spreading算法非迭代法</a></li>
+    <li><a href="#1337-小结">13.3.7 小结</a></li>
+  </ul>
+</nav>
+
+
+
+  </aside>
+  
+ 
+      </header>
+
+      
+      
+  <article class="markdown book-article"><h1 id="133-label-spreading-算法">13.3 Label Spreading 算法<a class="anchor" href="#133-label-spreading-%e7%ae%97%e6%b3%95">#</a></h1>
+<p>在上一节内容中，我们介绍了一种基于图结构的标签传播算法。标签传播算法的核心思想认为，在样本空间中距离越相近的样本点越有可能具有相同的标签。因此，对于样本空间中的所有样本点，可以通过构建一个有向完全图来表示样本点之间的位置关系，并以此为基础构建一个概率迁移矩阵来确定未知标签的所属类别。在本节内容中，我们将继续学习另外一种同样也是基于图结构的标签扩散算法（Label Spreading）[1]。</p>
+<p>如图13-10所示便是标签扩散算法的学习路线图，我们将先介绍其对应的思想以及sklearn的建模过程，然后再来介绍其背后的原理、计算示例和收敛性证明等过程，最后再一步步来从零实现整个算法。</p>
+<div align=center><img width="500" src="/images/ml/240427164441.jpg"/> </div><center>图 13-10 标签扩散算法学习路线图</center>
+<h2 id="1331-label-spreading算法思想">13.3.1 Label Spreading算法思想<a class="anchor" href="#1331-label-spreading%e7%ae%97%e6%b3%95%e6%80%9d%e6%83%b3">#</a></h2>
+<p>从本质上来讲，标签传播和标签扩散这两种算法在思想上并没有太大的差别，都是基于样本点的空间位置来构造得到概率迁移矩阵，然后通过概率迁移矩阵用已知标签的样本点来确定未知标签样本点的类别。相比较于标签传播算法来说，标签扩散算法的改进点表现在两个方面：①使用了标准化的拉普拉斯矩阵（Laplace Matrix ）来作为概率迁移矩阵，其目的是能够使得在迭代过程中标签的传播更加平滑；②加入了类似于正则化策略的惩罚参数来增加模型的泛化能力。由于标签扩散算法在思想上与标签传播算法并没有什么本质区别，下面首先直接来看标签扩散算法的示例用法。</p>
+<h2 id="1332-label-spreading-示例代码">13.3.2 Label Spreading 示例代码<a class="anchor" href="#1332-label-spreading-%e7%a4%ba%e4%be%8b%e4%bb%a3%e7%a0%81">#</a></h2>
+<p>在sklearn中，可以从<code>sklearn.semi_supervised</code>中来导入标签传播算法<code>LabelSpreading</code>模块。接下来，需要构造半监督学习所需要使用到的训练集，即将部分样本的标签置为-1，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#ae81ff">1</span> <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">load_data</span>():
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">2</span>     x, y <span style="color:#f92672">=</span> load_iris(return_X_y<span style="color:#f92672">=</span><span style="color:#66d9ef">True</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">3</span>     x_train, x_test, y_train, y_test <span style="color:#f92672">=</span> \
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">4</span>         train_test_split(x, y, test_size<span style="color:#f92672">=</span><span style="color:#ae81ff">0.3</span>, random_state<span style="color:#f92672">=</span><span style="color:#ae81ff">2022</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">5</span>     rng <span style="color:#f92672">=</span> np<span style="color:#f92672">.</span>random<span style="color:#f92672">.</span>RandomState(<span style="color:#ae81ff">20</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">6</span>     random_unlabeled_points <span style="color:#f92672">=</span> rng<span style="color:#f92672">.</span>rand(y_train<span style="color:#f92672">.</span>shape[<span style="color:#ae81ff">0</span>]) <span style="color:#f92672">&lt;</span> <span style="color:#ae81ff">0.8</span>
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">7</span>     y_mixed <span style="color:#f92672">=</span> deepcopy(y_train)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">8</span>     y_mixed[random_unlabeled_points] <span style="color:#f92672">=</span> <span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">9</span>     <span style="color:#66d9ef">return</span> x_train, x_test, y_train, y_test, y_mixed</span></span></code></pre></div><p>在上述代码中，第2~4行是导入原始并进行训练集和测试集的划分。第5~8行则是将训练集中$80\%$样本的标签重置为-1，同时也保留了原始重置之前的标签便于后续在训练集上测试模型的效果。第9行是返回最后各个部分的结果。</p>
+<p>进一步，便可以导入<code>LabelSpreading</code>进行模型训练和测试，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#ae81ff">1</span> <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">test_label_spreding</span>():
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">2</span>     x_train, x_test, y_train, y_test, y_mixed <span style="color:#f92672">=</span> load_data()
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">3</span>     ls <span style="color:#f92672">=</span> LabelSpreading(alpha<span style="color:#f92672">=</span><span style="color:#ae81ff">0.2</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">4</span>     ls<span style="color:#f92672">.</span>fit(x_train, y_mixed)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">5</span>     print(<span style="color:#e6db74">&#34;Label Spreading&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">6</span>     print(<span style="color:#e6db74">f</span><span style="color:#e6db74">&#34;训练集上的准确率为：</span><span style="color:#e6db74">{</span>ls<span style="color:#f92672">.</span>score(x_train, y_train)<span style="color:#e6db74">}</span><span style="color:#e6db74">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">7</span>     print(<span style="color:#e6db74">f</span><span style="color:#e6db74">&#34;测试集上的准确率为：</span><span style="color:#e6db74">{</span>ls<span style="color:#f92672">.</span>score(x_test, y_test)<span style="color:#e6db74">}</span><span style="color:#e6db74">&#34;</span>)</span></span></code></pre></div><p>上述代码运行结束后便会得到类似如下所示的结果：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#ae81ff">1</span> 训练集上的准确率为<span style="color:#960050;background-color:#1e0010">：</span><span style="color:#ae81ff">0.9714</span>
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">2</span> 测试集上的准确率为<span style="color:#960050;background-color:#1e0010">：</span><span style="color:#ae81ff">1.0</span></span></span></code></pre></div><p>上述完整示例代码可参见 <code>AllBooKCode/Chapter13/C06_label_spreading.py</code> 文件。</p>
+<p>在学会<code>LabelSpreading</code>模块的使用后，再来对比一下标签扩散和标签传播算法各自在包含噪音数据上的表现。下面以sklearn中的手写体数据集为例来构造相应的训练和测试样本，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#ae81ff">1</span> <span style="color:#f92672">from</span> sklearn.datasets <span style="color:#f92672">import</span> load_digits
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">2</span> <span style="color:#f92672">from</span> sklearn.preprocessing <span style="color:#f92672">import</span> StandardScaler
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">3</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">4</span> <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">load_data</span>(noise_rate<span style="color:#f92672">=</span><span style="color:#ae81ff">0.1</span>):
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">5</span>     n_class <span style="color:#f92672">=</span> <span style="color:#ae81ff">10</span>
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">6</span>     x, y <span style="color:#f92672">=</span> load_digits(n_class<span style="color:#f92672">=</span>n_class, return_X_y<span style="color:#f92672">=</span><span style="color:#66d9ef">True</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">7</span>     x_train, x_test, y_train, y_test <span style="color:#f92672">=</span> \
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">8</span>         train_test_split(x, y, test_size<span style="color:#f92672">=</span><span style="color:#ae81ff">0.3</span>, random_state<span style="color:#f92672">=</span><span style="color:#ae81ff">2022</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">9</span>     rng <span style="color:#f92672">=</span> np<span style="color:#f92672">.</span>random<span style="color:#f92672">.</span>RandomState(<span style="color:#ae81ff">20</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">10</span>     random_unlabeled_points <span style="color:#f92672">=</span> rng<span style="color:#f92672">.</span>rand(y_train<span style="color:#f92672">.</span>shape[<span style="color:#ae81ff">0</span>]) <span style="color:#f92672">&lt;</span> <span style="color:#ae81ff">0.8</span>
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">11</span>     y_mixed <span style="color:#f92672">=</span> deepcopy(y_train)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">12</span>     y_mixed[random_unlabeled_points] <span style="color:#f92672">=</span> <span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">13</span>     <span style="color:#66d9ef">for</span> i <span style="color:#f92672">in</span> range(len(y_mixed)):
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">14</span>         <span style="color:#66d9ef">if</span> y_mixed[i] <span style="color:#f92672">==</span> <span style="color:#f92672">-</span><span style="color:#ae81ff">1</span>:
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">15</span>             <span style="color:#66d9ef">continue</span>
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">16</span>         <span style="color:#66d9ef">if</span> rng<span style="color:#f92672">.</span>random() <span style="color:#f92672">&lt;</span> noise_rate:  <span style="color:#75715e"># 在训练集中，将有标签的样本中的noise_rate替换为随机标签</span>
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">17</span>             candidate_ids <span style="color:#f92672">=</span> np<span style="color:#f92672">.</span>random<span style="color:#f92672">.</span>permutation(n_class)<span style="color:#f92672">.</span>tolist()
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">18</span>             candidate_ids<span style="color:#f92672">.</span>remove(y_mixed[i])
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">19</span>             y_mixed[i] <span style="color:#f92672">=</span> candidate_ids[<span style="color:#ae81ff">0</span>]
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">20</span>     ss <span style="color:#f92672">=</span> StandardScaler()
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">21</span>     x_train <span style="color:#f92672">=</span> ss<span style="color:#f92672">.</span>fit_transform(x_train)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">22</span>     x_test <span style="color:#f92672">=</span> ss<span style="color:#f92672">.</span>transform(x_test)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">23</span>     <span style="color:#66d9ef">return</span> x_train, x_test, y_train, y_test, y_mixed</span></span></code></pre></div><p>在上述代码中，第1~2行是导入手写体数据集和特征标准化模块。第5~8行是导入10个类别的数据集，并将其中$70\%$用作训练集。第9~12行是将训练集中$80\%$的样本重置为无标签样本。第13~19行则是将训练样本中，有真实标签样本中的<code>noise_rate</code>替换为随机标签（即制造噪音样本）。第20~22行是对训练集和测试集进行标准化处理；第23行是返回最后处理完成的结果。</p>
+<p>进一步，可以定义一个函数来对两个模型的结果进行对比，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#ae81ff">1</span> <span style="color:#66d9ef">def</span> <span style="color:#a6e22e">comp</span>(p<span style="color:#f92672">=</span><span style="color:#ae81ff">0.1</span>):
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">2</span>     x_train, x_test, y_train, y_test, y_mixed <span style="color:#f92672">=</span> load_data(noise_rate<span style="color:#f92672">=</span>p)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">3</span>     lp <span style="color:#f92672">=</span> LabelPropagation(max_iter<span style="color:#f92672">=</span><span style="color:#ae81ff">200</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">4</span>     lp<span style="color:#f92672">.</span>fit(x_train, y_mixed)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">5</span>     print(<span style="color:#e6db74">&#34;LabelPropagation&#34;</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">6</span>     print(<span style="color:#e6db74">f</span><span style="color:#e6db74">&#34;训练集上的准确率为：</span><span style="color:#e6db74">{</span>lp<span style="color:#f92672">.</span>score(x_train, y_train)<span style="color:#e6db74">}</span><span style="color:#e6db74">&#34;</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">7</span>     print(<span style="color:#e6db74">f</span><span style="color:#e6db74">&#34;测试集上的准确率为：</span><span style="color:#e6db74">{</span>lp<span style="color:#f92672">.</span>score(x_test, y_test)<span style="color:#e6db74">}</span><span style="color:#e6db74">&#34;</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">8</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#ae81ff">9</span>     ls <span style="color:#f92672">=</span> LabelSpreading(max_iter<span style="color:#f92672">=</span><span style="color:#ae81ff">200</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">10</span>     paras <span style="color:#f92672">=</span> {<span style="color:#e6db74">&#39;alpha&#39;</span>: np<span style="color:#f92672">.</span>arange(<span style="color:#ae81ff">0.01</span>, <span style="color:#ae81ff">1</span>, <span style="color:#ae81ff">0.02</span>)}
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">11</span>     gs <span style="color:#f92672">=</span> GridSearchCV(ls, paras, verbose<span style="color:#f92672">=</span><span style="color:#ae81ff">1</span>, cv<span style="color:#f92672">=</span><span style="color:#ae81ff">3</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">12</span>     gs<span style="color:#f92672">.</span>fit(x_train, y_mixed)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">13</span>     print(<span style="color:#e6db74">&#34;LabelSpreading&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">14</span>     print(<span style="color:#e6db74">&#39;最佳模型:&#39;</span>, gs<span style="color:#f92672">.</span>best_params_ )
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">15</span>     print(<span style="color:#e6db74">f</span><span style="color:#e6db74">&#34;训练集上的准确率为：</span><span style="color:#e6db74">{</span>gs<span style="color:#f92672">.</span>score(x_train, y_train)<span style="color:#e6db74">}</span><span style="color:#e6db74">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">16</span>     print(<span style="color:#e6db74">f</span><span style="color:#e6db74">&#34;测试集上的准确率为：</span><span style="color:#e6db74">{</span>gs<span style="color:#f92672">.</span>score(x_test, y_test)<span style="color:#e6db74">}</span><span style="color:#e6db74">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">17</span> 
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">18</span> <span style="color:#66d9ef">if</span> __name__ <span style="color:#f92672">==</span> <span style="color:#e6db74">&#39;__main__&#39;</span>:
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">19</span>     comp()</span></span></code></pre></div><p>在上述代码中，第2行是载入手写体数据集，并将训练集中有标签样本的$10\%$设定为随机标签。第3~7行是标签传播算法分别在训练集和测试集上的表现结果。第9~16行分别是标签扩散算法在训练集和测试集上的结果，同时这里使用了网格搜索与交叉验证来寻找超参数$\alpha$，这部分内容可以参考5.3.2节内容。</p>
+<p>在上述代码中运行结束后便会得到类似如下结果：</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#ae81ff">1</span> LabelPropagation
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">2</span> 训练集上的准确率为<span style="color:#960050;background-color:#1e0010">：</span><span style="color:#ae81ff">0.8409</span>
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">3</span> 测试集上的准确率为<span style="color:#960050;background-color:#1e0010">：</span><span style="color:#ae81ff">0.8241</span>
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">4</span> Fitting <span style="color:#ae81ff">3</span> folds <span style="color:#66d9ef">for</span> each of <span style="color:#ae81ff">50</span> candidates, totalling <span style="color:#ae81ff">150</span> fits
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">5</span> LabelSpreading
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">6</span> 最佳模型: {<span style="color:#e6db74">&#39;alpha&#39;</span>: <span style="color:#ae81ff">0.9899</span>}
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">7</span> 训练集上的准确率为<span style="color:#960050;background-color:#1e0010">：</span><span style="color:#ae81ff">0.85759</span>
+</span></span><span style="display:flex;"><span><span style="color:#ae81ff">8</span> 测试集上的准确率为<span style="color:#960050;background-color:#1e0010">：</span><span style="color:#ae81ff">0.8444</span></span></span></code></pre></div><p>从上述结果可以看出，无论是在训练集上还是测试集上标签扩散算法的表现结果都要明显好于标签传播算法。同时，经过网格搜索后可知，当$\alpha\approx0.99$时模型的效果最优。上述代码可参见 <code>AllBooKCode/Chapter13/C07_label_spreading_comp.py</code> 文件。</p>
+<h2 id="1333-label-spreading算法原理">13.3.3 Label Spreading算法原理<a class="anchor" href="#1333-label-spreading%e7%ae%97%e6%b3%95%e5%8e%9f%e7%90%86">#</a></h2>
+<p>在介绍完标签扩散算法的使用示例及与标签传播算法的对比以后，再来详细介绍其背后的数学原理。设$(x_1,y_1),(x_2,y_2),...,(x_l,y_l)$为已知标签的数据样本，其中$Y_L=\{y_1,y_2,...,y_l\}$是样本点对应的标签；同时样本的类别数为$C$，并且假定所有的类别均出现在$Y_L$中。继续，设$(x_{l+1},y_{l+1}),(x_{l+2},y_{l+2}),...,(x_{l+u},y_{l+u})$为不含标签的样本点，其中$Y_U=\{y_{l+1},y_{l+2},...,y_{l+u}\}$未知，且通常情况下$l\ll u$。此时有$X=\{x_1,...,x_{l+u}\}$，且$x_i\in R^D$。</p>
+<p>首先，我们同样需要先计算任意两个样本点之间的权重距离，如式(13-20)所示</p>
+$$
+W_{ij}=
+\begin{cases}
+\exp\frac{-\|x_i-x_j\|^2}{2\sigma^2},  & \text{if } i \neq j  \\[2ex]
+0, & \text{if } i=j \\
+\end{cases}\tag{13-20}
+$$<p>从式(13-20)中可以看出，当 $i=j$ 时，即同一个样本点之间的权重距离为0，这样处理是为了避免样本点自身权重过大的问题。同时可以知道，$W$是一个形状为$(l+u,l+u)$的对称矩阵。</p>
+<p>进一步，根据式(13-21)来构造样本点之间概率迁移矩阵
+</p>
+$$
+S=D^{-\frac{1}{2}}WD^{-\frac{1}{2}}\tag{13-21}
+$$<p>
+其中 $D$ 为一个对角矩阵，对角线上每个值为权重 $W$ 中对应行所有所有元素的和，即$D_{ii}=\sum_{j=1}W_{ij}$。同时，$S$ 是标准化后的拉普拉斯矩阵，形状与权重矩阵$W$相同。</p>
+<p>接着，再定义一个形状为$(l+u,C)$的标签矩阵$Y$，其每一行用于表示每个样本属于各个类别的概率分布。</p>
+<p>最后，只需要迭代式(13-22)便可以求解得到未知标签样本的预测结果：
+</p>
+$$
+F(t+1)=\alpha SF(t)+(1-\alpha)Y\tag{13-22}
+$$<p>
+其中$F(0)=Y$，$\alpha\in(0,1)$ 用来平衡模型在迭代过程中对于初始标签矩阵的依赖程度，$\alpha$​ 越大则表示模型更加依赖于样本的分布情况，即式(13-22) 中等式右边的第一项，这样可以一定程度上增强模型的泛化能力。</p>
+<h2 id="1334-label-spreading-收敛性证明">13.3.4 Label Spreading 收敛性证明<a class="anchor" href="#1334-label-spreading-%e6%94%b6%e6%95%9b%e6%80%a7%e8%af%81%e6%98%8e">#</a></h2>
+<p>在介绍完标签扩散算法的原理后，再来简单看一下为什么算法多次迭代后便会收敛结论。根据式(13-22)可知，此时有
+</p>
+$$
+\begin{aligned}
+F(1)&=\alpha SF(0)+(1-\alpha)Y\\[1ex]
+F(2)&=\alpha SF(1)+(1-\alpha)Y\\[1ex]
+\vdots\\[1ex] 
+F(t)&=\alpha SF(t-1)+(1-\alpha)Y\\[1ex]
+\end{aligned}\tag{13-23}
+$$<p>
+进一步可得
+</p>
+$$
+\begin{aligned}
+F(t)=(\alpha S)^tY+(1-\alpha)\sum_{i=0}^{t-1}(\alpha S)^iY
+\end{aligned}\tag{13-24}
+$$<p>
+又因为$0<\alpha < 1$所以有
+</p>
+$$
+\lim_{t \to \infty}(\alpha S)^t=0;\;\;\lim_{t \to \infty}\sum_{i=0}^{t-1}(\alpha S)^i=(I-\alpha S)^{-1}\tag{13-25}
+$$<p>
+因此
+</p>
+$$
+F^{\ast}=\lim_{t \to \infty}F(t)=(1-\alpha)(I-\alpha S)^{-1}Y\tag{13-26}
+$$<p>
+由于对于分类任务来说，$F$表示样本所属类别的概率分布，所以式(13-26)还可以等价写为
+</p>
+$$
+F^{\ast}=(I-\alpha S)^{-1}Y\tag{13-27}
+$$<p>
+也就是说，式(13-22)的整个迭代过程将会等价地收敛于式(13-27)中的结果，因此在实现标签扩散算法时还可以通过式(13-27)来直接计算得到标签概率矩阵。</p>
+<p>接着再来看式(13-25)中极限结果的证明，此时有</p>
+<h2 id="1335-从零实现label-spreading算法迭代法">13.3.5 从零实现Label Spreading算法迭代法<a class="anchor" href="#1335-%e4%bb%8e%e9%9b%b6%e5%ae%9e%e7%8e%b0label-spreading%e7%ae%97%e6%b3%95%e8%bf%ad%e4%bb%a3%e6%b3%95">#</a></h2>
+<h2 id="1336-从零实现label-spreading算法非迭代法">13.3.6 从零实现Label Spreading算法非迭代法<a class="anchor" href="#1336-%e4%bb%8e%e9%9b%b6%e5%ae%9e%e7%8e%b0label-spreading%e7%ae%97%e6%b3%95%e9%9d%9e%e8%bf%ad%e4%bb%a3%e6%b3%95">#</a></h2>
+<h2 id="1337-小结">13.3.7 小结<a class="anchor" href="#1337-%e5%b0%8f%e7%bb%93">#</a></h2>
+<p><subscribe>38</subscribe></p>
+<br>
+<br>
+<br></article>
+ 
+      
+
+      <footer class="book-footer">
+        
+  <div class="flex flex-wrap justify-between">
+
+<div>
+
+</div>
+
+<div>
+
+</div>
+
+</div>
+
+<div class="flex flex-wrap justify-between">
+    <span>
+    
+      <a href="/ml/chapter13/87fdcf0be1c34644/" class="flex align-center">
+        <img src="/icons/backward.svg" class="book-icon" alt="Backward" />
+        <span>13.2 Label Propagation算法</span>
+      </a>
+    
+    </span>
+    <span>
+    
+    </span>
+  </div>
+
+ 
+        
+  
+  <div class="book-comments">
+
+</div>
+  
+ 
+        
+  <link rel="stylesheet" href="/katex/katex.min.css" />
+  <script defer src="/katex/katex.min.js"></script>
+  <script defer src="/katex/auto-render.min.js"></script>
+  
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        if (window.renderMathInElement) {
+          renderMathInElement(
+            document.querySelector(".book-page"),
+            Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
+          );
+        }
+      });
+    </script>
+  
+
+
+        
+  
+ 
+        
+  
+    <script>(function(){document.querySelectorAll("pre:has(code)").forEach(e=>{e.addEventListener("click",e.focus),e.addEventListener("copy",function(t){if(t.preventDefault(),navigator.clipboard){const t=window.getSelection().toString()||e.textContent;navigator.clipboard.writeText(t)}})})})()</script>
+  
+
+      </footer>
+
+      <label for="menu-control" class="hidden book-menu-overlay"></label>
+    </div>
+
+    
+  
+  <aside class="book-toc">
+    <div class="book-toc-content">
+      
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#1331-label-spreading算法思想">13.3.1 Label Spreading算法思想</a></li>
+    <li><a href="#1332-label-spreading-示例代码">13.3.2 Label Spreading 示例代码</a></li>
+    <li><a href="#1333-label-spreading算法原理">13.3.3 Label Spreading算法原理</a></li>
+    <li><a href="#1334-label-spreading-收敛性证明">13.3.4 Label Spreading 收敛性证明</a></li>
+    <li><a href="#1335-从零实现label-spreading算法迭代法">13.3.5 从零实现Label Spreading算法迭代法</a></li>
+    <li><a href="#1336-从零实现label-spreading算法非迭代法">13.3.6 从零实现Label Spreading算法非迭代法</a></li>
+    <li><a href="#1337-小结">13.3.7 小结</a></li>
+  </ul>
+</nav>
+
+
+
+    </div>
+  </aside>
+  
+ 
+  </main>
+
+  
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

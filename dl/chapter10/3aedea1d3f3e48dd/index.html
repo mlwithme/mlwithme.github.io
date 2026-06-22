@@ -1,0 +1,3747 @@
+<!DOCTYPE html>
+<html lang="zh_CN" dir="ltr">
+<head>
+  <!--
+Made with Book Theme
+https://github.com/alex-shpak/hugo-book
+-->
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="10.6 BERT网络# 经过前面几节内容的介绍，我们对Transformer模型已经有了清晰地认识。不过说起Transformer模型在它发表之初并没有引起太大的反响，直到它的后继者BERT[1]模型的出现才使得大家再次回过头来仔细研究Transformer模型。在接下来的几节内容中，我们将主要从BERT模型的基本原理、模型实现、预训练模型在下游任务中的运用以及掩码任务和下句预测任务这几个方面来详细介绍BERT模型。
+10.6.1 BERT动机# 虽然预训练语言模型对于很多下游处理任务的性能都有着显著的提升，但现有预训练模型的网络结构却限制了模型自身的表达能力，其中最主要的一点就是模型的单向编码。例如在传统的RNN或者是GPT[2]中，模型在建模时使用的均是从左到右（Left-to-Right）或者从右到左（Right-to-Left）的建模方式，这就使得模型在编码过程中只能够看到当前时刻之前的信息，而不能够同时捕捉到当前时刻之后的信息。
+图10-25 编码方向图 如图10-25所示，对于这句样本来说无论模型采用的是从左到右还是从右到左的编码方，模型在对词“it”进行编码时都不能有效地捕捉到其具体所指代的信息。这就类似于我们人在阅读这句话时一样，在没有看到“tired”这个词之前我们同样也无法判断“it”具体所指代的事物。例如如果我们把“tired”这个词换成“wide”，则“it”指代的就变成了“street”。所以，如果模型采用的是双向编码的方式，那么从理论上来看就能够很好的避免这个问题。
+基于这样的动机，德夫林（Devlin）等人[1]于2018年10月提出了一种采用双向表示的编码器（Bidirectional Encoder Representations from Transformers, BERT）来实现模型的双向编码学习能力。整体来看BERT模型的整体结构并不复杂，它本质上就等同于Transformer中的编码器，只是模型在预训练的过程中使用了掩码语言模型（Mask Language Model, MLM）和下句预测（Next Sentence Prediction, NSP）这两项任务。下面我们首先开始介绍BERT模型的基本原理。
+10.6.2 BERT结构# BERT网络结构整体上是由多层的Transformer编码器所构建，如图10-26所示便是一个详细的BERT模型网络结构图。从图10-26可以发现其上半部分的结构与10.3节内容中介绍的Transformer编码器类似，只不过在输入层部分新加入了句子编码（Segment Embedding）。
+图10-26 BERT网络结构图 如图10-26所示，其上半部分便是BERT编码器，其整体由多个BERT编码层（即原文中指代的 Transformer Blocks）所构成。具体地，在论文中作者分别用 $L$来表示编码层的格式，即BERT编码器是由$L$ 个编码层所构成；用$H$来表示模型的维度；用$A$来表示多头注意力中多头的个数。同时，作者分别就$\text{BERT}_{\text{BASE}} (L=12,H =768,A=12)$和$\text{BERT}_{\text{BASE}} (L=24,H =1024,A=16)$这两种尺寸的BERT模型进行了实验对比。由于这部分类似的内容在10.3节内容中已经进行了详细介绍，所以这里就不再 赘述，细节之处见10.7节代码实现。
+10.6.3 BERT输入层# 如图10-27所示，在BERT中输入层模块中一共包含3个部分：字符嵌入（Token Embedding）、位置编码（Positional Embedding） 和句子编码（Segment Embedding）。虽然前面两部分在10.3节内容中已经介绍过了，但这里需要注意的是BERT中的位置编码并不是采用公式计算得到，而是类似 普通的嵌入层一样为每一个位置初始化了一个向量然后随着网络一起训练得到。
+图10-27 输入层结构图 同时，最值得注意的一点是BERT开源的预训练模型最大只支持 512个字符的长度，这是因为模型在训练过程中位置编码的词表的最大长度只有512。
+除此之外，第三部分则是BERT模型中所引入的句子编码。由于BERT模型的主要目的是构建一个通用的预训练模型，因此难免需要兼顾到各种NLP 任务场景下的输入。因此句子编码的作用便是用来区分输入序列中的不同部分，其本质是通过一个普通的嵌入层来区分每一个序列所处的位置。例如在下句预测任务中，对于任意一个输入样本来说均由两个句子构成，而句子编码的作用就是对每个字符进行位置标识，以此来区分哪些字符属于第1个句子哪些字符属于第2个句子，因此也可以看出同一个句子中的编码是一样的。最后，再将这三部分的结果相加并标准化便得到了BERT模型的输入。
+图10-28 输入层细节图 如图10-28所示，最上面的Input表示原始的输入序列，其中第1个字符[CLS]是一个特殊的分类标志，如果下游任务是做文本分类的话，那么在 BERT 的输出结果中可以只取[CLS]对应的向量进行分类（不过实验表明，取所有位置向量的均值往往有着更好的效果）；而其中的[SEP]字符则是用来作为将两句话分开的标志。句子编码则同样是用来区分两句话所在的不同位置，对于每句话来说其内部各自的位置向量都是一样的，当然如果原始输入只有一句话，那么句子编码层中对应的每个字符的位置向量均相同。最后，位置编码则是用来标识句子中每个字符各自所在的位置，使得模型能够捕捉到文本“有序”这一特性，具体细节之处可见10.7节代码实现。
+10.6.4 预训练任务# 为了能够更好训练BERT模型，论文引入了MLM和NSP这两个预训练任务来训练网络。对于MLM任务来说，它的做法是随机掩盖掉输入序列中$15\%$​的字符，即用[MASK]替换掉原有的字符，然后在BERT的输出结果中取对应掩盖位置上的向量进行真实值预测。不过由于模型在后续的微调（Fine-tuning)过程中输入序列并不存在 [MASK]这样的字符，因此这将导致模型的预训练和微调之间存在不匹配的问题。为了解决这一问题，可以将原始MLM做相应调整，即先选定15%的字符，然后将其中的80%替换为[MASK]符号、10%随机替换为其它符号、剩下的10%保持不变。最后取这15% 的字符对应的输出来做分类来预测其真实值。
+对于NSP任务来说，它的做法是在每个有AB两个句子构造的样本中，其中50%的情况下B确实为A上下文的下一句话，此时标签为IsNext；另外50%的情况下B为语料中其它的随机句子， 此时标签为NotNext然；最后模型取[CLS]位置上对应的向量来预测B是否为A的下一句话。这样做的目的便是因为在很多下游任务需要依赖于分析两句话之间的关系来进行建模，例如文本蕴含、问题选择等任务场景。
+图10-29 NSP和MLM任务网络结构 如图10-29所示便是MLM和NSP这两个预训练任务在BERT预训练时的输入输出示意图。在图10-29中，最上层输出的C在训练时用于NSP的分类任务，其它位置上的$T_i$和$T^{\prime}_j$等则用于预测被掩盖掉的字符。
+">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
+<meta name="color-scheme" content="light dark"><meta property="og:url" content="https://mlwithme.github.io/dl/chapter10/3aedea1d3f3e48dd/">
+	<meta property="og:site_name" content="《从零学AI指南手册》">
+	<meta property="og:title" content="10.6 BERT网络">
+	<meta property="og:description" content="10.6 BERT网络# 经过前面几节内容的介绍，我们对Transformer模型已经有了清晰地认识。不过说起Transformer模型在它发表之初并没有引起太大的反响，直到它的后继者BERT[1]模型的出现才使得大家再次回过头来仔细研究Transformer模型。在接下来的几节内容中，我们将主要从BERT模型的基本原理、模型实现、预训练模型在下游任务中的运用以及掩码任务和下句预测任务这几个方面来详细介绍BERT模型。
+10.6.1 BERT动机# 虽然预训练语言模型对于很多下游处理任务的性能都有着显著的提升，但现有预训练模型的网络结构却限制了模型自身的表达能力，其中最主要的一点就是模型的单向编码。例如在传统的RNN或者是GPT[2]中，模型在建模时使用的均是从左到右（Left-to-Right）或者从右到左（Right-to-Left）的建模方式，这就使得模型在编码过程中只能够看到当前时刻之前的信息，而不能够同时捕捉到当前时刻之后的信息。
+图10-25 编码方向图 如图10-25所示，对于这句样本来说无论模型采用的是从左到右还是从右到左的编码方，模型在对词“it”进行编码时都不能有效地捕捉到其具体所指代的信息。这就类似于我们人在阅读这句话时一样，在没有看到“tired”这个词之前我们同样也无法判断“it”具体所指代的事物。例如如果我们把“tired”这个词换成“wide”，则“it”指代的就变成了“street”。所以，如果模型采用的是双向编码的方式，那么从理论上来看就能够很好的避免这个问题。
+基于这样的动机，德夫林（Devlin）等人[1]于2018年10月提出了一种采用双向表示的编码器（Bidirectional Encoder Representations from Transformers, BERT）来实现模型的双向编码学习能力。整体来看BERT模型的整体结构并不复杂，它本质上就等同于Transformer中的编码器，只是模型在预训练的过程中使用了掩码语言模型（Mask Language Model, MLM）和下句预测（Next Sentence Prediction, NSP）这两项任务。下面我们首先开始介绍BERT模型的基本原理。
+10.6.2 BERT结构# BERT网络结构整体上是由多层的Transformer编码器所构建，如图10-26所示便是一个详细的BERT模型网络结构图。从图10-26可以发现其上半部分的结构与10.3节内容中介绍的Transformer编码器类似，只不过在输入层部分新加入了句子编码（Segment Embedding）。
+图10-26 BERT网络结构图 如图10-26所示，其上半部分便是BERT编码器，其整体由多个BERT编码层（即原文中指代的 Transformer Blocks）所构成。具体地，在论文中作者分别用 $L$来表示编码层的格式，即BERT编码器是由$L$ 个编码层所构成；用$H$来表示模型的维度；用$A$来表示多头注意力中多头的个数。同时，作者分别就$\text{BERT}_{\text{BASE}} (L=12,H =768,A=12)$和$\text{BERT}_{\text{BASE}} (L=24,H =1024,A=16)$这两种尺寸的BERT模型进行了实验对比。由于这部分类似的内容在10.3节内容中已经进行了详细介绍，所以这里就不再 赘述，细节之处见10.7节代码实现。
+10.6.3 BERT输入层# 如图10-27所示，在BERT中输入层模块中一共包含3个部分：字符嵌入（Token Embedding）、位置编码（Positional Embedding） 和句子编码（Segment Embedding）。虽然前面两部分在10.3节内容中已经介绍过了，但这里需要注意的是BERT中的位置编码并不是采用公式计算得到，而是类似 普通的嵌入层一样为每一个位置初始化了一个向量然后随着网络一起训练得到。
+图10-27 输入层结构图 同时，最值得注意的一点是BERT开源的预训练模型最大只支持 512个字符的长度，这是因为模型在训练过程中位置编码的词表的最大长度只有512。
+除此之外，第三部分则是BERT模型中所引入的句子编码。由于BERT模型的主要目的是构建一个通用的预训练模型，因此难免需要兼顾到各种NLP 任务场景下的输入。因此句子编码的作用便是用来区分输入序列中的不同部分，其本质是通过一个普通的嵌入层来区分每一个序列所处的位置。例如在下句预测任务中，对于任意一个输入样本来说均由两个句子构成，而句子编码的作用就是对每个字符进行位置标识，以此来区分哪些字符属于第1个句子哪些字符属于第2个句子，因此也可以看出同一个句子中的编码是一样的。最后，再将这三部分的结果相加并标准化便得到了BERT模型的输入。
+图10-28 输入层细节图 如图10-28所示，最上面的Input表示原始的输入序列，其中第1个字符[CLS]是一个特殊的分类标志，如果下游任务是做文本分类的话，那么在 BERT 的输出结果中可以只取[CLS]对应的向量进行分类（不过实验表明，取所有位置向量的均值往往有着更好的效果）；而其中的[SEP]字符则是用来作为将两句话分开的标志。句子编码则同样是用来区分两句话所在的不同位置，对于每句话来说其内部各自的位置向量都是一样的，当然如果原始输入只有一句话，那么句子编码层中对应的每个字符的位置向量均相同。最后，位置编码则是用来标识句子中每个字符各自所在的位置，使得模型能够捕捉到文本“有序”这一特性，具体细节之处可见10.7节代码实现。
+10.6.4 预训练任务# 为了能够更好训练BERT模型，论文引入了MLM和NSP这两个预训练任务来训练网络。对于MLM任务来说，它的做法是随机掩盖掉输入序列中$15\%$​的字符，即用[MASK]替换掉原有的字符，然后在BERT的输出结果中取对应掩盖位置上的向量进行真实值预测。不过由于模型在后续的微调（Fine-tuning)过程中输入序列并不存在 [MASK]这样的字符，因此这将导致模型的预训练和微调之间存在不匹配的问题。为了解决这一问题，可以将原始MLM做相应调整，即先选定15%的字符，然后将其中的80%替换为[MASK]符号、10%随机替换为其它符号、剩下的10%保持不变。最后取这15% 的字符对应的输出来做分类来预测其真实值。
+对于NSP任务来说，它的做法是在每个有AB两个句子构造的样本中，其中50%的情况下B确实为A上下文的下一句话，此时标签为IsNext；另外50%的情况下B为语料中其它的随机句子， 此时标签为NotNext然；最后模型取[CLS]位置上对应的向量来预测B是否为A的下一句话。这样做的目的便是因为在很多下游任务需要依赖于分析两句话之间的关系来进行建模，例如文本蕴含、问题选择等任务场景。
+图10-29 NSP和MLM任务网络结构 如图10-29所示便是MLM和NSP这两个预训练任务在BERT预训练时的输入输出示意图。在图10-29中，最上层输出的C在训练时用于NSP的分类任务，其它位置上的$T_i$和$T^{\prime}_j$等则用于预测被掩盖掉的字符。">
+	<meta property="og:locale" content="zh_CN">
+	<meta property="og:type" content="article">
+		<meta property="article:section" content="dl">
+
+
+	<meta itemprop="name" content="10.6 BERT网络">
+	<meta itemprop="description" content="10.6 BERT网络# 经过前面几节内容的介绍，我们对Transformer模型已经有了清晰地认识。不过说起Transformer模型在它发表之初并没有引起太大的反响，直到它的后继者BERT[1]模型的出现才使得大家再次回过头来仔细研究Transformer模型。在接下来的几节内容中，我们将主要从BERT模型的基本原理、模型实现、预训练模型在下游任务中的运用以及掩码任务和下句预测任务这几个方面来详细介绍BERT模型。
+10.6.1 BERT动机# 虽然预训练语言模型对于很多下游处理任务的性能都有着显著的提升，但现有预训练模型的网络结构却限制了模型自身的表达能力，其中最主要的一点就是模型的单向编码。例如在传统的RNN或者是GPT[2]中，模型在建模时使用的均是从左到右（Left-to-Right）或者从右到左（Right-to-Left）的建模方式，这就使得模型在编码过程中只能够看到当前时刻之前的信息，而不能够同时捕捉到当前时刻之后的信息。
+图10-25 编码方向图 如图10-25所示，对于这句样本来说无论模型采用的是从左到右还是从右到左的编码方，模型在对词“it”进行编码时都不能有效地捕捉到其具体所指代的信息。这就类似于我们人在阅读这句话时一样，在没有看到“tired”这个词之前我们同样也无法判断“it”具体所指代的事物。例如如果我们把“tired”这个词换成“wide”，则“it”指代的就变成了“street”。所以，如果模型采用的是双向编码的方式，那么从理论上来看就能够很好的避免这个问题。
+基于这样的动机，德夫林（Devlin）等人[1]于2018年10月提出了一种采用双向表示的编码器（Bidirectional Encoder Representations from Transformers, BERT）来实现模型的双向编码学习能力。整体来看BERT模型的整体结构并不复杂，它本质上就等同于Transformer中的编码器，只是模型在预训练的过程中使用了掩码语言模型（Mask Language Model, MLM）和下句预测（Next Sentence Prediction, NSP）这两项任务。下面我们首先开始介绍BERT模型的基本原理。
+10.6.2 BERT结构# BERT网络结构整体上是由多层的Transformer编码器所构建，如图10-26所示便是一个详细的BERT模型网络结构图。从图10-26可以发现其上半部分的结构与10.3节内容中介绍的Transformer编码器类似，只不过在输入层部分新加入了句子编码（Segment Embedding）。
+图10-26 BERT网络结构图 如图10-26所示，其上半部分便是BERT编码器，其整体由多个BERT编码层（即原文中指代的 Transformer Blocks）所构成。具体地，在论文中作者分别用 $L$来表示编码层的格式，即BERT编码器是由$L$ 个编码层所构成；用$H$来表示模型的维度；用$A$来表示多头注意力中多头的个数。同时，作者分别就$\text{BERT}_{\text{BASE}} (L=12,H =768,A=12)$和$\text{BERT}_{\text{BASE}} (L=24,H =1024,A=16)$这两种尺寸的BERT模型进行了实验对比。由于这部分类似的内容在10.3节内容中已经进行了详细介绍，所以这里就不再 赘述，细节之处见10.7节代码实现。
+10.6.3 BERT输入层# 如图10-27所示，在BERT中输入层模块中一共包含3个部分：字符嵌入（Token Embedding）、位置编码（Positional Embedding） 和句子编码（Segment Embedding）。虽然前面两部分在10.3节内容中已经介绍过了，但这里需要注意的是BERT中的位置编码并不是采用公式计算得到，而是类似 普通的嵌入层一样为每一个位置初始化了一个向量然后随着网络一起训练得到。
+图10-27 输入层结构图 同时，最值得注意的一点是BERT开源的预训练模型最大只支持 512个字符的长度，这是因为模型在训练过程中位置编码的词表的最大长度只有512。
+除此之外，第三部分则是BERT模型中所引入的句子编码。由于BERT模型的主要目的是构建一个通用的预训练模型，因此难免需要兼顾到各种NLP 任务场景下的输入。因此句子编码的作用便是用来区分输入序列中的不同部分，其本质是通过一个普通的嵌入层来区分每一个序列所处的位置。例如在下句预测任务中，对于任意一个输入样本来说均由两个句子构成，而句子编码的作用就是对每个字符进行位置标识，以此来区分哪些字符属于第1个句子哪些字符属于第2个句子，因此也可以看出同一个句子中的编码是一样的。最后，再将这三部分的结果相加并标准化便得到了BERT模型的输入。
+图10-28 输入层细节图 如图10-28所示，最上面的Input表示原始的输入序列，其中第1个字符[CLS]是一个特殊的分类标志，如果下游任务是做文本分类的话，那么在 BERT 的输出结果中可以只取[CLS]对应的向量进行分类（不过实验表明，取所有位置向量的均值往往有着更好的效果）；而其中的[SEP]字符则是用来作为将两句话分开的标志。句子编码则同样是用来区分两句话所在的不同位置，对于每句话来说其内部各自的位置向量都是一样的，当然如果原始输入只有一句话，那么句子编码层中对应的每个字符的位置向量均相同。最后，位置编码则是用来标识句子中每个字符各自所在的位置，使得模型能够捕捉到文本“有序”这一特性，具体细节之处可见10.7节代码实现。
+10.6.4 预训练任务# 为了能够更好训练BERT模型，论文引入了MLM和NSP这两个预训练任务来训练网络。对于MLM任务来说，它的做法是随机掩盖掉输入序列中$15\%$​的字符，即用[MASK]替换掉原有的字符，然后在BERT的输出结果中取对应掩盖位置上的向量进行真实值预测。不过由于模型在后续的微调（Fine-tuning)过程中输入序列并不存在 [MASK]这样的字符，因此这将导致模型的预训练和微调之间存在不匹配的问题。为了解决这一问题，可以将原始MLM做相应调整，即先选定15%的字符，然后将其中的80%替换为[MASK]符号、10%随机替换为其它符号、剩下的10%保持不变。最后取这15% 的字符对应的输出来做分类来预测其真实值。
+对于NSP任务来说，它的做法是在每个有AB两个句子构造的样本中，其中50%的情况下B确实为A上下文的下一句话，此时标签为IsNext；另外50%的情况下B为语料中其它的随机句子， 此时标签为NotNext然；最后模型取[CLS]位置上对应的向量来预测B是否为A的下一句话。这样做的目的便是因为在很多下游任务需要依赖于分析两句话之间的关系来进行建模，例如文本蕴含、问题选择等任务场景。
+图10-29 NSP和MLM任务网络结构 如图10-29所示便是MLM和NSP这两个预训练任务在BERT预训练时的输入输出示意图。在图10-29中，最上层输出的C在训练时用于NSP的分类任务，其它位置上的$T_i$和$T^{\prime}_j$等则用于预测被掩盖掉的字符。">
+	<meta itemprop="wordCount" content="111">
+
+<title>10.6 BERT网络 • 《从零学AI指南手册》</title>
+<link rel="icon" href="/favicon.png" >
+<link rel="manifest" href="/manifest.json">
+<link rel="canonical" href="https://mlwithme.github.io/dl/chapter10/3aedea1d3f3e48dd/">
+<link rel="stylesheet" href="/book.min.6097ccf1d338ddfaa037d2f96478059a71fa573d0f917d128bab595efea338ca.css" integrity="sha256-YJfM8dM43fqgN9L5ZHgFmnH6Vz0PkX0Si6tZXv6jOMo=" crossorigin="anonymous">
+
+
+  <script defer type="module" src="/en.search.min.ffaad769e546b38d39820301bb9e5c193822f7bf0f46a855602e4e14707802e0.js" integrity="sha256-/6rXaeVGs405ggMBu55cGTgi978PRqhVYC5OFHB4AuA=" crossorigin="anonymous"></script>
+
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-23SZ6E8VY7"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-23SZ6E8VY7');
+</script>
+<script async src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
+
+</head>
+<body dir="ltr" class="book-kind-page book-type-dl">
+  <input type="checkbox" class="hidden toggle" id="menu-control" />
+  <input type="checkbox" class="hidden toggle" id="toc-control" />
+  <main class="container flex">
+    
+<aside class="book-menu">
+  <div class="book-menu-content">
+    
+  <nav>
+<h2 class="book-brand">
+  <a class="flex align-center" href="/"><span>《从零学AI指南手册》</span>
+  </a>
+</h2>
+
+
+<div class="book-search hidden">
+  <input id="book-search-input" type="text" 
+    placeholder="Search"
+    aria-label="Search"
+    maxlength="64" />
+  <div class="book-search-spinner hidden"></div>
+  <ul id="book-search-results"></ul>
+</div>
+<script>document.querySelector(".book-search").classList.remove("hidden")</script>
+
+
+
+
+
+
+
+
+
+
+  
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a>
+      大模型Agent开发</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-253e26e732e57a78f635dcf47df3d0a3" class="toggle"  />
+    <label for="section-253e26e732e57a78f635dcf47df3d0a3" class="flex">
+      <a role="button" class="">
+        第 1 章 RAG 基础概念</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/454f0942222e471e/" class="">
+      1.1 RAG 提出背景</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/d7623d619f884b25/" class="">
+      1.2 RAG 流程概览</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-810ee5a2a3a24c9b7c25ab5324ae7db7" class="toggle"  />
+    <label for="section-810ee5a2a3a24c9b7c25ab5324ae7db7" class="flex">
+      <a role="button" class="">
+        第 2 章 大模型接入与使用</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/d43adfc00df54515/" class="">
+      2.1 SDK 介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/8b9059fde1d644a4/" class="">
+      2.2 现代大模型中的 SDK</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/95d3214ab80b4769/" class="">
+      2.3 DashScope 接口体系</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/b9843c089d654494/" class="">
+      2.4 千问大模型接入与使用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ed1727f01d0e40dc9b7961b72e42160e" class="toggle"  />
+    <label for="section-ed1727f01d0e40dc9b7961b72e42160e" class="flex">
+      <a role="button" class="">
+        第 3 章 文档标准化与语义检索</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/7f4af6d48c5b425c/" class="">
+      3.1 文档加载与标准化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/572ba4c9cb114677/" class="">
+      3.2 常见文本切分策略</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/06e588cd33fa4454/" class="">
+      3.3 向量数据库选择</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/ff27306c0d7b4387/" class="">
+      3.4 Qwen3 Embedding 模型介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/303035851c5e42f2/" class="">
+      3.5 语义搜索引擎构建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/e1328cb23e8c412b/" class="">
+      3.6  Milvus 模块解析</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-caaf9d8eb5e5559f7ca8bb11c41da71a" class="toggle"  />
+    <label for="section-caaf9d8eb5e5559f7ca8bb11c41da71a" class="flex">
+      <a role="button" class="">
+        第 4 章 RAG 与 Agent</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/4c646aa07f3b4b74/" class="">
+      4.1 两步式 RAG 搭建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/5c35e934bab24ac3/" class="">
+      4.2 Function Calling 概念介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/88ff352fc22e4cd6/" class="">
+      4.3 LangChain 中的 Tool 修饰器</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/83fe26536a5d4b6e/" class="">
+      4.4 RAG Agent 原理与搭建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/b7e49268357a4bca/" class="">
+      4.5 复杂问题拆解与ReAct框架</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/469b5963f2ca4799/" class="">
+      4.6 RAG 中的两阶段索引</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/10fb92a6c5484039/" class="">
+      4.7 Qwen3 Reranking 原理与使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/45d286aec1bc4d66/" class="">
+      4.8 基于两阶段索引的 RAG Agent 搭建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/43af483460574e48/" class="">
+      4.9 LangGraph 基本概念介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/0def4564f3aa455d/" class="">
+      4.10  基于 LangGraph 构建自定义 RAG Agent</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a>
+      深度学习</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/70e5f9cdbedc4b2c/" class="">
+      学习思维导图</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-a9b664bcf9e1dab8add449268565f466" class="toggle"  />
+    <label for="section-a9b664bcf9e1dab8add449268565f466" class="flex">
+      <a role="button" class="">
+        第 1 章 深度学习简介</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/647eb9c607874e3a/" class="">
+      1.1 深度学习的发展阶段</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/f31da36a6f444afe/" class="">
+      1.2 深度学习中的关键人物</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/da9fa13021e64f3c/" class="">
+      1.3 深度学习框架介绍</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-e6e0db5d4bc28bd97dfe8d5210249e63" class="toggle"  />
+    <label for="section-e6e0db5d4bc28bd97dfe8d5210249e63" class="flex">
+      <a role="button" class="">
+        第 2 章 环境配置</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/a0c5d1e0de0140cb/" class="">
+      2.1 体系结构介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/04f07b9246984577/" class="">
+      2.2 深度学习环境安装</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/5bf6454673194c67/" class="">
+      2.3 开发环境安装配置</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-0a2ca47f15332c8b06ae83247328edb4" class="toggle"  />
+    <label for="section-0a2ca47f15332c8b06ae83247328edb4" class="flex">
+      <a role="button" class="">
+        第 3 章 深度学习基础</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/75c5fa7839174c16/" class="">
+      3.1 线性回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/ca16f8cb6df444a6/" class="">
+      3.2 线性回归简洁实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/97e1da1143cd4554/" class="">
+      3.3 梯度下降与反向传播</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/7b865de988ea422c/" class="">
+      3.4 从零实现回归模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/18fdd1deff424a16/" class="">
+      3.5 从逻辑回归到Softmax回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/55967b0f642b4509/" class="">
+      3.6 Softmax回归简洁实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/381bbd56509e4a6f/" class="">
+      3.7 从零实现分类模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/2c061df4435d4928/" class="">
+      3.8 回归模型评估指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/e3442eff254e473c/" class="">
+      3.9 分类模型评估指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/307f927c8a1245c5/" class="">
+      3.10 过拟合与正则化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/bcb64de5aa404f18/" class="">
+      3.11 超参数与交叉验证</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/66dd7425cdd04565/" class="">
+      3.12 激活函数</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/0d3dacfff4c04794/" class="">
+      3.13 多标签分类</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-95b7e7417bf2b821a1b760975d3acc22" class="toggle"  />
+    <label for="section-95b7e7417bf2b821a1b760975d3acc22" class="flex">
+      <a role="button" class="">
+        第 4 章 卷积神经网络</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/102e183e8be94f46/" class="">
+      4.1 卷积的概念</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/5b3e3152e9e54f4f/" class="">
+      4.2 卷积的计算过程</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/762f60de801a4ccd/" class="">
+      4.3 填充和池化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/c8af5d84174b4420/" class="">
+      4.4 LeNet5网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/de007462967e4701/" class="">
+      4.5 AlexNet网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/f084f181c3554082/" class="">
+      4.6 VGG网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/911b961cc5d949b6/" class="">
+      4.7 NIN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/47da186baf3e4a0b/" class="">
+      4.8 GoogLeNet网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/da16c61397454b2c/" class="">
+      4.9 ResNet网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/1c24468824274650/" class="">
+      4.10 DenseNet网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-17076fe90a2d84e207bbd0c829983325" class="toggle"  />
+    <label for="section-17076fe90a2d84e207bbd0c829983325" class="flex">
+      <a role="button" class="">
+        第 5 章 模型训练与复用</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/4557a6f03dec4475/" class="">
+      5.1 参数及日志管理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/e7c4c6da085148d0/" class="">
+      5.2 Tensorboard可视化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/27387966672c45ed/" class="">
+      5.3 模型的保存与复用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/211b26bdd8f248ac/" class="">
+      5.4 模型的迁移学习</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/345c1b72253043cb/" class="">
+      5.5 开源模型复用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/c912dda030c946d9/" class="">
+      5.6 多GPU训练</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/f065af80f3844b0b/" class="">
+      5.7 数据预处理与缓存</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-2d091d454d5c3f03f5e0a202c37cc226" class="toggle"  />
+    <label for="section-2d091d454d5c3f03f5e0a202c37cc226" class="flex">
+      <a role="button" class="">
+        第 6 章 模型优化方法</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/cc35bb112783410e/" class="">
+      6.1 学习率调度器</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/fc024c283f164849/" class="">
+      6.2 梯度裁剪</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/27ed3ed136e24092/" class="">
+      6.3 批归一化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/fdd5ba4b41f74a0e/" class="">
+      6.4 层归一化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/9246afed14eb436c/" class="">
+      6.5 组归一化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/fcbc66ad051a4336/" class="">
+      6.6 动量法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/8b83d654898c40a2/" class="">
+      6.7 AdaGrad算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/078f2394980d41d2/" class="">
+      6.8 AdaDelta算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/28ad7fb39987447e/" class="">
+      6.9 Adam算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/4b81b8d39721434d/" class="">
+      6.10 初始化方法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f2f78ba4851131558fc284d927542d28" class="toggle"  />
+    <label for="section-f2f78ba4851131558fc284d927542d28" class="flex">
+      <a role="button" class="">
+        第 7 章 循环神经网络</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/88ba4e03337b4233/" class="">
+      7.1 RNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/ec8ff069aadc49b9/" class="">
+      7.2 时序数据</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/b4c5ddcc9e904238/" class="">
+      7.3 LSTM网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/4112672112224dc1/" class="">
+      7.4 GRU网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/b6e5ccb6cd064f74/" class="">
+      7.5 BiRNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/4bf3ecf7b21e45fb/" class="">
+      7.6 CharRNN网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-49992cff6143e64ae5d7f2209dcfb054" class="toggle"  />
+    <label for="section-49992cff6143e64ae5d7f2209dcfb054" class="flex">
+      <a role="button" class="">
+        第 8 章 时序与模型融合</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/2be88fbc08a5418f/" class="">
+      8.1 TextCNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/9023d1f822a54226/" class="">
+      8.2 TextRNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/9edd7db2d439402f/" class="">
+      8.3 CNN-RNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/19c2b86e85f2461e/" class="">
+      8.4 ConvLSTM网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/1e6da79bf7b44c20/" class="">
+      8.5 3DCNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/5f426a9190e7454b/" class="">
+      8.6 STResNet网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ca07c572acb4d7fd40854f5b367c247b" class="toggle"  />
+    <label for="section-ca07c572acb4d7fd40854f5b367c247b" class="flex">
+      <a role="button" class="">
+        第 9 章 自然语言处理</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/e0cb9a7aae814045/" class="">
+      9.1 自然语言处理介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/d4703d990f8d4fed/" class="">
+      9.2 Word2Vec词向量</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/1bb6351b01a2479b/" class="">
+      9.3 Word2Vec训练与使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/40a8a1146d934c55/" class="">
+      9.4 GloVe词向量</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/c6aa1405b8cf46d8/" class="">
+      9.5 词向量的微调使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/48c26d04b342452d/" class="">
+      9.6 fastText网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/03a0166e195f443f/" class="">
+      9.7 Seq2Seq网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/271bda16904544af/" class="">
+      9.8 序列模型评价指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/fefa60e0bc854a17/" class="">
+      9.9 NMT网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/5bcd8b0920414f34/" class="">
+      9.10 注意力机制</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/8a78e8213ee04aac/" class="">
+      9.11 含注意力的NMT网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/474ac7a1867d4b5e/" class="">
+      9.12 含注意力的RNN网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-8cdec04c2fd8683c5c7373c78d943528" class="toggle" checked />
+    <label for="section-8cdec04c2fd8683c5c7373c78d943528" class="flex">
+      <a role="button" class="">
+        第10章 现代神经网络</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/7523731afc0241c0/" class="">
+      10.1 ELMo网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/4987d1044939480d/" class="">
+      10.2 Transformer网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/a469ed1a25e1498f/" class="">
+      10.3 Transformer结构</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/d50c490eef3b4565/" class="">
+      10.4 Transformer实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/f6c507b3d2d74f03/" class="">
+      10.5 Transformer对联模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/3aedea1d3f3e48dd/" class="active">
+      10.6 BERT网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/82a1cd0def084620/" class="">
+      10.7 从零实现BERT</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/e736d3974ed0484c/" class="">
+      10.8 BERT文本分类模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/f5076cbadda84d4e/" class="">
+      10.9 BERT问题选择模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/25d9ef3d9b34472a/" class="">
+      10.10 BERT问题回答模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/64d3ec5593ec4b94/" class="">
+      10.11 BERT命名体识别模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/90ea8d3e090d48b4/" class="">
+      10.12 BERT从零训练</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/e36878dad7a647d8/" class="">
+      10.13 GPT-1模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/94dda9bbbc994913/" class="">
+      10.14 GPT-2与GPT-3模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/4af57a29308840de/" class="">
+      10.15 基于GPT-2的中文预训练模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/9f5c00cadde14d31/" class="">
+      10.16 InstructGPT与ChatGPT</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/050b54fd34ca480a/" class="">
+      10.17 ChatGPT与提示词工程</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/a90b0d71389b4d69/" class="">
+      10.18 百川大模型使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/40c1c9ade70c4ce7/" class="">
+      10.19 百川大模型实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/ea1b4cf8b40c4b05/" class="">
+      10.20 GPT-4与GPTs使用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a>
+      机器学习</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/43fc00b3809d4be6/" class="">
+      学习思维导图</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-0a3254d1ca9963fd6975aa5bc0b3edcc" class="toggle"  />
+    <label for="section-0a3254d1ca9963fd6975aa5bc0b3edcc" class="flex">
+      <a role="button" class="">
+        第 1 章 环境配置</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/baafb91f0af14a84/" class="">
+      1.1 安装使用Conda</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/7a01c403acd6488a/" class="">
+      1.2 开发环境安装配置</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-4569258198323c16bc8a634ea44fd5db" class="toggle"  />
+    <label for="section-4569258198323c16bc8a634ea44fd5db" class="flex">
+      <a role="button" class="">
+        第 2 章 线性回归</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/2414d4b6648d405a/" class="">
+      2.1 模型的建立与求解</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/3e9ba14da71f4fd3/" class="">
+      2.2 多变量线性回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/4a16c0dc82a84e78/" class="">
+      2.3 多项式回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/f8dea699983c48c6/" class="">
+      2.4 回归模型评估</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/df41c2e97f554e68/" class="">
+      2.5 梯度下降</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/71ef816e0005492d/" class="">
+      2.6 正态分布</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/803bee4f70be4dca/" class="">
+      2.7 目标函数推导</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-a6ca5e2f846ebd900d1a868e6718dc82" class="toggle"  />
+    <label for="section-a6ca5e2f846ebd900d1a868e6718dc82" class="flex">
+      <a role="button" class="">
+        第 3 章 逻辑回归</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/96d46b53aee14c3b/" class="">
+      3.1 模型的建立与求解</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/fac70083dd764141/" class="">
+      3.2 多分类任务</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/6d7cfd79ef304cbd/" class="">
+      3.3 常见的分类评估指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/2fdc655d00c74548/" class="">
+      3.4 目标函数推导</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/a4b61c5bbadd43a6/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-9f462f716bd0e46ef79984b356eeb5a2" class="toggle"  />
+    <label for="section-9f462f716bd0e46ef79984b356eeb5a2" class="flex">
+      <a role="button" class="">
+        第 4 章 模型的改善与泛化</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/2089400b28f54dd9/" class="">
+      4.1 基本概念</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/56b788b624cd4971/" class="">
+      4.2 特征标准化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/ca091dc393a84518/" class="">
+      4.3过拟合</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/5097d3b8c1144427/" class="">
+      4.4 正则化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/3c7eee1621d4480b/" class="">
+      4.5 偏差、方差与交叉验证</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/c5957e0753d04746/" class="">
+      4.6 实例分析手写体识别</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/a915e49586eb4426/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-327db48e4f4df6236855078634147679" class="toggle"  />
+    <label for="section-327db48e4f4df6236855078634147679" class="flex">
+      <a role="button" class="">
+        第 5 章 K近邻</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/7c610e923e754259/" class="">
+      5.1 K近邻思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/1a97571e0a6447ef/" class="">
+      5.2 K近邻原理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/d245bda107034e65/" class="">
+      5.3 sklearn接口与示例代码</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/24378571ce404d9c/" class="">
+      5.4 kd树构建与搜索</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/40f253b916f24038/" class="">
+      5.5 从零实现K近邻</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/76818d9e48944f8c/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-94d0a5f5555d92c51e0903b148e34993" class="toggle"  />
+    <label for="section-94d0a5f5555d92c51e0903b148e34993" class="flex">
+      <a role="button" class="">
+        第 6 章 文本特征与模型复用</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/e05b5928c41d4841/" class="">
+      6.1 词袋模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/de59bf74d753457e/" class="">
+      6 .2 基于K近邻算法的垃圾邮件分类</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/c6fdc78b49d44453/" class="">
+      6.3 考虑权重的词袋模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/825fde8589654b16/" class="">
+      6.4 词云图</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/8451cffe49f5477c/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-544be5d1e48c4fd8b33ba2f91964c6dd" class="toggle"  />
+    <label for="section-544be5d1e48c4fd8b33ba2f91964c6dd" class="flex">
+      <a role="button" class="">
+        第 7 章 朴素贝叶斯</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/faf303eb93a241d1/" class="">
+      7.1 朴素贝叶斯算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/842c7b8684c747d2/" class="">
+      7.2 贝叶斯估计</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/724bf42b09bb440e/" class="">
+      7.3 朴素贝叶斯实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/1a9deee1d5f042b5/" class="">
+      7.4 多项式朴素贝叶斯原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/5c27cdd8b3264f50/" class="">
+      7.5 高斯朴素贝叶斯原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/715b8eaf245f45f1/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-d1884c6b3e8f1260019220c57d615371" class="toggle"  />
+    <label for="section-d1884c6b3e8f1260019220c57d615371" class="flex">
+      <a role="button" class="">
+        第 8 章 决策树</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/690fe2be21834c2a/" class="">
+      8.1 决策树的基本思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/ee9ada9729124049/" class="">
+      8.2 决策树建模与可视化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/5887cf1408dd4c7f/" class="">
+      8.3 决策树生成之ID3与C4.5</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/87ba589d6c17434d/" class="">
+      8.4 决策树剪枝过程</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/34bc962c974646f4/" class="">
+      8.5 从零实现ID3与C4.5算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/c44682dbb3364be4/" class="">
+      8.6 连续型特征变量下决策树实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/4eead717a84a4dbf/" class="">
+      8.7 CART生成与剪枝算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/1c72d67dffc64dc9/" class="">
+      8.8 从零实现CART算法及剪枝示例</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/ae452792b2604e84/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-1f0a2178f0a580ba251c7da2649aa52f" class="toggle"  />
+    <label for="section-1f0a2178f0a580ba251c7da2649aa52f" class="flex">
+      <a role="button" class="">
+        第 9 章 集成学习与提升算法</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/9eff4004fd6c437d/" class="">
+      9.1 集成学习算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/18980c9f757e42c8/" class="">
+      9.2 随机森林</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/8a91b358b2f74d56/" class="">
+      9.3 泰坦尼克号生还预测</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/73f6914844f549f1/" class="">
+      9.4 AdaBoost原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/71fd0e44294e4abb/" class="">
+      9.5 MultiAdaBoost原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/f3c2341ce7d64f70/" class="">
+      9.6 Gradient Boost 原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/4f9b26d5b65541f5/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f63defd924ef7373144c8643a39fd7b2" class="toggle"  />
+    <label for="section-f63defd924ef7373144c8643a39fd7b2" class="flex">
+      <a role="button" class="">
+        第 10 章 支持向量机</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/dce7180d4eb047d7/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/515b54e2307a4c8a/" class="">
+      10.1 SVM思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/9c3862bc843c4179/" class="">
+      10.2 SVM线性不可分</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/fbdb6f8adace457d/" class="">
+      10.3 SVM原理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/1a3ffa363b1d4f83/" class="">
+      10.4 SVM中的软间隔</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/8b7a06412a9f4267/" class="">
+      10.5 拉格朗日乘数法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/40e977f0a2f84ac0/" class="">
+      10.6 对偶性与KKT条件</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/b18d45a772574ddb/" class="">
+      10.7 SVM优化问题</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/c53ed12f7bc04405/" class="">
+      10.8 SVM核函数原理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/26d9b2b328a849c2/" class="">
+      10.9 SMO算法求解SVM</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/215a1e15c0f2470d/" class="">
+      10.10 从零实现SVM分类算法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bdcc54d1c295c5cc69c9c851c02886ea" class="toggle"  />
+    <label for="section-bdcc54d1c295c5cc69c9c851c02886ea" class="flex">
+      <a role="button" class="">
+        第 11 章 聚类分析</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/f9d9305a55a548a1/" class="">
+      11.1 聚类算法的思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/e635df24de32487a/" class="">
+      11.2 Kmeans聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/e75b8efa232249ab/" class="">
+      11.3 Kmeans算法求解</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/60e49a33d1aa4f50/" class="">
+      11.4 从零实现Kmeans聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/c8b45d8a3d8c4cf4/" class="">
+      11.5 Kmeans&#43;&#43;聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/1ede2f3557d0438f/" class="">
+      11.6 聚类外部评价指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/e6a75df19f85498c/" class="">
+      11.7 加权Kmeans聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/c52cf7920f1d4636/" class="">
+      11.8 聚类内部评价指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/f95259c359b146ba/" class="">
+      11.9 聚类K值选取与分析</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/b85c1a858f7c4686/" class="">
+      11.10 基于密度的聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/2f01ba751d914336/" class="">
+      11.11 基于层次的聚类算法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bafa8c48214ccf62d333a6d0457c5f72" class="toggle"  />
+    <label for="section-bafa8c48214ccf62d333a6d0457c5f72" class="flex">
+      <a role="button" class="">
+        第 12 章 降维算法</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/9478de824edd44c6/" class="">
+      12.1 主成分分析</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/909356aa90fe456a/" class="">
+      12.2 基于核函数的主成分分析</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-d5f143889a719ce66d602e75b72bffb9" class="toggle"  />
+    <label for="section-d5f143889a719ce66d602e75b72bffb9" class="flex">
+      <a role="button" class="">
+        第 13 章 自训练与标签传播</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/8d71301c2e414efe/" class="">
+      13.1 Self-Training 自训练算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/87fdcf0be1c34644/" class="">
+      13.2 Label Propagation算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/7fc8b0fc47d2427c/" class="">
+      13.3 Label Spreading 算法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+
+
+
+
+
+
+
+
+
+
+
+
+</nav>
+
+
+
+
+  <script>(function(){var e=document.querySelector("aside .book-menu-content");addEventListener("beforeunload",function(){localStorage.setItem("menu.scrollTop",e.scrollTop)}),e.scrollTop=localStorage.getItem("menu.scrollTop")})()</script>
+
+
+
+  </div>
+</aside>
+ 
+
+    <div class="book-page">
+      <header class="book-header hidden">
+        
+  <div class="flex align-center justify-between">
+  <label for="menu-control">
+    <img src="/icons/menu.svg" class="book-icon" alt="Menu" />
+  </label>
+
+  <h3>10.6 BERT网络</h3>
+
+  <label for="toc-control">
+    
+    <img src="/icons/toc.svg" class="book-icon" alt="Table of Contents" />
+    
+  </label>
+</div>
+
+
+  
+  <aside class="hidden">
+    
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#1061-bert动机">10.6.1 BERT动机</a></li>
+    <li><a href="#1062-bert结构">10.6.2 BERT结构</a></li>
+    <li><a href="#1063-bert输入层">10.6.3 BERT输入层</a></li>
+    <li><a href="#1064-预训练任务">10.6.4 预训练任务</a></li>
+    <li><a href="#1065-小结">10.6.5 小结</a></li>
+  </ul>
+</nav>
+
+
+
+  </aside>
+  
+ 
+      </header>
+
+      
+      
+  <article class="markdown book-article"><h1 id="106-bert网络">10.6 BERT网络<a class="anchor" href="#106-bert%e7%bd%91%e7%bb%9c">#</a></h1>
+<p>经过前面几节内容的介绍，我们对Transformer模型已经有了清晰地认识。不过说起Transformer模型在它发表之初并没有引起太大的反响，直到它的后继者BERT[1]模型的出现才使得大家再次回过头来仔细研究Transformer模型。在接下来的几节内容中，我们将主要从BERT模型的基本原理、模型实现、预训练模型在下游任务中的运用以及掩码任务和下句预测任务这几个方面来详细介绍BERT模型。</p>
+<h2 id="1061-bert动机">10.6.1 BERT动机<a class="anchor" href="#1061-bert%e5%8a%a8%e6%9c%ba">#</a></h2>
+<p>虽然预训练语言模型对于很多下游处理任务的性能都有着显著的提升，但现有预训练模型的网络结构却限制了模型自身的表达能力，其中最主要的一点就是模型的单向编码。例如在传统的RNN或者是GPT[2]中，模型在建模时使用的均是从左到右（Left-to-Right）或者从右到左（Right-to-Left）的建模方式，这就使得模型在编码过程中只能够看到当前时刻之前的信息，而不能够同时捕捉到当前时刻之后的信息。</p>
+<div align=center><img width="350" src="/images/dl/230914200254.jpg"/> </div><center>图10-25 编码方向图</center>
+<p>如图10-25所示，对于这句样本来说无论模型采用的是从左到右还是从右到左的编码方，模型在对词“it”进行编码时都不能有效地捕捉到其具体所指代的信息。这就类似于我们人在阅读这句话时一样，在没有看到“tired”这个词之前我们同样也无法判断“it”具体所指代的事物。例如如果我们把“tired”这个词换成“wide”，则“it”指代的就变成了“street”。所以，如果模型采用的是双向编码的方式，那么从理论上来看就能够很好的避免这个问题。</p>
+<p>基于这样的动机，德夫林（Devlin）等人[1]于2018年10月提出了一种采用双向表示的编码器（Bidirectional Encoder Representations from Transformers, BERT）来实现模型的双向编码学习能力。整体来看BERT模型的整体结构并不复杂，它本质上就等同于Transformer中的编码器，只是模型在预训练的过程中使用了掩码语言模型（Mask Language Model, MLM）和下句预测（Next Sentence Prediction, NSP）这两项任务。下面我们首先开始介绍BERT模型的基本原理。</p>
+<h2 id="1062-bert结构">10.6.2 BERT结构<a class="anchor" href="#1062-bert%e7%bb%93%e6%9e%84">#</a></h2>
+<p>BERT网络结构整体上是由多层的Transformer编码器所构建，如图10-26所示便是一个详细的BERT模型网络结构图。从图10-26可以发现其上半部分的结构与<a href="dl/Chapter10/a469ed1a25e1498f">10.3节</a>内容中介绍的Transformer编码器类似，只不过在输入层部分新加入了句子编码（Segment Embedding）。</p>
+<div align=center><img width="300" src="/images/dl/230914200835.jpg"/> </div><center>图10-26 BERT网络结构图</center>
+<p>如图10-26所示，其上半部分便是BERT编码器，其整体由多个BERT编码层（即原文中指代的 Transformer Blocks）所构成。具体地，在论文中作者分别用 $L$来表示编码层的格式，即BERT编码器是由$L$ 个编码层所构成；用$H$来表示模型的维度；用$A$来表示多头注意力中多头的个数。同时，作者分别就$\text{BERT}_{\text{BASE}} (L=12,H =768,A=12)$和$\text{BERT}_{\text{BASE}} (L=24,H =1024,A=16)$这两种尺寸的BERT模型进行了实验对比。由于这部分类似的内容在<a href="dl/Chapter10/a469ed1a25e1498f">10.3节</a>内容中已经进行了详细介绍，所以这里就不再 赘述，细节之处见<a href="dl/Chapter10/82a1cd0def084620">10.7节</a>代码实现。</p>
+<h2 id="1063-bert输入层">10.6.3 BERT输入层<a class="anchor" href="#1063-bert%e8%be%93%e5%85%a5%e5%b1%82">#</a></h2>
+<p>如图10-27所示，在BERT中输入层模块中一共包含3个部分：字符嵌入（Token Embedding）、位置编码（Positional Embedding） 和句子编码（Segment Embedding）。虽然前面两部分在<a href="dl/Chapter10/a469ed1a25e1498f">10.3节</a>内容中已经介绍过了，但这里需要注意的是BERT中的位置编码并不是采用公式计算得到，而是类似 普通的嵌入层一样为每一个位置初始化了一个向量然后随着网络一起训练得到。</p>
+<div align=center><img width="360" src="/images/dl/230914200914.jpg"/> </div><center>图10-27 输入层结构图</center>
+<p>同时，最值得注意的一点是BERT开源的预训练模型最大只支持 512个字符的长度，这是因为模型在训练过程中位置编码的词表的最大长度只有512。</p>
+<p>除此之外，第三部分则是BERT模型中所引入的句子编码。由于BERT模型的主要目的是构建一个通用的预训练模型，因此难免需要兼顾到各种NLP 任务场景下的输入。因此句子编码的作用便是用来区分输入序列中的不同部分，其本质是通过一个普通的嵌入层来区分每一个序列所处的位置。例如在下句预测任务中，对于任意一个输入样本来说均由两个句子构成，而句子编码的作用就是对每个字符进行位置标识，以此来区分哪些字符属于第1个句子哪些字符属于第2个句子，因此也可以看出同一个句子中的编码是一样的。最后，再将这三部分的结果相加并标准化便得到了BERT模型的输入。</p>
+<div align=center><img width="500" src="/images/dl/230914203449.jpg"/> </div><center>图10-28 输入层细节图</center>
+<p>如图10-28所示，最上面的Input表示原始的输入序列，其中第1个字符[CLS]是一个特殊的分类标志，如果下游任务是做文本分类的话，那么在 BERT 的输出结果中可以只取[CLS]对应的向量进行分类（不过实验表明，取所有位置向量的均值往往有着更好的效果）；而其中的[SEP]字符则是用来作为将两句话分开的标志。句子编码则同样是用来区分两句话所在的不同位置，对于每句话来说其内部各自的位置向量都是一样的，当然如果原始输入只有一句话，那么句子编码层中对应的每个字符的位置向量均相同。最后，位置编码则是用来标识句子中每个字符各自所在的位置，使得模型能够捕捉到文本“有序”这一特性，具体细节之处可见<a href="dl/Chapter10/82a1cd0def084620">10.7节</a>代码实现。</p>
+<h2 id="1064-预训练任务">10.6.4 预训练任务<a class="anchor" href="#1064-%e9%a2%84%e8%ae%ad%e7%bb%83%e4%bb%bb%e5%8a%a1">#</a></h2>
+<p>为了能够更好训练BERT模型，论文引入了MLM和NSP这两个预训练任务来训练网络。对于MLM任务来说，它的做法是随机掩盖掉输入序列中$15\%$​的字符，即用[MASK]替换掉原有的字符，然后在BERT的输出结果中取对应掩盖位置上的向量进行真实值预测。不过由于模型在后续的微调（Fine-tuning)过程中输入序列并不存在 [MASK]这样的字符，因此这将导致模型的预训练和微调之间存在不匹配的问题。为了解决这一问题，可以将原始MLM做相应调整，即先选定15%的字符，然后将其中的80%替换为[MASK]符号、10%随机替换为其它符号、剩下的10%保持不变。最后取这15% 的字符对应的输出来做分类来预测其真实值。</p>
+<p>对于NSP任务来说，它的做法是在每个有AB两个句子构造的样本中，其中50%的情况下B确实为A上下文的下一句话，此时标签为IsNext；另外50%的情况下B为语料中其它的随机句子， 此时标签为NotNext然；最后模型取[CLS]位置上对应的向量来预测B是否为A的下一句话。这样做的目的便是因为在很多下游任务需要依赖于分析两句话之间的关系来进行建模，例如文本蕴含、问题选择等任务场景。</p>
+<div align=center><img width="330" src="/images/dl/230914201017.jpg"/> </div><center>图10-29 NSP和MLM任务网络结构</center>
+<p>如图10-29所示便是MLM和NSP这两个预训练任务在BERT预训练时的输入输出示意图。在图10-29中，最上层输出的C在训练时用于NSP的分类任务，其它位置上的$T_i$和$T^{\prime}_j$等则用于预测被掩盖掉的字符。</p>
+<p>到此，对于BERT模型的原理以及NS和MLM这两个任务的内容就介绍完 了。整体来看，如果单从网络结构上看BERT并没有太大的创新，仅仅只是相当于Transformer中的编码器，并且所谓的”双向“指的也就是其中的自注意力机制。</p>
+<h2 id="1065-小结">10.6.5 小结<a class="anchor" href="#1065-%e5%b0%8f%e7%bb%93">#</a></h2>
+<p>在本节内容中，我们首先介绍了BERT模型所提出的动机以及传统语言模型的弊端；然后介绍了BERT模型的基本原理，包括网络结构和输入层的构造；最后详细介绍了用于对BERT进行预训练的MLM和NSP任务。在下节内容中，我们将开始介绍如何基于先前实现的多头注意力机制来实现整个BERT模型。</p>
+<h1 id="引用">引用<a class="anchor" href="#%e5%bc%95%e7%94%a8">#</a></h1>
+<p>[1] Devlin J, Chang M W, Lee K, et al. Bert: Pre-training of deep bidirectional transformers for language understanding[J]. arXiv preprint, 2018, arXiv:1810.04805.</p>
+<p>[2] Radford A, Narasimhan K, Salimans T, et al. Improving language understanding by generative pre-training[J]. 2018.</p>
+</article>
+ 
+      
+
+      <footer class="book-footer">
+        
+  <div class="flex flex-wrap justify-between">
+
+<div>
+
+</div>
+
+<div>
+
+</div>
+
+</div>
+
+<div class="flex flex-wrap justify-between">
+    <span>
+    
+      <a href="/dl/chapter10/f6c507b3d2d74f03/" class="flex align-center">
+        <img src="/icons/backward.svg" class="book-icon" alt="Backward" />
+        <span>10.5 Transformer对联模型</span>
+      </a>
+    
+    </span>
+    <span>
+    
+      <a href="/dl/chapter10/82a1cd0def084620/" class="flex align-center">
+        <span>10.7 从零实现BERT</span>
+        <img src="/icons/forward.svg" class="book-icon" alt="Forward" />
+      </a>
+    
+    </span>
+  </div>
+
+ 
+        
+  
+  <div class="book-comments">
+
+</div>
+  
+ 
+        
+  <link rel="stylesheet" href="/katex/katex.min.css" />
+  <script defer src="/katex/katex.min.js"></script>
+  <script defer src="/katex/auto-render.min.js"></script>
+  
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        if (window.renderMathInElement) {
+          renderMathInElement(
+            document.querySelector(".book-page"),
+            Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
+          );
+        }
+      });
+    </script>
+  
+
+
+        
+  
+ 
+        
+  
+    <script>(function(){document.querySelectorAll("pre:has(code)").forEach(e=>{e.addEventListener("click",e.focus),e.addEventListener("copy",function(t){if(t.preventDefault(),navigator.clipboard){const t=window.getSelection().toString()||e.textContent;navigator.clipboard.writeText(t)}})})})()</script>
+  
+
+      </footer>
+
+      <label for="menu-control" class="hidden book-menu-overlay"></label>
+    </div>
+
+    
+  
+  <aside class="book-toc">
+    <div class="book-toc-content">
+      
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#1061-bert动机">10.6.1 BERT动机</a></li>
+    <li><a href="#1062-bert结构">10.6.2 BERT结构</a></li>
+    <li><a href="#1063-bert输入层">10.6.3 BERT输入层</a></li>
+    <li><a href="#1064-预训练任务">10.6.4 预训练任务</a></li>
+    <li><a href="#1065-小结">10.6.5 小结</a></li>
+  </ul>
+</nav>
+
+
+
+    </div>
+  </aside>
+  
+ 
+  </main>
+
+  
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

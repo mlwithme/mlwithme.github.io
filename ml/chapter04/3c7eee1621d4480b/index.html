@@ -1,0 +1,3796 @@
+<!DOCTYPE html>
+<html lang="zh_CN" dir="ltr">
+<head>
+  <!--
+Made with Book Theme
+https://github.com/alex-shpak/hugo-book
+-->
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="4.5 偏差、方差与交叉验证# 在第4.4节中，我们介绍了什么是正则化，以及正则化为什么能够缓解过拟合的原理。同时我们知道，越是复杂的模型越可能产生过拟合的现象，这也就为模型在其他未知数据集上的预测带来了误差，但是这些误差来自哪里，又是怎么产生的呢？知道这些误差的来源后对改善我们的模型有什么样的帮助呢？接下来我们就来介绍关于误差分析及模型选择的若干方法。
+4.5.1 偏差与方差定义# 在机器学习的建模中，模型的误差普遍来自于偏差（Bias）或方差（Variance）。什么是偏差与方差呢？
+如图4-23所示 [12]，假设你拿着一把枪射击红色的靶心，在你连打数十枪后出现了以下4种情况：
+（1）所有子弹都密集打在了红色靶心的位置，这就是典型的方差小（子弹集中），偏差小（都在靶心位置）。
+（2）子弹都散落在靶心周围的位置，这就是典型的方差大（子弹很散乱），偏差小（都在靶心附近）。
+（3）所有子弹都密集打在靶心旁边的位置，这就是典型的方差小（子弹很集中），偏差大（距离靶心远）。
+（4）子弹都散落在靶心旁边的位置，这就是典型的方差大（子弹散乱），偏差大（距离靶心远）。
+由此可知，偏差描述的是预测值的期望与真实值之间的差距，即偏差越大，越偏离真实值，如图4-23第2行所示。方差描述的是预测值之间的变化范围和离散程度，也就是离其期望值的距离，即方差越大数据的分布越分散，如图4-23右列所示。
+图 4-23 偏差与方差 4.5.2 模型的偏差与方差# 上面介绍了什么是偏差与方差，那么这4种情况又对应于机器学习中的哪些场景呢？通常来讲，一个简单的模型会带来比较小的方差（Low Variance），而复杂的模型会带来比较大的方差（High Variance）。这是由于简单的模型不容易受到噪声的影响，而复杂的模型（例如过拟合）容易受到噪声的影响而产生较大的误差。一个极端的例子，$\hat{y}=C$这个模型不管输入是什么，输出都是常数$C$，那么其对应的方差就会是0。对于偏差来讲，一个简单的模型容易产生较高的偏差（High Bias），而复杂的模型容易产生较低的偏差（Low Bias），这是由于越复杂的模型越容易拟合更多的样本。
+如图4-24所示为模型的偏差、方差与模型复杂度的变化情况。从图中可以看出，方差随着模型的复杂度增大而上升，偏差与之恰好相反。同时，如果一个模型的主要误差来自于较大的方差，则这个模型呈现出的就是过拟合的状态，而当一个模型的主要误差来自于较大的偏差时，此时模型呈现出的就是欠拟合状态。
+图4-24模型偏差与方差 总结来讲，模型的高方差与高偏差分别对应于过拟合与欠拟合。如果一个模型不能很好地拟合训练样本，则此时模型呈现的就是高偏差（欠拟合）的状态。 如果能够很好地拟合训练样本，但是在测试集上有较大的误差，这就意味着此时模型出现了高方差（过拟合）的状态，因此，当模型出现这类情况时，我们完全可以按照前面处理过拟合与欠拟合的方法对模型进行改善，然后在这两者之间寻找平衡。
+4.5.3 超参数选择# 在之前的介绍中，我们知道了模型中的权重参数可以通过训练集利用梯度下降算法求解得到，但超参数又是什么呢？所谓超参数（Hyper Parameter）是指那些不能通过数据集训练得到的参数，但它的取值同样会影响最终模型的效果，因此同样重要。到目前为止，我们一共接触过了3个超参数，只是第一次出现的时候我们并没有提起其名字，在这里再做一个细致的总结。这3个超参数分别是： 惩罚系数$\lambda$、学习率$\alpha$ 及特征映射时多项式的次数，其中最为重要的是前面两个。
+1. 惩罚系数$\lambda$
+从4.4节内容中对正则化的介绍可知，$\lambda$越大也就意味着对模型的惩罚力度越大，最终训练得到的模型也就相对越简单，因此，在模型的训练过程中，也需要选择一个合适的$\lambda$来使模型的泛化能力尽可能好。
+2. 学习率$\alpha$
+在介绍线性回归的求解过程中，我们首次介绍了梯度下降算法，如式(4-26)所示。 $$ W=W-\alpha \cdot \frac{\partial J}{\partial W}\tag{4-26} $$ 并且讲过，$\alpha$ 的作用是用来控制每次向前跳跃的距离，较大的$\alpha$可以更快地跳到谷底并找到最优解，但是过大的$\alpha$同样能使目标函数在峡谷的两边来回振荡，以至于需要多次迭代才可以得到最优解，不过也可能得不到最优解。
+如图4-25所示为相同模型采用不同学习率后，经梯度下降算法在同一初始位置优化后的结果，其中黑色五角星表示全局最优解（Global Optimum），ite表示迭代次数。
+图 4-25 凸函数优化过程 从图4-25可以看出，当学习率为0.4时，模型大概在迭代12次后就基本达到了全局最优解附近。当学习率为3.5时，模型在大约迭代12次后同样能够收敛于全局最优解附近，但是，当学习率为4.1时，此时的模型已经处于了发散状态。可以发现，由于模型的目标函数为凸形函数（例如线性回归），所以尽管使用了较大的学习率3.5，目标函数依旧能够收敛，但在后面的学习过程中，遇到更多的情况便是非凸型的目标函数，此时的模型对于学习率的大小将会更加敏感。
+如图4-26所示为一个非凸形的目标函数，三者均从同一初始点开始进行迭代优化，只是各自采用了不同的学习率。其中黑色五角星表示全局最优解，ite表示迭代次数。
+图 4-26 非凸形函数优化过程 从图4-26可以看出，当采用较小的学习率0.02时，模型在迭代20次后陷入了局部最优解（Local Optimum），并且可以知道此时无论再继续迭代多少次，其依旧会收敛于此处，因为此时的梯度已经开始接近于0，而使参数无法得到更新。当采用较大一点的学习率0.4时，模型在迭代4次后便能收敛于全局最优解附近。当采用学习率为0.6时，模型在这20次的迭代过程中总是来回振荡，并且没有一次接近于全局最优解。
+从上面两个示例的分析可以得出，学习率的大小对于模型的收敛性及收敛速度有着严重的影响，并且非凸函数在优化过程中对于学习率的敏感性更大。同时值得注意的是，所谓学习率过大或者过小，在不同模型间没有可比性。例如在上面凸函数的图示中学习率为0.4时可能还算小，但是在非凸函数的这个例子中0.4已经算是相对较大了。
+经过上面的介绍，我们明白了超参数对于模型最终的性能有着重要的影响。那到底应该如何选择这些超参数呢？对于超参数的选择，首先可以列出各个参数的备选取值，例如$\alpha=[0.001,0.03,0.1,0.3,1]$，$\lambda=[0.1,0.3,1,3,10]$，然后根据不同的超参数组合训练得到不同的模型（例如这里就有25个备选模型），然后通过4.5.4节所介绍的交叉验证来确立模型。不过这一整套步骤sklearn中也有现成的类方法可供使用，并且使用起来也非常方便，在4.6节中将会通过一个详细的示例进行说明。不过随着介绍的模型越来越复杂，就会出现更多的超参数组合，训练一个模型也会花费一定的时间，因此，对于模型调参的一个基本要求就是要理解各个参数的含义，这样才可能更快地排除不可能的参数取值，以便于更快地训练出可用的模型。
+4.5.4 模型选择# 当在对模型进行改善时，自然而然地就会出现很多备选模型，而我们的目的便是尽可能地选择一个较好的模型，以达到低偏差与低方差之间的平衡。该如何选择一个好的模型呢？通常来讲有两种方式： 第1种就是4.3.3节中介绍过的将整个数据集划分成3部份的方式； 第2种则是使用K折交叉验证（KFold Cross Validation）[9] 的方式。对于第1种方法来说，其步骤为先在训练集上训练不同的模型，然后在验证集上选择其中表现最好的模型，最后在测试集上测试模型的泛化能力。但是这种做法的缺点在于可能某一次数据集的划分结果具有较强的偶然性，导致模型表现出来的泛化误差不准确，因此可以通过K折交叉验证来解决。同时，在数据量有限的情况下，交叉验证还可以充分利用数据，让每个样本都有机会被用作训练集和验证集。
+">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
+<meta name="color-scheme" content="light dark"><meta property="og:url" content="https://mlwithme.github.io/ml/chapter04/3c7eee1621d4480b/">
+	<meta property="og:site_name" content="《从零学AI指南手册》">
+	<meta property="og:title" content="4.5 偏差、方差与交叉验证">
+	<meta property="og:description" content="4.5 偏差、方差与交叉验证# 在第4.4节中，我们介绍了什么是正则化，以及正则化为什么能够缓解过拟合的原理。同时我们知道，越是复杂的模型越可能产生过拟合的现象，这也就为模型在其他未知数据集上的预测带来了误差，但是这些误差来自哪里，又是怎么产生的呢？知道这些误差的来源后对改善我们的模型有什么样的帮助呢？接下来我们就来介绍关于误差分析及模型选择的若干方法。
+4.5.1 偏差与方差定义# 在机器学习的建模中，模型的误差普遍来自于偏差（Bias）或方差（Variance）。什么是偏差与方差呢？
+如图4-23所示 [12]，假设你拿着一把枪射击红色的靶心，在你连打数十枪后出现了以下4种情况：
+（1）所有子弹都密集打在了红色靶心的位置，这就是典型的方差小（子弹集中），偏差小（都在靶心位置）。
+（2）子弹都散落在靶心周围的位置，这就是典型的方差大（子弹很散乱），偏差小（都在靶心附近）。
+（3）所有子弹都密集打在靶心旁边的位置，这就是典型的方差小（子弹很集中），偏差大（距离靶心远）。
+（4）子弹都散落在靶心旁边的位置，这就是典型的方差大（子弹散乱），偏差大（距离靶心远）。
+由此可知，偏差描述的是预测值的期望与真实值之间的差距，即偏差越大，越偏离真实值，如图4-23第2行所示。方差描述的是预测值之间的变化范围和离散程度，也就是离其期望值的距离，即方差越大数据的分布越分散，如图4-23右列所示。
+图 4-23 偏差与方差 4.5.2 模型的偏差与方差# 上面介绍了什么是偏差与方差，那么这4种情况又对应于机器学习中的哪些场景呢？通常来讲，一个简单的模型会带来比较小的方差（Low Variance），而复杂的模型会带来比较大的方差（High Variance）。这是由于简单的模型不容易受到噪声的影响，而复杂的模型（例如过拟合）容易受到噪声的影响而产生较大的误差。一个极端的例子，$\hat{y}=C$这个模型不管输入是什么，输出都是常数$C$，那么其对应的方差就会是0。对于偏差来讲，一个简单的模型容易产生较高的偏差（High Bias），而复杂的模型容易产生较低的偏差（Low Bias），这是由于越复杂的模型越容易拟合更多的样本。
+如图4-24所示为模型的偏差、方差与模型复杂度的变化情况。从图中可以看出，方差随着模型的复杂度增大而上升，偏差与之恰好相反。同时，如果一个模型的主要误差来自于较大的方差，则这个模型呈现出的就是过拟合的状态，而当一个模型的主要误差来自于较大的偏差时，此时模型呈现出的就是欠拟合状态。
+图4-24模型偏差与方差 总结来讲，模型的高方差与高偏差分别对应于过拟合与欠拟合。如果一个模型不能很好地拟合训练样本，则此时模型呈现的就是高偏差（欠拟合）的状态。 如果能够很好地拟合训练样本，但是在测试集上有较大的误差，这就意味着此时模型出现了高方差（过拟合）的状态，因此，当模型出现这类情况时，我们完全可以按照前面处理过拟合与欠拟合的方法对模型进行改善，然后在这两者之间寻找平衡。
+4.5.3 超参数选择# 在之前的介绍中，我们知道了模型中的权重参数可以通过训练集利用梯度下降算法求解得到，但超参数又是什么呢？所谓超参数（Hyper Parameter）是指那些不能通过数据集训练得到的参数，但它的取值同样会影响最终模型的效果，因此同样重要。到目前为止，我们一共接触过了3个超参数，只是第一次出现的时候我们并没有提起其名字，在这里再做一个细致的总结。这3个超参数分别是： 惩罚系数$\lambda$、学习率$\alpha$ 及特征映射时多项式的次数，其中最为重要的是前面两个。
+1. 惩罚系数$\lambda$
+从4.4节内容中对正则化的介绍可知，$\lambda$越大也就意味着对模型的惩罚力度越大，最终训练得到的模型也就相对越简单，因此，在模型的训练过程中，也需要选择一个合适的$\lambda$来使模型的泛化能力尽可能好。
+2. 学习率$\alpha$
+在介绍线性回归的求解过程中，我们首次介绍了梯度下降算法，如式(4-26)所示。 $$ W=W-\alpha \cdot \frac{\partial J}{\partial W}\tag{4-26} $$ 并且讲过，$\alpha$ 的作用是用来控制每次向前跳跃的距离，较大的$\alpha$可以更快地跳到谷底并找到最优解，但是过大的$\alpha$同样能使目标函数在峡谷的两边来回振荡，以至于需要多次迭代才可以得到最优解，不过也可能得不到最优解。
+如图4-25所示为相同模型采用不同学习率后，经梯度下降算法在同一初始位置优化后的结果，其中黑色五角星表示全局最优解（Global Optimum），ite表示迭代次数。
+图 4-25 凸函数优化过程 从图4-25可以看出，当学习率为0.4时，模型大概在迭代12次后就基本达到了全局最优解附近。当学习率为3.5时，模型在大约迭代12次后同样能够收敛于全局最优解附近，但是，当学习率为4.1时，此时的模型已经处于了发散状态。可以发现，由于模型的目标函数为凸形函数（例如线性回归），所以尽管使用了较大的学习率3.5，目标函数依旧能够收敛，但在后面的学习过程中，遇到更多的情况便是非凸型的目标函数，此时的模型对于学习率的大小将会更加敏感。
+如图4-26所示为一个非凸形的目标函数，三者均从同一初始点开始进行迭代优化，只是各自采用了不同的学习率。其中黑色五角星表示全局最优解，ite表示迭代次数。
+图 4-26 非凸形函数优化过程 从图4-26可以看出，当采用较小的学习率0.02时，模型在迭代20次后陷入了局部最优解（Local Optimum），并且可以知道此时无论再继续迭代多少次，其依旧会收敛于此处，因为此时的梯度已经开始接近于0，而使参数无法得到更新。当采用较大一点的学习率0.4时，模型在迭代4次后便能收敛于全局最优解附近。当采用学习率为0.6时，模型在这20次的迭代过程中总是来回振荡，并且没有一次接近于全局最优解。
+从上面两个示例的分析可以得出，学习率的大小对于模型的收敛性及收敛速度有着严重的影响，并且非凸函数在优化过程中对于学习率的敏感性更大。同时值得注意的是，所谓学习率过大或者过小，在不同模型间没有可比性。例如在上面凸函数的图示中学习率为0.4时可能还算小，但是在非凸函数的这个例子中0.4已经算是相对较大了。
+经过上面的介绍，我们明白了超参数对于模型最终的性能有着重要的影响。那到底应该如何选择这些超参数呢？对于超参数的选择，首先可以列出各个参数的备选取值，例如$\alpha=[0.001,0.03,0.1,0.3,1]$，$\lambda=[0.1,0.3,1,3,10]$，然后根据不同的超参数组合训练得到不同的模型（例如这里就有25个备选模型），然后通过4.5.4节所介绍的交叉验证来确立模型。不过这一整套步骤sklearn中也有现成的类方法可供使用，并且使用起来也非常方便，在4.6节中将会通过一个详细的示例进行说明。不过随着介绍的模型越来越复杂，就会出现更多的超参数组合，训练一个模型也会花费一定的时间，因此，对于模型调参的一个基本要求就是要理解各个参数的含义，这样才可能更快地排除不可能的参数取值，以便于更快地训练出可用的模型。
+4.5.4 模型选择# 当在对模型进行改善时，自然而然地就会出现很多备选模型，而我们的目的便是尽可能地选择一个较好的模型，以达到低偏差与低方差之间的平衡。该如何选择一个好的模型呢？通常来讲有两种方式： 第1种就是4.3.3节中介绍过的将整个数据集划分成3部份的方式； 第2种则是使用K折交叉验证（KFold Cross Validation）[9] 的方式。对于第1种方法来说，其步骤为先在训练集上训练不同的模型，然后在验证集上选择其中表现最好的模型，最后在测试集上测试模型的泛化能力。但是这种做法的缺点在于可能某一次数据集的划分结果具有较强的偶然性，导致模型表现出来的泛化误差不准确，因此可以通过K折交叉验证来解决。同时，在数据量有限的情况下，交叉验证还可以充分利用数据，让每个样本都有机会被用作训练集和验证集。">
+	<meta property="og:locale" content="zh_CN">
+	<meta property="og:type" content="article">
+		<meta property="article:section" content="ml">
+
+
+	<meta itemprop="name" content="4.5 偏差、方差与交叉验证">
+	<meta itemprop="description" content="4.5 偏差、方差与交叉验证# 在第4.4节中，我们介绍了什么是正则化，以及正则化为什么能够缓解过拟合的原理。同时我们知道，越是复杂的模型越可能产生过拟合的现象，这也就为模型在其他未知数据集上的预测带来了误差，但是这些误差来自哪里，又是怎么产生的呢？知道这些误差的来源后对改善我们的模型有什么样的帮助呢？接下来我们就来介绍关于误差分析及模型选择的若干方法。
+4.5.1 偏差与方差定义# 在机器学习的建模中，模型的误差普遍来自于偏差（Bias）或方差（Variance）。什么是偏差与方差呢？
+如图4-23所示 [12]，假设你拿着一把枪射击红色的靶心，在你连打数十枪后出现了以下4种情况：
+（1）所有子弹都密集打在了红色靶心的位置，这就是典型的方差小（子弹集中），偏差小（都在靶心位置）。
+（2）子弹都散落在靶心周围的位置，这就是典型的方差大（子弹很散乱），偏差小（都在靶心附近）。
+（3）所有子弹都密集打在靶心旁边的位置，这就是典型的方差小（子弹很集中），偏差大（距离靶心远）。
+（4）子弹都散落在靶心旁边的位置，这就是典型的方差大（子弹散乱），偏差大（距离靶心远）。
+由此可知，偏差描述的是预测值的期望与真实值之间的差距，即偏差越大，越偏离真实值，如图4-23第2行所示。方差描述的是预测值之间的变化范围和离散程度，也就是离其期望值的距离，即方差越大数据的分布越分散，如图4-23右列所示。
+图 4-23 偏差与方差 4.5.2 模型的偏差与方差# 上面介绍了什么是偏差与方差，那么这4种情况又对应于机器学习中的哪些场景呢？通常来讲，一个简单的模型会带来比较小的方差（Low Variance），而复杂的模型会带来比较大的方差（High Variance）。这是由于简单的模型不容易受到噪声的影响，而复杂的模型（例如过拟合）容易受到噪声的影响而产生较大的误差。一个极端的例子，$\hat{y}=C$这个模型不管输入是什么，输出都是常数$C$，那么其对应的方差就会是0。对于偏差来讲，一个简单的模型容易产生较高的偏差（High Bias），而复杂的模型容易产生较低的偏差（Low Bias），这是由于越复杂的模型越容易拟合更多的样本。
+如图4-24所示为模型的偏差、方差与模型复杂度的变化情况。从图中可以看出，方差随着模型的复杂度增大而上升，偏差与之恰好相反。同时，如果一个模型的主要误差来自于较大的方差，则这个模型呈现出的就是过拟合的状态，而当一个模型的主要误差来自于较大的偏差时，此时模型呈现出的就是欠拟合状态。
+图4-24模型偏差与方差 总结来讲，模型的高方差与高偏差分别对应于过拟合与欠拟合。如果一个模型不能很好地拟合训练样本，则此时模型呈现的就是高偏差（欠拟合）的状态。 如果能够很好地拟合训练样本，但是在测试集上有较大的误差，这就意味着此时模型出现了高方差（过拟合）的状态，因此，当模型出现这类情况时，我们完全可以按照前面处理过拟合与欠拟合的方法对模型进行改善，然后在这两者之间寻找平衡。
+4.5.3 超参数选择# 在之前的介绍中，我们知道了模型中的权重参数可以通过训练集利用梯度下降算法求解得到，但超参数又是什么呢？所谓超参数（Hyper Parameter）是指那些不能通过数据集训练得到的参数，但它的取值同样会影响最终模型的效果，因此同样重要。到目前为止，我们一共接触过了3个超参数，只是第一次出现的时候我们并没有提起其名字，在这里再做一个细致的总结。这3个超参数分别是： 惩罚系数$\lambda$、学习率$\alpha$ 及特征映射时多项式的次数，其中最为重要的是前面两个。
+1. 惩罚系数$\lambda$
+从4.4节内容中对正则化的介绍可知，$\lambda$越大也就意味着对模型的惩罚力度越大，最终训练得到的模型也就相对越简单，因此，在模型的训练过程中，也需要选择一个合适的$\lambda$来使模型的泛化能力尽可能好。
+2. 学习率$\alpha$
+在介绍线性回归的求解过程中，我们首次介绍了梯度下降算法，如式(4-26)所示。 $$ W=W-\alpha \cdot \frac{\partial J}{\partial W}\tag{4-26} $$ 并且讲过，$\alpha$ 的作用是用来控制每次向前跳跃的距离，较大的$\alpha$可以更快地跳到谷底并找到最优解，但是过大的$\alpha$同样能使目标函数在峡谷的两边来回振荡，以至于需要多次迭代才可以得到最优解，不过也可能得不到最优解。
+如图4-25所示为相同模型采用不同学习率后，经梯度下降算法在同一初始位置优化后的结果，其中黑色五角星表示全局最优解（Global Optimum），ite表示迭代次数。
+图 4-25 凸函数优化过程 从图4-25可以看出，当学习率为0.4时，模型大概在迭代12次后就基本达到了全局最优解附近。当学习率为3.5时，模型在大约迭代12次后同样能够收敛于全局最优解附近，但是，当学习率为4.1时，此时的模型已经处于了发散状态。可以发现，由于模型的目标函数为凸形函数（例如线性回归），所以尽管使用了较大的学习率3.5，目标函数依旧能够收敛，但在后面的学习过程中，遇到更多的情况便是非凸型的目标函数，此时的模型对于学习率的大小将会更加敏感。
+如图4-26所示为一个非凸形的目标函数，三者均从同一初始点开始进行迭代优化，只是各自采用了不同的学习率。其中黑色五角星表示全局最优解，ite表示迭代次数。
+图 4-26 非凸形函数优化过程 从图4-26可以看出，当采用较小的学习率0.02时，模型在迭代20次后陷入了局部最优解（Local Optimum），并且可以知道此时无论再继续迭代多少次，其依旧会收敛于此处，因为此时的梯度已经开始接近于0，而使参数无法得到更新。当采用较大一点的学习率0.4时，模型在迭代4次后便能收敛于全局最优解附近。当采用学习率为0.6时，模型在这20次的迭代过程中总是来回振荡，并且没有一次接近于全局最优解。
+从上面两个示例的分析可以得出，学习率的大小对于模型的收敛性及收敛速度有着严重的影响，并且非凸函数在优化过程中对于学习率的敏感性更大。同时值得注意的是，所谓学习率过大或者过小，在不同模型间没有可比性。例如在上面凸函数的图示中学习率为0.4时可能还算小，但是在非凸函数的这个例子中0.4已经算是相对较大了。
+经过上面的介绍，我们明白了超参数对于模型最终的性能有着重要的影响。那到底应该如何选择这些超参数呢？对于超参数的选择，首先可以列出各个参数的备选取值，例如$\alpha=[0.001,0.03,0.1,0.3,1]$，$\lambda=[0.1,0.3,1,3,10]$，然后根据不同的超参数组合训练得到不同的模型（例如这里就有25个备选模型），然后通过4.5.4节所介绍的交叉验证来确立模型。不过这一整套步骤sklearn中也有现成的类方法可供使用，并且使用起来也非常方便，在4.6节中将会通过一个详细的示例进行说明。不过随着介绍的模型越来越复杂，就会出现更多的超参数组合，训练一个模型也会花费一定的时间，因此，对于模型调参的一个基本要求就是要理解各个参数的含义，这样才可能更快地排除不可能的参数取值，以便于更快地训练出可用的模型。
+4.5.4 模型选择# 当在对模型进行改善时，自然而然地就会出现很多备选模型，而我们的目的便是尽可能地选择一个较好的模型，以达到低偏差与低方差之间的平衡。该如何选择一个好的模型呢？通常来讲有两种方式： 第1种就是4.3.3节中介绍过的将整个数据集划分成3部份的方式； 第2种则是使用K折交叉验证（KFold Cross Validation）[9] 的方式。对于第1种方法来说，其步骤为先在训练集上训练不同的模型，然后在验证集上选择其中表现最好的模型，最后在测试集上测试模型的泛化能力。但是这种做法的缺点在于可能某一次数据集的划分结果具有较强的偶然性，导致模型表现出来的泛化误差不准确，因此可以通过K折交叉验证来解决。同时，在数据量有限的情况下，交叉验证还可以充分利用数据，让每个样本都有机会被用作训练集和验证集。">
+	<meta itemprop="wordCount" content="81">
+
+<title>4.5 偏差、方差与交叉验证 • 《从零学AI指南手册》</title>
+<link rel="icon" href="/favicon.png" >
+<link rel="manifest" href="/manifest.json">
+<link rel="canonical" href="https://mlwithme.github.io/ml/chapter04/3c7eee1621d4480b/">
+<link rel="stylesheet" href="/book.min.6097ccf1d338ddfaa037d2f96478059a71fa573d0f917d128bab595efea338ca.css" integrity="sha256-YJfM8dM43fqgN9L5ZHgFmnH6Vz0PkX0Si6tZXv6jOMo=" crossorigin="anonymous">
+
+
+  <script defer type="module" src="/en.search.min.ffaad769e546b38d39820301bb9e5c193822f7bf0f46a855602e4e14707802e0.js" integrity="sha256-/6rXaeVGs405ggMBu55cGTgi978PRqhVYC5OFHB4AuA=" crossorigin="anonymous"></script>
+
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-23SZ6E8VY7"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-23SZ6E8VY7');
+</script>
+<script async src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
+
+</head>
+<body dir="ltr" class="book-kind-page book-type-ml">
+  <input type="checkbox" class="hidden toggle" id="menu-control" />
+  <input type="checkbox" class="hidden toggle" id="toc-control" />
+  <main class="container flex">
+    
+<aside class="book-menu">
+  <div class="book-menu-content">
+    
+  <nav>
+<h2 class="book-brand">
+  <a class="flex align-center" href="/"><span>《从零学AI指南手册》</span>
+  </a>
+</h2>
+
+
+<div class="book-search hidden">
+  <input id="book-search-input" type="text" 
+    placeholder="Search"
+    aria-label="Search"
+    maxlength="64" />
+  <div class="book-search-spinner hidden"></div>
+  <ul id="book-search-results"></ul>
+</div>
+<script>document.querySelector(".book-search").classList.remove("hidden")</script>
+
+
+
+
+
+
+
+
+
+
+  
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a>
+      大模型Agent开发</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-253e26e732e57a78f635dcf47df3d0a3" class="toggle"  />
+    <label for="section-253e26e732e57a78f635dcf47df3d0a3" class="flex">
+      <a role="button" class="">
+        第 1 章 RAG 基础概念</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/454f0942222e471e/" class="">
+      1.1 RAG 提出背景</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/d7623d619f884b25/" class="">
+      1.2 RAG 流程概览</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-810ee5a2a3a24c9b7c25ab5324ae7db7" class="toggle"  />
+    <label for="section-810ee5a2a3a24c9b7c25ab5324ae7db7" class="flex">
+      <a role="button" class="">
+        第 2 章 大模型接入与使用</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/d43adfc00df54515/" class="">
+      2.1 SDK 介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/8b9059fde1d644a4/" class="">
+      2.2 现代大模型中的 SDK</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/95d3214ab80b4769/" class="">
+      2.3 DashScope 接口体系</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/b9843c089d654494/" class="">
+      2.4 千问大模型接入与使用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ed1727f01d0e40dc9b7961b72e42160e" class="toggle"  />
+    <label for="section-ed1727f01d0e40dc9b7961b72e42160e" class="flex">
+      <a role="button" class="">
+        第 3 章 文档标准化与语义检索</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/7f4af6d48c5b425c/" class="">
+      3.1 文档加载与标准化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/572ba4c9cb114677/" class="">
+      3.2 常见文本切分策略</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/06e588cd33fa4454/" class="">
+      3.3 向量数据库选择</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/ff27306c0d7b4387/" class="">
+      3.4 Qwen3 Embedding 模型介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/303035851c5e42f2/" class="">
+      3.5 语义搜索引擎构建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/e1328cb23e8c412b/" class="">
+      3.6  Milvus 模块解析</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-caaf9d8eb5e5559f7ca8bb11c41da71a" class="toggle"  />
+    <label for="section-caaf9d8eb5e5559f7ca8bb11c41da71a" class="flex">
+      <a role="button" class="">
+        第 4 章 RAG 与 Agent</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/4c646aa07f3b4b74/" class="">
+      4.1 两步式 RAG 搭建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/5c35e934bab24ac3/" class="">
+      4.2 Function Calling 概念介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/88ff352fc22e4cd6/" class="">
+      4.3 LangChain 中的 Tool 修饰器</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/83fe26536a5d4b6e/" class="">
+      4.4 RAG Agent 原理与搭建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/b7e49268357a4bca/" class="">
+      4.5 复杂问题拆解与ReAct框架</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/469b5963f2ca4799/" class="">
+      4.6 RAG 中的两阶段索引</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/10fb92a6c5484039/" class="">
+      4.7 Qwen3 Reranking 原理与使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/45d286aec1bc4d66/" class="">
+      4.8 基于两阶段索引的 RAG Agent 搭建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/43af483460574e48/" class="">
+      4.9 LangGraph 基本概念介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/0def4564f3aa455d/" class="">
+      4.10  基于 LangGraph 构建自定义 RAG Agent</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a>
+      深度学习</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/70e5f9cdbedc4b2c/" class="">
+      学习思维导图</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-a9b664bcf9e1dab8add449268565f466" class="toggle"  />
+    <label for="section-a9b664bcf9e1dab8add449268565f466" class="flex">
+      <a role="button" class="">
+        第 1 章 深度学习简介</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/647eb9c607874e3a/" class="">
+      1.1 深度学习的发展阶段</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/f31da36a6f444afe/" class="">
+      1.2 深度学习中的关键人物</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/da9fa13021e64f3c/" class="">
+      1.3 深度学习框架介绍</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-e6e0db5d4bc28bd97dfe8d5210249e63" class="toggle"  />
+    <label for="section-e6e0db5d4bc28bd97dfe8d5210249e63" class="flex">
+      <a role="button" class="">
+        第 2 章 环境配置</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/a0c5d1e0de0140cb/" class="">
+      2.1 体系结构介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/04f07b9246984577/" class="">
+      2.2 深度学习环境安装</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/5bf6454673194c67/" class="">
+      2.3 开发环境安装配置</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-0a2ca47f15332c8b06ae83247328edb4" class="toggle"  />
+    <label for="section-0a2ca47f15332c8b06ae83247328edb4" class="flex">
+      <a role="button" class="">
+        第 3 章 深度学习基础</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/75c5fa7839174c16/" class="">
+      3.1 线性回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/ca16f8cb6df444a6/" class="">
+      3.2 线性回归简洁实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/97e1da1143cd4554/" class="">
+      3.3 梯度下降与反向传播</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/7b865de988ea422c/" class="">
+      3.4 从零实现回归模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/18fdd1deff424a16/" class="">
+      3.5 从逻辑回归到Softmax回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/55967b0f642b4509/" class="">
+      3.6 Softmax回归简洁实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/381bbd56509e4a6f/" class="">
+      3.7 从零实现分类模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/2c061df4435d4928/" class="">
+      3.8 回归模型评估指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/e3442eff254e473c/" class="">
+      3.9 分类模型评估指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/307f927c8a1245c5/" class="">
+      3.10 过拟合与正则化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/bcb64de5aa404f18/" class="">
+      3.11 超参数与交叉验证</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/66dd7425cdd04565/" class="">
+      3.12 激活函数</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/0d3dacfff4c04794/" class="">
+      3.13 多标签分类</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-95b7e7417bf2b821a1b760975d3acc22" class="toggle"  />
+    <label for="section-95b7e7417bf2b821a1b760975d3acc22" class="flex">
+      <a role="button" class="">
+        第 4 章 卷积神经网络</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/102e183e8be94f46/" class="">
+      4.1 卷积的概念</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/5b3e3152e9e54f4f/" class="">
+      4.2 卷积的计算过程</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/762f60de801a4ccd/" class="">
+      4.3 填充和池化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/c8af5d84174b4420/" class="">
+      4.4 LeNet5网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/de007462967e4701/" class="">
+      4.5 AlexNet网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/f084f181c3554082/" class="">
+      4.6 VGG网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/911b961cc5d949b6/" class="">
+      4.7 NIN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/47da186baf3e4a0b/" class="">
+      4.8 GoogLeNet网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/da16c61397454b2c/" class="">
+      4.9 ResNet网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/1c24468824274650/" class="">
+      4.10 DenseNet网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-17076fe90a2d84e207bbd0c829983325" class="toggle"  />
+    <label for="section-17076fe90a2d84e207bbd0c829983325" class="flex">
+      <a role="button" class="">
+        第 5 章 模型训练与复用</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/4557a6f03dec4475/" class="">
+      5.1 参数及日志管理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/e7c4c6da085148d0/" class="">
+      5.2 Tensorboard可视化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/27387966672c45ed/" class="">
+      5.3 模型的保存与复用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/211b26bdd8f248ac/" class="">
+      5.4 模型的迁移学习</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/345c1b72253043cb/" class="">
+      5.5 开源模型复用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/c912dda030c946d9/" class="">
+      5.6 多GPU训练</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/f065af80f3844b0b/" class="">
+      5.7 数据预处理与缓存</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-2d091d454d5c3f03f5e0a202c37cc226" class="toggle"  />
+    <label for="section-2d091d454d5c3f03f5e0a202c37cc226" class="flex">
+      <a role="button" class="">
+        第 6 章 模型优化方法</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/cc35bb112783410e/" class="">
+      6.1 学习率调度器</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/fc024c283f164849/" class="">
+      6.2 梯度裁剪</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/27ed3ed136e24092/" class="">
+      6.3 批归一化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/fdd5ba4b41f74a0e/" class="">
+      6.4 层归一化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/9246afed14eb436c/" class="">
+      6.5 组归一化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/fcbc66ad051a4336/" class="">
+      6.6 动量法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/8b83d654898c40a2/" class="">
+      6.7 AdaGrad算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/078f2394980d41d2/" class="">
+      6.8 AdaDelta算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/28ad7fb39987447e/" class="">
+      6.9 Adam算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/4b81b8d39721434d/" class="">
+      6.10 初始化方法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f2f78ba4851131558fc284d927542d28" class="toggle"  />
+    <label for="section-f2f78ba4851131558fc284d927542d28" class="flex">
+      <a role="button" class="">
+        第 7 章 循环神经网络</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/88ba4e03337b4233/" class="">
+      7.1 RNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/ec8ff069aadc49b9/" class="">
+      7.2 时序数据</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/b4c5ddcc9e904238/" class="">
+      7.3 LSTM网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/4112672112224dc1/" class="">
+      7.4 GRU网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/b6e5ccb6cd064f74/" class="">
+      7.5 BiRNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/4bf3ecf7b21e45fb/" class="">
+      7.6 CharRNN网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-49992cff6143e64ae5d7f2209dcfb054" class="toggle"  />
+    <label for="section-49992cff6143e64ae5d7f2209dcfb054" class="flex">
+      <a role="button" class="">
+        第 8 章 时序与模型融合</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/2be88fbc08a5418f/" class="">
+      8.1 TextCNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/9023d1f822a54226/" class="">
+      8.2 TextRNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/9edd7db2d439402f/" class="">
+      8.3 CNN-RNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/19c2b86e85f2461e/" class="">
+      8.4 ConvLSTM网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/1e6da79bf7b44c20/" class="">
+      8.5 3DCNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/5f426a9190e7454b/" class="">
+      8.6 STResNet网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ca07c572acb4d7fd40854f5b367c247b" class="toggle"  />
+    <label for="section-ca07c572acb4d7fd40854f5b367c247b" class="flex">
+      <a role="button" class="">
+        第 9 章 自然语言处理</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/e0cb9a7aae814045/" class="">
+      9.1 自然语言处理介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/d4703d990f8d4fed/" class="">
+      9.2 Word2Vec词向量</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/1bb6351b01a2479b/" class="">
+      9.3 Word2Vec训练与使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/40a8a1146d934c55/" class="">
+      9.4 GloVe词向量</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/c6aa1405b8cf46d8/" class="">
+      9.5 词向量的微调使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/48c26d04b342452d/" class="">
+      9.6 fastText网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/03a0166e195f443f/" class="">
+      9.7 Seq2Seq网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/271bda16904544af/" class="">
+      9.8 序列模型评价指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/fefa60e0bc854a17/" class="">
+      9.9 NMT网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/5bcd8b0920414f34/" class="">
+      9.10 注意力机制</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/8a78e8213ee04aac/" class="">
+      9.11 含注意力的NMT网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/474ac7a1867d4b5e/" class="">
+      9.12 含注意力的RNN网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-8cdec04c2fd8683c5c7373c78d943528" class="toggle"  />
+    <label for="section-8cdec04c2fd8683c5c7373c78d943528" class="flex">
+      <a role="button" class="">
+        第10章 现代神经网络</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/7523731afc0241c0/" class="">
+      10.1 ELMo网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/4987d1044939480d/" class="">
+      10.2 Transformer网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/a469ed1a25e1498f/" class="">
+      10.3 Transformer结构</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/d50c490eef3b4565/" class="">
+      10.4 Transformer实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/f6c507b3d2d74f03/" class="">
+      10.5 Transformer对联模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/3aedea1d3f3e48dd/" class="">
+      10.6 BERT网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/82a1cd0def084620/" class="">
+      10.7 从零实现BERT</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/e736d3974ed0484c/" class="">
+      10.8 BERT文本分类模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/f5076cbadda84d4e/" class="">
+      10.9 BERT问题选择模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/25d9ef3d9b34472a/" class="">
+      10.10 BERT问题回答模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/64d3ec5593ec4b94/" class="">
+      10.11 BERT命名体识别模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/90ea8d3e090d48b4/" class="">
+      10.12 BERT从零训练</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/e36878dad7a647d8/" class="">
+      10.13 GPT-1模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/94dda9bbbc994913/" class="">
+      10.14 GPT-2与GPT-3模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/4af57a29308840de/" class="">
+      10.15 基于GPT-2的中文预训练模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/9f5c00cadde14d31/" class="">
+      10.16 InstructGPT与ChatGPT</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/050b54fd34ca480a/" class="">
+      10.17 ChatGPT与提示词工程</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/a90b0d71389b4d69/" class="">
+      10.18 百川大模型使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/40c1c9ade70c4ce7/" class="">
+      10.19 百川大模型实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/ea1b4cf8b40c4b05/" class="">
+      10.20 GPT-4与GPTs使用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a>
+      机器学习</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/43fc00b3809d4be6/" class="">
+      学习思维导图</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-0a3254d1ca9963fd6975aa5bc0b3edcc" class="toggle"  />
+    <label for="section-0a3254d1ca9963fd6975aa5bc0b3edcc" class="flex">
+      <a role="button" class="">
+        第 1 章 环境配置</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/baafb91f0af14a84/" class="">
+      1.1 安装使用Conda</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/7a01c403acd6488a/" class="">
+      1.2 开发环境安装配置</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-4569258198323c16bc8a634ea44fd5db" class="toggle"  />
+    <label for="section-4569258198323c16bc8a634ea44fd5db" class="flex">
+      <a role="button" class="">
+        第 2 章 线性回归</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/2414d4b6648d405a/" class="">
+      2.1 模型的建立与求解</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/3e9ba14da71f4fd3/" class="">
+      2.2 多变量线性回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/4a16c0dc82a84e78/" class="">
+      2.3 多项式回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/f8dea699983c48c6/" class="">
+      2.4 回归模型评估</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/df41c2e97f554e68/" class="">
+      2.5 梯度下降</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/71ef816e0005492d/" class="">
+      2.6 正态分布</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/803bee4f70be4dca/" class="">
+      2.7 目标函数推导</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-a6ca5e2f846ebd900d1a868e6718dc82" class="toggle"  />
+    <label for="section-a6ca5e2f846ebd900d1a868e6718dc82" class="flex">
+      <a role="button" class="">
+        第 3 章 逻辑回归</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/96d46b53aee14c3b/" class="">
+      3.1 模型的建立与求解</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/fac70083dd764141/" class="">
+      3.2 多分类任务</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/6d7cfd79ef304cbd/" class="">
+      3.3 常见的分类评估指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/2fdc655d00c74548/" class="">
+      3.4 目标函数推导</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/a4b61c5bbadd43a6/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-9f462f716bd0e46ef79984b356eeb5a2" class="toggle" checked />
+    <label for="section-9f462f716bd0e46ef79984b356eeb5a2" class="flex">
+      <a role="button" class="">
+        第 4 章 模型的改善与泛化</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/2089400b28f54dd9/" class="">
+      4.1 基本概念</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/56b788b624cd4971/" class="">
+      4.2 特征标准化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/ca091dc393a84518/" class="">
+      4.3过拟合</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/5097d3b8c1144427/" class="">
+      4.4 正则化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/3c7eee1621d4480b/" class="active">
+      4.5 偏差、方差与交叉验证</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/c5957e0753d04746/" class="">
+      4.6 实例分析手写体识别</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/a915e49586eb4426/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-327db48e4f4df6236855078634147679" class="toggle"  />
+    <label for="section-327db48e4f4df6236855078634147679" class="flex">
+      <a role="button" class="">
+        第 5 章 K近邻</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/7c610e923e754259/" class="">
+      5.1 K近邻思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/1a97571e0a6447ef/" class="">
+      5.2 K近邻原理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/d245bda107034e65/" class="">
+      5.3 sklearn接口与示例代码</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/24378571ce404d9c/" class="">
+      5.4 kd树构建与搜索</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/40f253b916f24038/" class="">
+      5.5 从零实现K近邻</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/76818d9e48944f8c/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-94d0a5f5555d92c51e0903b148e34993" class="toggle"  />
+    <label for="section-94d0a5f5555d92c51e0903b148e34993" class="flex">
+      <a role="button" class="">
+        第 6 章 文本特征与模型复用</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/e05b5928c41d4841/" class="">
+      6.1 词袋模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/de59bf74d753457e/" class="">
+      6 .2 基于K近邻算法的垃圾邮件分类</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/c6fdc78b49d44453/" class="">
+      6.3 考虑权重的词袋模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/825fde8589654b16/" class="">
+      6.4 词云图</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/8451cffe49f5477c/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-544be5d1e48c4fd8b33ba2f91964c6dd" class="toggle"  />
+    <label for="section-544be5d1e48c4fd8b33ba2f91964c6dd" class="flex">
+      <a role="button" class="">
+        第 7 章 朴素贝叶斯</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/faf303eb93a241d1/" class="">
+      7.1 朴素贝叶斯算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/842c7b8684c747d2/" class="">
+      7.2 贝叶斯估计</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/724bf42b09bb440e/" class="">
+      7.3 朴素贝叶斯实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/1a9deee1d5f042b5/" class="">
+      7.4 多项式朴素贝叶斯原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/5c27cdd8b3264f50/" class="">
+      7.5 高斯朴素贝叶斯原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/715b8eaf245f45f1/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-d1884c6b3e8f1260019220c57d615371" class="toggle"  />
+    <label for="section-d1884c6b3e8f1260019220c57d615371" class="flex">
+      <a role="button" class="">
+        第 8 章 决策树</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/690fe2be21834c2a/" class="">
+      8.1 决策树的基本思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/ee9ada9729124049/" class="">
+      8.2 决策树建模与可视化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/5887cf1408dd4c7f/" class="">
+      8.3 决策树生成之ID3与C4.5</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/87ba589d6c17434d/" class="">
+      8.4 决策树剪枝过程</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/34bc962c974646f4/" class="">
+      8.5 从零实现ID3与C4.5算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/c44682dbb3364be4/" class="">
+      8.6 连续型特征变量下决策树实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/4eead717a84a4dbf/" class="">
+      8.7 CART生成与剪枝算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/1c72d67dffc64dc9/" class="">
+      8.8 从零实现CART算法及剪枝示例</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/ae452792b2604e84/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-1f0a2178f0a580ba251c7da2649aa52f" class="toggle"  />
+    <label for="section-1f0a2178f0a580ba251c7da2649aa52f" class="flex">
+      <a role="button" class="">
+        第 9 章 集成学习与提升算法</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/9eff4004fd6c437d/" class="">
+      9.1 集成学习算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/18980c9f757e42c8/" class="">
+      9.2 随机森林</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/8a91b358b2f74d56/" class="">
+      9.3 泰坦尼克号生还预测</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/73f6914844f549f1/" class="">
+      9.4 AdaBoost原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/71fd0e44294e4abb/" class="">
+      9.5 MultiAdaBoost原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/f3c2341ce7d64f70/" class="">
+      9.6 Gradient Boost 原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/4f9b26d5b65541f5/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f63defd924ef7373144c8643a39fd7b2" class="toggle"  />
+    <label for="section-f63defd924ef7373144c8643a39fd7b2" class="flex">
+      <a role="button" class="">
+        第 10 章 支持向量机</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/dce7180d4eb047d7/" class="">
+      引用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/515b54e2307a4c8a/" class="">
+      10.1 SVM思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/9c3862bc843c4179/" class="">
+      10.2 SVM线性不可分</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/fbdb6f8adace457d/" class="">
+      10.3 SVM原理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/1a3ffa363b1d4f83/" class="">
+      10.4 SVM中的软间隔</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/8b7a06412a9f4267/" class="">
+      10.5 拉格朗日乘数法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/40e977f0a2f84ac0/" class="">
+      10.6 对偶性与KKT条件</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/b18d45a772574ddb/" class="">
+      10.7 SVM优化问题</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/c53ed12f7bc04405/" class="">
+      10.8 SVM核函数原理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/26d9b2b328a849c2/" class="">
+      10.9 SMO算法求解SVM</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/215a1e15c0f2470d/" class="">
+      10.10 从零实现SVM分类算法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bdcc54d1c295c5cc69c9c851c02886ea" class="toggle"  />
+    <label for="section-bdcc54d1c295c5cc69c9c851c02886ea" class="flex">
+      <a role="button" class="">
+        第 11 章 聚类分析</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/f9d9305a55a548a1/" class="">
+      11.1 聚类算法的思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/e635df24de32487a/" class="">
+      11.2 Kmeans聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/e75b8efa232249ab/" class="">
+      11.3 Kmeans算法求解</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/60e49a33d1aa4f50/" class="">
+      11.4 从零实现Kmeans聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/c8b45d8a3d8c4cf4/" class="">
+      11.5 Kmeans&#43;&#43;聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/1ede2f3557d0438f/" class="">
+      11.6 聚类外部评价指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/e6a75df19f85498c/" class="">
+      11.7 加权Kmeans聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/c52cf7920f1d4636/" class="">
+      11.8 聚类内部评价指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/f95259c359b146ba/" class="">
+      11.9 聚类K值选取与分析</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/b85c1a858f7c4686/" class="">
+      11.10 基于密度的聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/2f01ba751d914336/" class="">
+      11.11 基于层次的聚类算法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bafa8c48214ccf62d333a6d0457c5f72" class="toggle"  />
+    <label for="section-bafa8c48214ccf62d333a6d0457c5f72" class="flex">
+      <a role="button" class="">
+        第 12 章 降维算法</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/9478de824edd44c6/" class="">
+      12.1 主成分分析</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/909356aa90fe456a/" class="">
+      12.2 基于核函数的主成分分析</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-d5f143889a719ce66d602e75b72bffb9" class="toggle"  />
+    <label for="section-d5f143889a719ce66d602e75b72bffb9" class="flex">
+      <a role="button" class="">
+        第 13 章 自训练与标签传播</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/8d71301c2e414efe/" class="">
+      13.1 Self-Training 自训练算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/87fdcf0be1c34644/" class="">
+      13.2 Label Propagation算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/7fc8b0fc47d2427c/" class="">
+      13.3 Label Spreading 算法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+
+
+
+
+
+
+
+
+
+
+
+
+</nav>
+
+
+
+
+  <script>(function(){var e=document.querySelector("aside .book-menu-content");addEventListener("beforeunload",function(){localStorage.setItem("menu.scrollTop",e.scrollTop)}),e.scrollTop=localStorage.getItem("menu.scrollTop")})()</script>
+
+
+
+  </div>
+</aside>
+ 
+
+    <div class="book-page">
+      <header class="book-header hidden">
+        
+  <div class="flex align-center justify-between">
+  <label for="menu-control">
+    <img src="/icons/menu.svg" class="book-icon" alt="Menu" />
+  </label>
+
+  <h3>4.5 偏差、方差与交叉验证</h3>
+
+  <label for="toc-control">
+    
+    <img src="/icons/toc.svg" class="book-icon" alt="Table of Contents" />
+    
+  </label>
+</div>
+
+
+  
+  <aside class="hidden">
+    
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#451-偏差与方差定义">4.5.1 偏差与方差定义</a></li>
+    <li><a href="#452-模型的偏差与方差">4.5.2 模型的偏差与方差</a></li>
+    <li><a href="#453-超参数选择">4.5.3 超参数选择</a></li>
+    <li><a href="#454-模型选择">4.5.4 模型选择</a></li>
+    <li><a href="#455-小结">4.5.5 小结</a></li>
+  </ul>
+</nav>
+
+
+
+  </aside>
+  
+ 
+      </header>
+
+      
+      
+  <article class="markdown book-article"><h1 id="45-偏差方差与交叉验证">4.5 偏差、方差与交叉验证<a class="anchor" href="#45-%e5%81%8f%e5%b7%ae%e6%96%b9%e5%b7%ae%e4%b8%8e%e4%ba%a4%e5%8f%89%e9%aa%8c%e8%af%81">#</a></h1>
+<p>在第4.4节中，我们介绍了什么是正则化，以及正则化为什么能够缓解过拟合的原理。同时我们知道，越是复杂的模型越可能产生过拟合的现象，这也就为模型在其他未知数据集上的预测带来了误差，但是这些误差来自哪里，又是怎么产生的呢？知道这些误差的来源后对改善我们的模型有什么样的帮助呢？接下来我们就来介绍关于误差分析及模型选择的若干方法。</p>
+<h2 id="451-偏差与方差定义">4.5.1 偏差与方差定义<a class="anchor" href="#451-%e5%81%8f%e5%b7%ae%e4%b8%8e%e6%96%b9%e5%b7%ae%e5%ae%9a%e4%b9%89">#</a></h2>
+<p>在机器学习的建模中，模型的误差普遍来自于偏差（Bias）或方差（Variance）。什么是偏差与方差呢？</p>
+<p>如图4-23所示 [12]，假设你拿着一把枪射击红色的靶心，在你连打数十枪后出现了以下4种情况：</p>
+<p>（1）所有子弹都密集打在了红色靶心的位置，这就是典型的方差小（子弹集中），偏差小（都在靶心位置）。</p>
+<p>（2）子弹都散落在靶心周围的位置，这就是典型的方差大（子弹很散乱），偏差小（都在靶心附近）。</p>
+<p>（3）所有子弹都密集打在靶心旁边的位置，这就是典型的方差小（子弹很集中），偏差大（距离靶心远）。</p>
+<p>（4）子弹都散落在靶心旁边的位置，这就是典型的方差大（子弹散乱），偏差大（距离靶心远）。</p>
+<p>由此可知，偏差描述的是预测值的期望与真实值之间的差距，即偏差越大，越偏离真实值，如图4-23第2行所示。方差描述的是预测值之间的变化范围和离散程度，也就是离其期望值的距离，即方差越大数据的分布越分散，如图4-23右列所示。</p>
+<div align=center><img width="280" src="/images/ml/p4-18.jpg"/></div><center> 图 4-23 偏差与方差</center>
+<h2 id="452-模型的偏差与方差">4.5.2 模型的偏差与方差<a class="anchor" href="#452-%e6%a8%a1%e5%9e%8b%e7%9a%84%e5%81%8f%e5%b7%ae%e4%b8%8e%e6%96%b9%e5%b7%ae">#</a></h2>
+<p>上面介绍了什么是偏差与方差，那么这4种情况又对应于机器学习中的哪些场景呢？通常来讲，一个简单的模型会带来比较小的方差（Low Variance），而复杂的模型会带来比较大的方差（High Variance）。这是由于简单的模型不容易受到噪声的影响，而复杂的模型（例如过拟合）容易受到噪声的影响而产生较大的误差。一个极端的例子，$\hat{y}=C$这个模型不管输入是什么，输出都是常数$C$，那么其对应的方差就会是0。对于偏差来讲，一个简单的模型容易产生较高的偏差（High Bias），而复杂的模型容易产生较低的偏差（Low Bias），这是由于越复杂的模型越容易拟合更多的样本。</p>
+<p>如图4-24所示为模型的偏差、方差与模型复杂度的变化情况。从图中可以看出，方差随着模型的复杂度增大而上升，偏差与之恰好相反。同时，如果一个模型的主要误差来自于较大的方差，则这个模型呈现出的就是过拟合的状态，而当一个模型的主要误差来自于较大的偏差时，此时模型呈现出的就是欠拟合状态。</p>
+<div align=center>
+<img width="320" src="/images/ml/p4-19.png"/>
+</div>
+<center>
+  图4-24模型偏差与方差
+</center>
+<p>总结来讲，模型的高方差与高偏差分别对应于过拟合与欠拟合。如果一个模型不能很好地拟合训练样本，则此时模型呈现的就是高偏差（欠拟合）的状态。 如果能够很好地拟合训练样本，但是在测试集上有较大的误差，这就意味着此时模型出现了高方差（过拟合）的状态，因此，当模型出现这类情况时，我们完全可以按照前面处理过拟合与欠拟合的方法对模型进行改善，然后在这两者之间寻找平衡。</p>
+<h2 id="453-超参数选择">4.5.3 超参数选择<a class="anchor" href="#453-%e8%b6%85%e5%8f%82%e6%95%b0%e9%80%89%e6%8b%a9">#</a></h2>
+<p>在之前的介绍中，我们知道了模型中的权重参数可以通过训练集利用梯度下降算法求解得到，但超参数又是什么呢？所谓超参数（Hyper Parameter）是指那些不能通过数据集训练得到的参数，但它的取值同样会影响最终模型的效果，因此同样重要。到目前为止，我们一共接触过了3个超参数，只是第一次出现的时候我们并没有提起其名字，在这里再做一个细致的总结。这3个超参数分别是： 惩罚系数$\lambda$、学习率$\alpha$ 及特征映射时多项式的次数，其中最为重要的是前面两个。</p>
+<p><strong>1. 惩罚系数$\lambda$</strong></p>
+<p>从4.4节内容中对正则化的介绍可知，$\lambda$越大也就意味着对模型的惩罚力度越大，最终训练得到的模型也就相对越简单，因此，在模型的训练过程中，也需要选择一个合适的$\lambda$来使模型的泛化能力尽可能好。</p>
+<p><strong>2. 学习率$\alpha$</strong></p>
+<p>在介绍线性回归的求解过程中，我们首次介绍了梯度下降算法，如式(4-26)所示。
+</p>
+$$
+W=W-\alpha \cdot \frac{\partial J}{\partial W}\tag{4-26}
+$$<p>
+并且讲过，$\alpha$ 的作用是用来控制每次向前跳跃的距离，较大的$\alpha$可以更快地跳到谷底并找到最优解，但是过大的$\alpha$同样能使目标函数在峡谷的两边来回振荡，以至于需要多次迭代才可以得到最优解，不过也可能得不到最优解。</p>
+<p>如图4-25所示为相同模型采用不同学习率后，经梯度下降算法在同一初始位置优化后的结果，其中黑色五角星表示全局最优解（Global Optimum），ite表示迭代次数。</p>
+<div align=center><img width="600" src="/images/ml/p4-20.png"/></div><center>图 4-25 凸函数优化过程</center>
+<p>从图4-25可以看出，当学习率为0.4时，模型大概在迭代12次后就基本达到了全局最优解附近。当学习率为3.5时，模型在大约迭代12次后同样能够收敛于全局最优解附近，但是，当学习率为4.1时，此时的模型已经处于了发散状态。可以发现，由于模型的目标函数为凸形函数（例如线性回归），所以尽管使用了较大的学习率3.5，目标函数依旧能够收敛，但在后面的学习过程中，遇到更多的情况便是非凸型的目标函数，此时的模型对于学习率的大小将会更加敏感。</p>
+<p>如图4-26所示为一个非凸形的目标函数，三者均从同一初始点开始进行迭代优化，只是各自采用了不同的学习率。其中黑色五角星表示全局最优解，ite表示迭代次数。</p>
+<div align=center><img width="600" src="/images/ml/p4-21.png"/></div><center>图 4-26 非凸形函数优化过程</center>
+<p>从图4-26可以看出，当采用较小的学习率0.02时，模型在迭代20次后陷入了局部最优解（Local Optimum），并且可以知道此时无论再继续迭代多少次，其依旧会收敛于此处，因为此时的梯度已经开始接近于0，而使参数无法得到更新。当采用较大一点的学习率0.4时，模型在迭代4次后便能收敛于全局最优解附近。当采用学习率为0.6时，模型在这20次的迭代过程中总是来回振荡，并且没有一次接近于全局最优解。</p>
+<p>从上面两个示例的分析可以得出，学习率的大小对于模型的收敛性及收敛速度有着严重的影响，并且非凸函数在优化过程中对于学习率的敏感性更大。同时值得注意的是，所谓学习率过大或者过小，在不同模型间没有可比性。例如在上面凸函数的图示中学习率为0.4时可能还算小，但是在非凸函数的这个例子中0.4已经算是相对较大了。</p>
+<p>经过上面的介绍，我们明白了超参数对于模型最终的性能有着重要的影响。那到底应该如何选择这些超参数呢？对于超参数的选择，首先可以列出各个参数的备选取值，例如$\alpha=[0.001,0.03,0.1,0.3,1]$，$\lambda=[0.1,0.3,1,3,10]$，然后根据不同的超参数组合训练得到不同的模型（例如这里就有25个备选模型），然后通过4.5.4节所介绍的交叉验证来确立模型。不过这一整套步骤sklearn中也有现成的类方法可供使用，并且使用起来也非常方便，在4.6节中将会通过一个详细的示例进行说明。不过随着介绍的模型越来越复杂，就会出现更多的超参数组合，训练一个模型也会花费一定的时间，因此，对于模型调参的一个基本要求就是要理解各个参数的含义，这样才可能更快地排除不可能的参数取值，以便于更快地训练出可用的模型。</p>
+<h2 id="454-模型选择">4.5.4 模型选择<a class="anchor" href="#454-%e6%a8%a1%e5%9e%8b%e9%80%89%e6%8b%a9">#</a></h2>
+<p>当在对模型进行改善时，自然而然地就会出现很多备选模型，而我们的目的便是尽可能地选择一个较好的模型，以达到低偏差与低方差之间的平衡。该如何选择一个好的模型呢？通常来讲有两种方式： 第1种就是4.3.3节中介绍过的将整个数据集划分成3部份的方式； 第2种则是使用K折交叉验证（KFold Cross Validation）[9] 的方式。对于第1种方法来说，其步骤为先在训练集上训练不同的模型，然后在验证集上选择其中表现最好的模型，最后在测试集上测试模型的泛化能力。但是这种做法的缺点在于可能某一次数据集的划分结果具有较强的偶然性，导致模型表现出来的泛化误差不准确，因此可以通过K折交叉验证来解决。同时，在数据量有限的情况下，交叉验证还可以充分利用数据，让每个样本都有机会被用作训练集和验证集。</p>
+<p>如图4-27所示，以3折交叉验证为例，首先需要将整个完整的数据集分为训练集与测试集两部分，同时再将训练集划分成3份，每次选择其中两份作为训练数据，另外一份作为验证数据进行模型的训练与验证，最后选择平均误差最小的模型。</p>
+<div align=center><img width="280" src="/images/ml/p4-22.png"/></div><center>图 4-27 交叉验证划分图</center>
+<p>假设现在有4个不同的备选模型，其各自在不同验证集上的误差如表4-1所示。根据得到的结果，可以选择平均误差最小的模型2作为最终选择的模型。进一步，再利用图4-27中的整个训练集对模型2进行一次训练，最后用测试集测试其泛化误差。当然，还有一种简单的交叉验证方式，即一开始并不划分出测试集，而是直接将整个数据划分成为K份进行交叉验证，然后选择平均误差最小的模型即可。整个详细的示例过程将在4.6节内容中进行介绍。</p>
+<center>表 4-1 3折交叉验证划分表</center><div align=center><img width="650" src="/images/ml/p4-24.jpg"/></div>
+<h2 id="455-小结">4.5.5 小结<a class="anchor" href="#455-%e5%b0%8f%e7%bb%93">#</a></h2>
+<p>在本节内容中，我们首先通过一个例子直观地介绍了什么是偏差与方差，以及在机器学习中当模型出现高偏差与高方差时所对应的现象和处理方法，然后介绍了什么是超参数，以及超参数能够给模型带来什么样的影响，最后介绍了在改善模型的过程中如何通过K折交叉验证进行模型的选择。在4.6节内容中，我们将通过一个真实的例子对上述过程进行完整介绍。</p>
+</article>
+ 
+      
+
+      <footer class="book-footer">
+        
+  <div class="flex flex-wrap justify-between">
+
+<div>
+
+</div>
+
+<div>
+
+</div>
+
+</div>
+
+<div class="flex flex-wrap justify-between">
+    <span>
+    
+      <a href="/ml/chapter04/5097d3b8c1144427/" class="flex align-center">
+        <img src="/icons/backward.svg" class="book-icon" alt="Backward" />
+        <span>4.4 正则化</span>
+      </a>
+    
+    </span>
+    <span>
+    
+      <a href="/ml/chapter04/c5957e0753d04746/" class="flex align-center">
+        <span>4.6 实例分析手写体识别</span>
+        <img src="/icons/forward.svg" class="book-icon" alt="Forward" />
+      </a>
+    
+    </span>
+  </div>
+
+ 
+        
+  
+  <div class="book-comments">
+
+</div>
+  
+ 
+        
+  <link rel="stylesheet" href="/katex/katex.min.css" />
+  <script defer src="/katex/katex.min.js"></script>
+  <script defer src="/katex/auto-render.min.js"></script>
+  
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        if (window.renderMathInElement) {
+          renderMathInElement(
+            document.querySelector(".book-page"),
+            Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
+          );
+        }
+      });
+    </script>
+  
+
+
+        
+  
+ 
+        
+  
+    <script>(function(){document.querySelectorAll("pre:has(code)").forEach(e=>{e.addEventListener("click",e.focus),e.addEventListener("copy",function(t){if(t.preventDefault(),navigator.clipboard){const t=window.getSelection().toString()||e.textContent;navigator.clipboard.writeText(t)}})})})()</script>
+  
+
+      </footer>
+
+      <label for="menu-control" class="hidden book-menu-overlay"></label>
+    </div>
+
+    
+  
+  <aside class="book-toc">
+    <div class="book-toc-content">
+      
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#451-偏差与方差定义">4.5.1 偏差与方差定义</a></li>
+    <li><a href="#452-模型的偏差与方差">4.5.2 模型的偏差与方差</a></li>
+    <li><a href="#453-超参数选择">4.5.3 超参数选择</a></li>
+    <li><a href="#454-模型选择">4.5.4 模型选择</a></li>
+    <li><a href="#455-小结">4.5.5 小结</a></li>
+  </ul>
+</nav>
+
+
+
+    </div>
+  </aside>
+  
+ 
+  </main>
+
+  
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
