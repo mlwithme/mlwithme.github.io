@@ -26,27 +26,36 @@ $$ \begin{aligned} \text{moving\_mean} &amp;= \text{momentum} \times \text{movin
 ">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
-<meta name="color-scheme" content="light dark"><meta property="og:url" content="https://mlwithme.github.io/dl/chapter06/27ed3ed136e24092/">
-	<meta property="og:site_name" content="《从零学AI指南手册》">
-	<meta property="og:title" content="6.3 批归一化">
-	<meta property="og:description" content="6.3 批归一化# 在前面两节内容中，我们详细介绍了如何通过学习率动态调整以及梯度裁剪策略来提高模型的效果，在接下来的几节内容中我们将开始陆续介绍一些能够加速模型收敛速度的优化方法。我们知道，在机器学习中一种常见的提高模型收敛速度的方法就是对输入特征进行标准化，例如将每一列特征维度的方差和均值分别标准化为0和1。虽然在深度学习中我们也能够采用这一策略，但这还远远不够。在本节内容中，我们将会介绍深度学习中使用最为广泛的，由谷歌于2015年发表在ICML上所介绍的一种标准化方法——批归一化（Batch Normalization, BN）[1]。
-6.3.1 批归一化动机# 在深度学习中，随着网络层数的加深越是越靠近输入层的权重参数其对应的梯度也将会越小（这是由反向传播的性质所决定，可见3.3节内容），所以这就导致靠近输出层的权重参数能够更容易的得到训练，而靠近输入层的权重参数则更新缓慢。也正是由于两端的权重参数在更新节奏上相差太大网络底部的参数更新不及时，使得顶部的参数每次都要根据底部的前向传播结果来重新适应数据的分布，从而加大了网络的训练难度。
-假设现在有式(6-10)所示这么一个网络 $$ \mathcal{L}=F_2(F_1(u,\Theta_1),\Theta_2)\tag{6-10} $$ 其中$F_1,F_2$为任意的两个非线性变换，$u$为原始的网络输入，$\Theta_1,\Theta_2$分别为两个网络层的参数。
-现在的目的是通过最小化$\mathcal{L}$来求得参数$\Theta_1,\Theta_2$的取值。此时，我们也可以将$F_2$的输入看成是$x=F_1(u,\Theta_1)$，那么根据式(6-10)有 $$ \mathcal{L}=F_2(x,\Theta_2)\tag{6-11} $$ 接着根据式(6-12)就可以完成参数$\Theta_2$的迭代求解 $$ \Theta_2\leftarrow\Theta_2-\alpha\frac{\partial F_2(x,\Theta_2)}{\partial \Theta_2}\tag{6-12} $$ 由式(6-12)可知，由于输入$u$的分布每次在经过网络层$F_1$之后都会发生改变，这意味着网络层$F_2$中的参数$\Theta_2$每次都需要重新来学习适应输入值$x$的分布。也就是说，尽管一开始对原始的输入$u$进行了标准化，但经历过一个网络层后它的分布就发生了改变，那么下一层又需要重新学习另外一种分布，这就意味着每一层其实都是在学习不同的分布。Batch Normalization的思想便是在神经网络中添加一层归一化操作，使得网络中每一层输入的分布都尽可能地接近标准高斯分布，从而减轻这种问题。
-6.3.2 批归一化原理# 1. 归一化原理
-假设现在有一个$d$维的网络层，其输出为$x=(x^{(1)},x^{(2)},...,x^{(d)})$，那么对于每一个维度都可以通过式(6-13)中的方法进行标准化 $$ \hat{x}^{(k)}=\frac{x^{(k)}-E[x^{(k)}]}{\sqrt{Var[x^{(k)}]}}\tag{6-13} $$其中，$E[x^{(k)}]$和$Var[x^{(k)}]$分别是第$k$个维度在所有样本上计算得到的期望和方差。
-但如果仅仅只是简单通过式(6-13)中的计算方法来对每个维度进行标准化，那么在某些情况下将会改变该维度原有的表示信息。例如在对Sigmoid激活函数的输入值进行标准化时，通过公式(6-13)标准化后的输入值可能只会趋于0附近，从而把Sigmoid变成了一个线性激活函数。为了解决这一问题，可以加入了一组学习的参数$\gamma^{(k)}$和$\beta^{(k)}$来对$\hat{x}^{(k)}$进行了一次线性变换，即 $$ y^{(k)}=\gamma^{(k)}\hat{x}^{(k)}&#43;\beta^{(k)}\tag{6-14} $$ 其中$y^{(k)}$就是最后得到的标准化结果，而$\gamma^{(k)}$和$\beta^{(k)}$也会随着网络中的权重参数一起训练，当且仅当$\gamma^{(k)}=\sqrt{Var[x^{(k)}]}$，$\beta^{(k)}=E[x^{(k)}]$时，公式(6-14)就变成了恒等变换，也就相当于没有进行标准化（如果网络确实需要的话）。
-2. 小批量归一化
-由于计算机硬件条件的限制等，我们不可能同时将所有的数据一次性输入到网络中进行训练，因此通常情况下都是输入小批量的样本到网络中进行训练，而这也是小批量归一化这个名字的由来。
-现假设现有一个样本数量为$m$的小批量数据$\mathcal{B}=\{x_1,x_2,\cdots, x_m\}$，同时由于BN是独立地对每个神经元的输出值进行标准化，这意味着每个神经元都有自己独立的参数，这里以对第$k$个神经元标准化为例进行介绍。具体的，对于整个BN的详细过程为
-①在小批量数据样本上根据式(6-15)计算第$k$个神经元输出结果的均值 $$ \mu_{\mathcal{B}}\leftarrow\frac{1}{m}\sum_{i=1}^mx_i\tag{6-15} $$ ②在小批量数据样本上根据式(6-16)计算第$k$个神经元输出结果的方差 $$ \sigma^2_{\mathcal{B}}\leftarrow\frac{1}{m}\sum_{i=1}^m(x_i-\mu_{\mathcal{B}})^2\tag{6-16} $$ ③根据式(6-17)以及$\mu_{\mathcal{B}}$和$\sigma^2_{\mathcal{B}}$对$x_i$进行标准化 $$ \hat{x}_i\leftarrow\frac{x_i-\mu_{\mathcal{B}}}{\sqrt{\sigma^2_{\mathcal{B}}&#43;\epsilon}}\tag{6-17} $$ ④根据式(6-18)对$\hat{x}_i$进行缩放和平移 $$ y_i\leftarrow \gamma\hat{x}_{i}&#43;\beta\equiv \text{BN}_{\gamma,\beta}(x_i)\tag{6-18} $$ 其中$\mu_{\mathcal{B}}$为在小批量样本$\mathcal{B}$上对$x_i$期望的估计，$\sigma^2_{\mathcal{B}}$为对$x_i$方差的估计，而$\hat{x}_i$则表示标准化后的结果，$y_i$表示线性变换后的结果，也就是最后真正需要的结果。同时，为了防止方差为0的情况在进行标准化时分母额外的加了一个很小的常数$\epsilon$。这里需要说明的是，$\mu_{\mathcal{B}}$和$\sigma^2_{\mathcal{B}}$并不是整个数据集真实的期望与方差，而仅仅只是根据采样的小批量样本估计得到。
-3. 预测时的归一化
-根据上面内容的介绍，我们已经清楚了批归一化在网络训练时的详细计算过程，同时根据式(6-15)~式(6-18)可知，批归一化中一共有5个参数，$\mu_{\mathcal{B}},\sigma^2_{\mathcal{B}},\epsilon,\gamma$和$\beta$。在这5个参数中，模型在训练阶段里前两个参数是在小批量样本中估计得到，第3个参数则是预先设定的常数（例如1e-5)，后面两个参数是随机初始化后随着网络一起训练得到。所以，现在的问题便是当模型在预测阶段时$\mu_{\mathcal{B}},\sigma^2_{\mathcal{B}}$应该如何得到？
-为了保证模型在整个测试阶段所使用到的均值$\mu_{\mathcal{B}}$和方差$\sigma^2_{\mathcal{B}}$都相同，一种常见的做法便是在训练过程中采用移动平均策略来估计整个训练集的均值和方差并用于测试阶段中，具体的计算方式为
-$$ \begin{aligned} \text{moving\_mean} &amp;= \text{momentum} \times \text{moving\_mean} &#43; (1.0 - \text{momentum}) \times \text{mean}\\ \text{moving\_var} &amp;= \text{momentum} \times \text{moving\_var} &#43; (1.0 - \text{momentum}) \times \text{var} \end{aligned}\tag{6-19} $$其中$\text{mean}$和$\text{var}$是指在每个小批量样本上通过式(6-15)和式(6-16)估计而来，并且通过调节系数$\text{momentum}$可以控制$\text{moving\_mean}$和$\text{moving\_var}$到底是更接近于真实的值还是训练时每个小批量上的估计值。">
-	<meta property="og:locale" content="zh_CN">
-	<meta property="og:type" content="article">
-		<meta property="article:section" content="dl">
+<meta name="color-scheme" content="light dark">
+
+
+
+
+
+
+
+  
+
+
+
+  
+
+<meta property="og:url" content="https://mlwithme.github.io/dl/chapter06/27ed3ed136e24092/">
+<meta property="og:site_name" content="《从零学AI指南手册》">
+<meta property="og:title" content="6.3 批归一化">
+<meta property="og:description" content="6.3 批归一化# 在前面两节内容中，我们详细介绍了如何通过学习率动态调整以及梯度裁剪策略来提高模型的效果，在接下来的几节内容中我们将开始陆续介绍一些能够加速模型收敛速度的优化方法。我们知道，在机器学习中一种常见的提高模型收敛速度的方法就是对输入特征进行标准化，例如将每一列特征维 …">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:type" content="article">
+<meta property="og:image" content="https://mlwithme.github.io/images/dl/logo.jpg">
+<meta property="og:image:url" content="https://mlwithme.github.io/images/dl/logo.jpg">
+<meta property="og:image:secure_url" content="https://mlwithme.github.io/images/dl/logo.jpg">
+<meta property="og:image:width" content="1272">
+<meta property="og:image:height" content="1272">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:alt" content="《从零学AI指南手册》 - 6.3 批归一化">
+
+  <meta property="article:section" content="dl">
+
 
 
 	<meta itemprop="name" content="6.3 批归一化">
@@ -71,7 +80,7 @@ $$ \begin{aligned} \text{moving\_mean} &amp;= \text{momentum} \times \text{movin
 <link rel="icon" href="/favicon.png" >
 <link rel="manifest" href="/manifest.json">
 <link rel="canonical" href="https://mlwithme.github.io/dl/chapter06/27ed3ed136e24092/">
-<link rel="stylesheet" href="/book.min.e05a209bbdff79665f7fe0efc0036069c4851a205de335e26fce75ad3570d2cd.css" integrity="sha256-4Fogm73/eWZff&#43;DvwANgacSFGiBd4zXib851rTVw0s0=" crossorigin="anonymous">
+<link rel="stylesheet" href="/book.min.a3b3c189ec36eda25846e6a5241268b0c27b5b76ed9c0b34b9b3e6d3cae2a18c.css" integrity="sha256-o7PBiew27aJYRualJBJosMJ7W3btnAs0ubPm08rioYw=" crossorigin="anonymous">
 
 
   <script defer type="module" src="/en.search.min.d6b14dbcd48978b2c41611d06e5387dc896ddf705e423dd9152973bfd6c6096a.js" integrity="sha256-1rFNvNSJeLLEFhHQblOH3Ilt33BeQj3ZFSlzv9bGCWo=" crossorigin="anonymous"></script>
@@ -3621,14 +3630,6 @@ $$ \begin{aligned} \text{moving\_mean} &amp;= \text{momentum} \times \text{movin
         referrerpolicy="no-referrer"
       >
     </a>
-    <button
-      class="book-page-share-btn"
-      type="button"
-      data-share-url="https://mlwithme.github.io/dl/chapter06/27ed3ed136e24092/"
-      data-share-title="6.3 批归一化"
-    >
-      <span>转发分享</span>
-    </button>
   </section>
 
 
@@ -3898,34 +3899,6 @@ $$<p>
             Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
           );
         }
-
-        document.querySelectorAll(".book-page-share-btn").forEach(function (btn) {
-          btn.addEventListener("click", async function () {
-            var url = btn.dataset.shareUrl;
-            var title = btn.dataset.shareTitle || document.title;
-            var originalText = btn.textContent;
-
-            try {
-              if (navigator.share) {
-                await navigator.share({ title: title, url: url });
-                return;
-              }
-
-              if (navigator.clipboard && url) {
-                await navigator.clipboard.writeText(url);
-                btn.textContent = "链接已复制";
-                window.setTimeout(function () {
-                  btn.textContent = originalText;
-                }, 1500);
-              }
-            } catch (err) {
-              btn.textContent = "分享失败";
-              window.setTimeout(function () {
-                btn.textContent = originalText;
-              }, 1500);
-            }
-          });
-        });
       });
     </script>
   
@@ -3982,14 +3955,6 @@ $$<p>
         referrerpolicy="no-referrer"
       >
     </a>
-    <button
-      class="book-page-share-btn"
-      type="button"
-      data-share-url="https://mlwithme.github.io/dl/chapter06/27ed3ed136e24092/"
-      data-share-title="6.3 批归一化"
-    >
-      <span>转发分享</span>
-    </button>
   </section>
 
 

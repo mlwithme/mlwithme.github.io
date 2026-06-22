@@ -25,26 +25,36 @@ https://github.com/alex-shpak/hugo-book
 ">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
-<meta name="color-scheme" content="light dark"><meta property="og:url" content="https://mlwithme.github.io/dl/chapter10/64d3ec5593ec4b94/">
-	<meta property="og:site_name" content="《从零学AI指南手册》">
-	<meta property="og:title" content="10.11 BERT命名体识别模型">
-	<meta property="og:description" content="10.11 BERT命名体识别模型# 在前面几节内容中我们陆续介绍了3种基于BERT预训练模型的下游任务，包括文本分类、问题选择和问题回答模型。在本节内容中，我们将会介绍最后一个基于BERT预训练模型的下游任务，命名体识别（Named Entity Recognition, NER）。所谓命名体指的是输入模型一句文本，最后需要模型将其中的实体，例如人名、地名、组织等标记出来。
-例如:
-1 句子:涂伊说，如果有机会他想去黄州赤壁看一看! 2 标签:[&#39;B-PER&#39;, &#39;I-PER&#39;, &#39;O&#39;, &#39;O&#39;, &#39;O&#39;, &#39;O&#39;, &#39;O&#39;, &#39;O&#39;, &#39;O&#39;, &#39;O&#39;, &#39;O&#39;, &#39;O&#39;, &#39;B-LOC&#39;, &#39;I-LOC&#39;, &#39;B-LOC&#39;, &#39;I-LOC&#39;, &#39;O&#39;, &#39;O&#39;, &#39;O&#39;, &#39;O&#39;] 3 实体:涂伊（人名）、黄州（地名）、赤壁（地名）在10.9节内容中我们提到，通常来讲几乎对于所有NLP任务来说最后所要完成的本质上都是一个分类任务，因此在NER任务中也不例外。根据上面给出的标签来看，对于原始句子中的每个字符来说其都有一个对应的类别标签，因此对于NER 任务来说只需对原始句子里每个字符进行分类，然后再将预测后的结果进行后处理便能够得到句子中存在的相应实体。这种对BERT最后一层每个字符进行分类的做法也类似于在上一节中介绍到的问题回答任务。
-10.11.1 任务构造原理# 正如上面所说，对于命名体识别这个任务场景来说其本质上依旧可以归结为分类任务，只是关键在于如何构建这个任务以及整个数据集。对于这个任务场景来说，模型的整体原理如图10-37所示。
-图 10-37 命名体识别原理图 如图10-37所示便是一个基于BERT预训练模型的NER任务原理图。从图中可以看出原始输入为一个单句，我们只需要在句子的首尾分别加上[CLS]和[SEP]，然后将其输入到模型当中进行特征提取并最终通过一个分类层对输出的每个向量进行分类即可。在推理过程中，只需要对每个位置的预测结果进行后处理便能够实现整个NER任务。
-到此，对于问答选择整个模型的原理就介绍完了，下面首先来看如何构造数据集。
-10.11.2 数据预处理# 1. 语料介绍
-在这里，我们使用到的是一个中文命名体识别数据集[1]，如下所示便是原始数据的存储形式：
-1 涂 B-PER 2 伊 I-PER 3 说 O 4 ... 5 黄 B-LOC 6 州 I-LOC 7 赤 B-LOC 8 壁 I-LOC 其中每一行包含一个字符和其所属类别，B-表示该类实体的开始标 志，I-表示该类实体的延续标志。例如对于第5~8行来说分别对应了“黄州”和 “赤壁”这两个实体。同时，对于该数据集来说，其一共包含有3类实体（人名、地名和组织），因此其对应的分类总数便为7，如下所示：
-1 {&#39;O&#39;: 0, &#39;B-ORG&#39;: 1,&#39;B-LOC&#39;: 2,&#39;B-PER&#39;: 3,&#39;I-ORG&#39;: 4, &#39;I-LOC&#39;: 5, &#39;I-PER&#39;: 6}进一步，我们便可以根据需要来构造模型训练时的数据集。
-2. 数据集构造
-在数据集构造部分同样包含载入原始数据、重构样本、样本填充构造迭代器等过程。由于这些内容我们在前面几节内容中已经多次提及，所以这里我们只对其中的关键部分进行介绍。同样，整体上我们依旧可以继承文本分类处理中的LoadSingleSentenceClassificationDataset类，然后再稍微修改其中的部分方法。
-首先是在data_process()函数中定义如何完成原始样本的构建过程， 示例代码如下所示：
-1 def data_process(self, file_path): 2 raw_iter = open(file_path, encoding=&#34;utf8&#34;).readlines() 3 data, max_len, tmp_token_ids = [], 0, [] 4 tmp_sentence,tmp_label, tmp_entity = &#34;&#34;, [], [] 5 for raw in tqdm(raw_iter, ncols=80): 6 line = raw.rstrip(&#34;\n&#34;).split(self.split_sep) 7 if len(line) == 1: 8 if len(tmp_token_ids) &gt; self.max_position_embeddings - 2: 9 tmp_token_ids = tmp_token_ids[:self.max_position_embeddings - 2] 10 tmp_label = tmp_label[:self.max_position_embeddings - 2] 11 max_len = max(max_len, len(tmp_label) &#43; 2) 12 token_ids = torch.tensor([self.CLS_IDX] &#43; tmp_token_ids &#43; 13 [self.SEP_IDX], dtype=torch.long) 14 labels = torch.tensor([self.IGNORE_IDX] &#43; tmp_label &#43; 15 [self.IGNORE_IDX], dtype=torch.long) 16 data.append([tmp_sentence, token_ids, labels]) 17 assert len(tmp_token_ids) == len(tmp_label) 18 tmp_token_ids,tmp_sentence = [], &#34;&#34; 19 tmp_label,tmp_entity = [], [] 20 continue 21 tmp_sentence &#43;= line[0] 22 tmp_token_ids.append(self.vocab[line[0]]) 23 tmp_label.append(self.entities[line[-1]]) 24 tmp_entity.append(line[-1]) 25 return data, max_len在上述代码中，第2行是一次性读取原始数据中的所有行。第3行分别用于保存预处理结束后的数据、所有样本中的最大长度和每个样本索引。第4行分别用于保存每个原始样本、对应的标签类别和原始标签值，主要用于观察预处理时的中间结果。第5行开始遍历原始数据中的每一行。第7行表示已经将上一个样本处理完毕。第7~10行是判断长度是否超过最大长度。第11行用来记录所有句子的最大长度。第12~15行是用来构造模型输入和正确标签。第21~24行分别是对当前样本中的每个字符进行相应的处理。">
-	<meta property="og:locale" content="zh_CN">
-	<meta property="og:type" content="article">
-		<meta property="article:section" content="dl">
+<meta name="color-scheme" content="light dark">
+
+
+
+
+
+
+
+  
+
+
+
+  
+
+<meta property="og:url" content="https://mlwithme.github.io/dl/chapter10/64d3ec5593ec4b94/">
+<meta property="og:site_name" content="《从零学AI指南手册》">
+<meta property="og:title" content="10.11 BERT命名体识别模型">
+<meta property="og:description" content="10.11 BERT命名体识别模型# 在前面几节内容中我们陆续介绍了3种基于BERT预训练模型的下游任务，包括文本分类、问题选择和问题回答模型。在本节内容中，我们将会介绍最后一个基于BERT预训练模型的下游任务，命名体识别（Named Entity Recognition, …">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:type" content="article">
+<meta property="og:image" content="https://mlwithme.github.io/images/dl/logo.jpg">
+<meta property="og:image:url" content="https://mlwithme.github.io/images/dl/logo.jpg">
+<meta property="og:image:secure_url" content="https://mlwithme.github.io/images/dl/logo.jpg">
+<meta property="og:image:width" content="1272">
+<meta property="og:image:height" content="1272">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:alt" content="《从零学AI指南手册》 - 10.11 BERT命名体识别模型">
+
+  <meta property="article:section" content="dl">
+
 
 
 	<meta itemprop="name" content="10.11 BERT命名体识别模型">
@@ -68,7 +78,7 @@ https://github.com/alex-shpak/hugo-book
 <link rel="icon" href="/favicon.png" >
 <link rel="manifest" href="/manifest.json">
 <link rel="canonical" href="https://mlwithme.github.io/dl/chapter10/64d3ec5593ec4b94/">
-<link rel="stylesheet" href="/book.min.e05a209bbdff79665f7fe0efc0036069c4851a205de335e26fce75ad3570d2cd.css" integrity="sha256-4Fogm73/eWZff&#43;DvwANgacSFGiBd4zXib851rTVw0s0=" crossorigin="anonymous">
+<link rel="stylesheet" href="/book.min.a3b3c189ec36eda25846e6a5241268b0c27b5b76ed9c0b34b9b3e6d3cae2a18c.css" integrity="sha256-o7PBiew27aJYRualJBJosMJ7W3btnAs0ubPm08rioYw=" crossorigin="anonymous">
 
 
   <script defer type="module" src="/en.search.min.d6b14dbcd48978b2c41611d06e5387dc896ddf705e423dd9152973bfd6c6096a.js" integrity="sha256-1rFNvNSJeLLEFhHQblOH3Ilt33BeQj3ZFSlzv9bGCWo=" crossorigin="anonymous"></script>
@@ -3614,14 +3624,6 @@ https://github.com/alex-shpak/hugo-book
         referrerpolicy="no-referrer"
       >
     </a>
-    <button
-      class="book-page-share-btn"
-      type="button"
-      data-share-url="https://mlwithme.github.io/dl/chapter10/64d3ec5593ec4b94/"
-      data-share-title="10.11 BERT命名体识别模型"
-    >
-      <span>转发分享</span>
-    </button>
   </section>
 
 
@@ -3813,34 +3815,6 @@ https://github.com/alex-shpak/hugo-book
             Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
           );
         }
-
-        document.querySelectorAll(".book-page-share-btn").forEach(function (btn) {
-          btn.addEventListener("click", async function () {
-            var url = btn.dataset.shareUrl;
-            var title = btn.dataset.shareTitle || document.title;
-            var originalText = btn.textContent;
-
-            try {
-              if (navigator.share) {
-                await navigator.share({ title: title, url: url });
-                return;
-              }
-
-              if (navigator.clipboard && url) {
-                await navigator.clipboard.writeText(url);
-                btn.textContent = "链接已复制";
-                window.setTimeout(function () {
-                  btn.textContent = originalText;
-                }, 1500);
-              }
-            } catch (err) {
-              btn.textContent = "分享失败";
-              window.setTimeout(function () {
-                btn.textContent = originalText;
-              }, 1500);
-            }
-          });
-        });
       });
     </script>
   
@@ -3893,14 +3867,6 @@ https://github.com/alex-shpak/hugo-book
         referrerpolicy="no-referrer"
       >
     </a>
-    <button
-      class="book-page-share-btn"
-      type="button"
-      data-share-url="https://mlwithme.github.io/dl/chapter10/64d3ec5593ec4b94/"
-      data-share-title="10.11 BERT命名体识别模型"
-    >
-      <span>转发分享</span>
-    </button>
   </section>
 
 

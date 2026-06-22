@@ -33,34 +33,38 @@ https://github.com/alex-shpak/hugo-book
 ">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
-<meta name="color-scheme" content="light dark"><meta property="og:url" content="https://mlwithme.github.io/ml/chapter06/e05b5928c41d4841/">
-	<meta property="og:site_name" content="《从零学AI指南手册》">
-	<meta property="og:title" content="6.1 词袋模型">
-	<meta property="og:description" content="在前面几个章节的示例介绍中，我们所用到的数据集都是已经处理好的数据，换句话说这些数据集的每个特征维度都已经转换成了可用于计算的数值形式，但是在实际的建模任务中，我们获得的数据集可能并不是这样的形式。例如文本形式的这类数据是我们在实际场景中会经常遇到的。同时，对于一个训练完成的模型通常我们都需要将其进行持久化保存以便在实际预测场景中进行使用。在本章内容中，我们首先将会介绍3中常见的文本向量化方法，然后再介绍如何对训练完成的模型进行持久化保存。整个第6章的学习路线如图6-1所示。
-图 6-1 文本特征提取与模型复用学习路线图 6.1 词袋模型# 如何对文本内容进行表示是整个机器学习领域中的一个重要研究方向。例如，对于下面这样一个邮件来说，应该采用什么样的方式对其进行量化呢？同时，我们知道在建模过程中需要保证每个样本的特征维度数都一样，但是这里每一封邮件的长度却并不同，这又该怎么处理呢？接下来，我们开始介绍机器学习中的第1种文本向量化方法——词袋模型（Bag Of Words, BOW）。
-“股权分置已经牵动全国股民的心，是机会？还是陷阱？如果是机会，则应该如何把握？如果是陷阱，则应该如何规避？请单击此网址索取和讯专家团针对股权分置的操作指导： http://www.spam.com/gwyqxjqxx/ ”。
-6.1.1 理解词袋模型# 什么是词袋模型呢？其实词袋模型这个叫法非常形象，突出了模型的核心思想。所谓词袋模型是指，首先将训练样本中所有不重复的词放到这个袋子中构成一个有序词表（字典）；然后以这个词表为标准来遍历每个样本。如果词表中对应位置的词出现在样本中，则词表对应位置就用1来表示，没有出现就用0来表示；最后，对于每个样本来讲都将其向量化成了一个和词表长度一样的只含有0和1的向量。
-如图6-2所示，此示意图为一个直观的词袋模型转换示意图。左边为原始数据集（包含两个样本），中间为词表，右边为向量化的结果。
-图 6-2 词袋模型原理示意图 其中[1 1 0 1]的含义就是，在样本“机器学习是人工智能的子集”中有3个词出现在词表当中，分别是“机器学习”、“人工智能”和“子集”。
-因此，词袋模型的处理流程可以总结为以下3步：
-1. 文本分词
-首先需要将原始数据的每个样本进行分词处理（英文语料可以跳过这步）。
-2. 构造词表
-然后在所有的分词结果中去掉重复部分，保证每个词语只出现一次，并且同时要以任意一种顺序来固定词表中每个词的位置。
-3. 文本向量化
-遍历每个数据样本，若词表中的词出现在该样本中，则对应位置为1，否则为0。
-在图6-2中，对样本“机器学习是人工智能的子集”来讲，其中有3个词出现在词表中，所以词表中每个词的对应位置为1，而“深度学习”这个词并没有出现在样本中，所以对应位置为0。
-可以看出，向量化后每个样本特征维度的长度都和词表长度相同（图6-2中为4）。虽然这样做的好处是词表包含了样本中所有出现过的词，但是却很容易导致维度灾难。因为通常一个一般大小的中文数据集，可能会出现数万个词语（而这意味着转化后向量的维度也有这么大），所以在实际处理中，在分词结束后通常还会进行词频统计这一步，即统计每个词在数据集中出现的次数，然后只选择其中出现频率最高的前K个词作为最终的词表。最后，通常也会将一些无意义的虚词，即停用词（Stop Words）去掉，例如“的”、“啊”、“了”等。
-6.1.2 文本分词# 通过6.1.1节内容的介绍可以知道，向量化的第1步是需要对文本进行分词处理。下面我们将介绍一款常用的开源分词工具jieba。当然，使用jieba库的前提是先要安装，读者可以先进入对应的虚拟环境中，然后通过命令pip install jieba进行安装。
-这里先用下面这段文本进行分词处理并做词频统计。
-央视网消息： 当地时间11日，美国国会参议院以88票对11票的结果通过了一项动议，允许国会“在总统以国家安全为由决定征收关税时”发挥一定的限制作用。这项动议主要针对加征钢、铝关税的232调查，目前尚不具有约束力。动议的主要发起者——共和党参议员鲍勃·科克说，11日的投票只是一小步，他会继续推动进行有约束力的投票。
-可以看到，这段文本中还包含了很多标点符号和数字，显然暂时不需要这些内容，所以在分词的时候可以通过正则表达式进行过滤。同时，jieba库分别提供了两种分词模式来应对不同场景下的中文分词，下面分别进行介绍。完整代码可参见AllBooKCode/Chapter06/C01_cut_words.py 文件。
-1. 普通分词模式
-普通分词模式指的是按照常规的分词方法，将一个句子分割成多个词语的组成形式，代码如下：
-1 import jieba,re 2 def cutWords(s, cut_all=False): 3 cut_words = [] 4 s = re.sub(&#34;[A-Za-z0-9\：\·\—\，\。\“ \”]&#34;, &#34;&#34;, s) 5 seg_list = jieba.cut(s, cut_all=cut_all) 6 cut_words.append(&#34;/&#34;.join(seg_list))在上述代码中，第4行是将所有字母、数字、冒号、逗号、句号等过滤掉，第5行用来完成分词处理的过程，其中当cut_all = False时，表示普通分词模式；第6行是将所有分词后的结果以/进行分割展示。根据上述代码分词结束后便能看到以下所示的结果：">
-	<meta property="og:locale" content="zh_CN">
-	<meta property="og:type" content="article">
-		<meta property="article:section" content="ml">
+<meta name="color-scheme" content="light dark">
+
+
+
+
+
+  
+
+
+
+  
+
+
+
+  
+
+<meta property="og:url" content="https://mlwithme.github.io/ml/chapter06/e05b5928c41d4841/">
+<meta property="og:site_name" content="《从零学AI指南手册》">
+<meta property="og:title" content="6.1 词袋模型">
+<meta property="og:description" content="在前面几个章节的示例介绍中，我们所用到的数据集都是已经处理好的数据，换句话说这些数据集的每个特征维度都已经转换成了可用于计算的数值形式，但是在实际的建模任务中，我们获得的数据集可能并不是这样的形式。例如文本形式的这类数据是我们在实际场景中会经常遇到的。同时，对于一个训练完成的模型 …">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:type" content="article">
+<meta property="og:image" content="https://mlwithme.github.io/images/ml/logo.jpg">
+<meta property="og:image:url" content="https://mlwithme.github.io/images/ml/logo.jpg">
+<meta property="og:image:secure_url" content="https://mlwithme.github.io/images/ml/logo.jpg">
+<meta property="og:image:width" content="1272">
+<meta property="og:image:height" content="1272">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:alt" content="《从零学AI指南手册》 - 6.1 词袋模型">
+
+  <meta property="article:section" content="ml">
+
 
 
 	<meta itemprop="name" content="6.1 词袋模型">
@@ -92,7 +96,7 @@ https://github.com/alex-shpak/hugo-book
 <link rel="icon" href="/favicon.png" >
 <link rel="manifest" href="/manifest.json">
 <link rel="canonical" href="https://mlwithme.github.io/ml/chapter06/e05b5928c41d4841/">
-<link rel="stylesheet" href="/book.min.e05a209bbdff79665f7fe0efc0036069c4851a205de335e26fce75ad3570d2cd.css" integrity="sha256-4Fogm73/eWZff&#43;DvwANgacSFGiBd4zXib851rTVw0s0=" crossorigin="anonymous">
+<link rel="stylesheet" href="/book.min.a3b3c189ec36eda25846e6a5241268b0c27b5b76ed9c0b34b9b3e6d3cae2a18c.css" integrity="sha256-o7PBiew27aJYRualJBJosMJ7W3btnAs0ubPm08rioYw=" crossorigin="anonymous">
 
 
   <script defer type="module" src="/en.search.min.d6b14dbcd48978b2c41611d06e5387dc896ddf705e423dd9152973bfd6c6096a.js" integrity="sha256-1rFNvNSJeLLEFhHQblOH3Ilt33BeQj3ZFSlzv9bGCWo=" crossorigin="anonymous"></script>
@@ -3642,14 +3646,6 @@ https://github.com/alex-shpak/hugo-book
         referrerpolicy="no-referrer"
       >
     </a>
-    <button
-      class="book-page-share-btn"
-      type="button"
-      data-share-url="https://mlwithme.github.io/ml/chapter06/e05b5928c41d4841/"
-      data-share-title="6.1 词袋模型"
-    >
-      <span>转发分享</span>
-    </button>
   </section>
 
 
@@ -3843,34 +3839,6 @@ https://github.com/alex-shpak/hugo-book
             Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
           );
         }
-
-        document.querySelectorAll(".book-page-share-btn").forEach(function (btn) {
-          btn.addEventListener("click", async function () {
-            var url = btn.dataset.shareUrl;
-            var title = btn.dataset.shareTitle || document.title;
-            var originalText = btn.textContent;
-
-            try {
-              if (navigator.share) {
-                await navigator.share({ title: title, url: url });
-                return;
-              }
-
-              if (navigator.clipboard && url) {
-                await navigator.clipboard.writeText(url);
-                btn.textContent = "链接已复制";
-                window.setTimeout(function () {
-                  btn.textContent = originalText;
-                }, 1500);
-              }
-            } catch (err) {
-              btn.textContent = "分享失败";
-              window.setTimeout(function () {
-                btn.textContent = originalText;
-              }, 1500);
-            }
-          });
-        });
       });
     </script>
   
@@ -3925,14 +3893,6 @@ https://github.com/alex-shpak/hugo-book
         referrerpolicy="no-referrer"
       >
     </a>
-    <button
-      class="book-page-share-btn"
-      type="button"
-      data-share-url="https://mlwithme.github.io/ml/chapter06/e05b5928c41d4841/"
-      data-share-title="6.1 词袋模型"
-    >
-      <span>转发分享</span>
-    </button>
   </section>
 
 

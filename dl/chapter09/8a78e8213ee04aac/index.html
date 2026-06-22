@@ -21,22 +21,36 @@ https://github.com/alex-shpak/hugo-book
 ">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
-<meta name="color-scheme" content="light dark"><meta property="og:url" content="https://mlwithme.github.io/dl/chapter09/8a78e8213ee04aac/">
-	<meta property="og:site_name" content="《从零学AI指南手册》">
-	<meta property="og:title" content="9.11 含注意力的NMT网络">
-	<meta property="og:description" content="9.11 含注意力的NMT网络# 在9.9节和9.10节内容中我们分别介绍了NMT模型和注意力机制的原理和实现。在本节内容中，我们将会结合NMT和注意力机制来实现一个完整的含注意力的神经网络翻译模型。
-9.11.1 含注意力的NMT结构# 在Seq2Seq任务中，源输入序列的不同部分通常都具有不同的重要性，然而传统Encoder-Decoder模型在处理这一过程时并没有考虑到这种情况。然而在理想情况下，解码器在对不同时刻的输出进行解码时都应该将注意力聚焦在编码器对应的不同时刻上。
-图9-27 含注意力的NMT模型网络结构图 如图9-27所示便是含注意力机制的NMT模型网络结构图。从图中可以看出，解码器在解码第2个时刻时，其输入除了上一个时刻的预测结果“我”之外，还有根据第1个时刻计算得到的上下文向量$c_1$。根据图9-27可知，在解码第2个时刻时应该将更多的注意力集中到编码器’am’对应的隐含向量上，因此理想状态下应该给予该时刻更多的注意力关注。此时，模型将首先取解码器第2层第1个时刻对应的隐含向量$h_1$同编码器第2层所有的隐含向量$\overline{h}_1,...\overline{h}_4$来计算得到对应的上下文向量$c_1$；然后再将$[c_1;\hat{y}_1]$一同作为第2个时刻的输入计算得到$a_2$；最后根据$a_2$分类得到第2个时刻的预测结果$\hat{y}_2$。
-9.11.2 含注意力的NMT实现# 在清楚NMT及注意力机制的相关原理后，接下来我们再来看如何实现整个基于注意力机制的解码过程。下面我们基于9.9节所实现的NMT模型进行改进。由于注意力机制只是作用于解码过程，因此我们只需要对解码器部分的代码进行改造即可，其余部分不需要进行任何改动。具体地，我们只需要修改类DecoderWrapper中的逻辑即可完成改造。
-1. 改造初始化方法
-首先我们需要在初始化方法中加入注意力机制的实例化逻辑，其中关键代码如下所示：
-1 class DecoderWrapper(nn.Module): 2 def __init__(self, embedding_size, hidden_size, num_layers, vocab_size, 3 cell_type=&#39;LSTM&#39;, attention_type=&#39;standard&#39;, batch_first=True, dropout=0.): 4 super(DecoderWrapper, self).__init__() 5 self.embedding_size = embedding_size 6 ... 7 input_size = self.embedding_size &#43; self.hidden_size 8 if self.attention_type == &#39;standard&#39;: 9 self.attention, input_size = None, self.embedding_size 10 elif self.attention_type == &#39;luong&#39;: 11 self.attention = LuongAttention(hidden_size, dropout) 12 elif self.attention_type == &#39;bahdanau&#39;: 13 self.attention = BahdanauAttention(hidden_size, dropout) 14 self.rnn = rnn_cell(input_size, self.hidden_size, self.num_layers, 15 batch_first=self.batch_first, dropout=self.dropout)在上述代码中，第7行是初始化RNN的输入维度，因为如果使用到注意力机制的话，RNN的输入还包含有上下文向量$c_t$。第8~13行是根据不同的超参数选择使用不同的注意力机制进行解码。
-2. 改造前向传播方法
-进一步需要改造原有解码器的前向传播过程，示例代码如下所示：
-1 def forward(self, tgt_input=None, decoder_state=None, 2 encoder_output=None, src_key_padding_mask=None): 3 tgt_input = self.token_embedding(tgt_input) 4 if self.attention_type == &#39;standard&#39;: 5 outputs, decoder_state = self.rnn(tgt_input, decoder_state) 6 else: 7 tgt_input = tgt_input.permute(1, 0, 2) 8 outputs, self._attention_weights = [], [] 9 for tgt_in in tgt_input: 10 tgt_in = tgt_in.unsqueeze(1) 11 if isinstance(self.rnn, nn.LSTM): 12 query = decoder_state[0][-1] 13 else: 14 query = decoder_state[-1] 15 con_vect, attn_weights = self.attention(query, encoder_output, 16 encoder_output, src_key_padding_mask) 17 tgt_in = torch.cat((tgt_in, con_vect), dim=-1) 18 attn_vector, decoder_state = self.rnn(tgt_in, decoder_state) 19 outputs.append(attn_vector) 20 self._attention_weights.append(attn_weights) 21 outputs = torch.cat(outputs, dim=1) 22 return outputs, decoder_state在上述代码中，第1~2行tgt_input是每个时刻解码器的输入形状为[batch_size, tgt_len]，decoder_state为解码器上一个时刻的状态，如果是解码第1个时刻则其为编码器最后一个时刻的状态，encoder_output为编码器所有时刻的输出形状为[batch_size, src_len, hidden_size]，src_key_padding_mask为注意力掩码用于忽略编码器中填充部分的输出结果形状为[batch_size, src_len]。第3行是词嵌入操作。第4~5行不使用注意力机制。第7行是交互tgt_input的维度，因为后续是逐时刻进行解码，其形状为[tgt_len, batch_size, embedding_size]。第8行用于保存每个时刻的解码输出和注意力权重矩阵。第9行开始逐时刻进行解码，此时tgt_in的形状为[batch_size, embedding_size]。第10行是扩张维度，将变成[batch_size, 1, embedding_size]。第11~14行是判断RNN的类型，因为LSTM的状态包括$h_t$和$C_t$两部分（详见7.3节内容）而 GUR 中只有 $h_t$，进一步取最后一层，此时query的形状为[batch_size, hidden_size]。第15~16行是计算上下文向量和注意力权重，在推理阶段时src_key_padding_mask的传入值将为None，此时con_vect的形状为[batch_size, 1, hidden_size]，attn_weights的形状为[batch_size, src_len]。第17~18行则是先将输入和上下文向量组合，然后输入到RNN中进行解码，此时tgt_in的形状为[batch_size, 1, hidden_size&#43;embedding_size]，attn_vector的形状为[batch_size, 1, hidden_size]。第19~20行是分别保存注意力向量和注意力权重矩阵。第21行是堆叠得到所有注意力向量，用于后续分类得到所有时刻的预测结果，其形状为[batch_size, tgt_len, hidden_size]。">
-	<meta property="og:locale" content="zh_CN">
-	<meta property="og:type" content="article">
-		<meta property="article:section" content="dl">
+<meta name="color-scheme" content="light dark">
+
+
+
+
+
+
+
+  
+
+
+
+  
+
+<meta property="og:url" content="https://mlwithme.github.io/dl/chapter09/8a78e8213ee04aac/">
+<meta property="og:site_name" content="《从零学AI指南手册》">
+<meta property="og:title" content="9.11 含注意力的NMT网络">
+<meta property="og:description" content="9.11 含注意力的NMT网络# 在9.9节和9.10节内容中我们分别介绍了NMT模型和注意力机制的原理和实现。在本节内容中，我们将会结合NMT和注意力机制来实现一个完整的含注意力的神经网络翻译模型。 9.11.1 含注意力的NMT结构# 在Seq2Seq任务中，源输入序列的不同 …">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:type" content="article">
+<meta property="og:image" content="https://mlwithme.github.io/images/dl/logo.jpg">
+<meta property="og:image:url" content="https://mlwithme.github.io/images/dl/logo.jpg">
+<meta property="og:image:secure_url" content="https://mlwithme.github.io/images/dl/logo.jpg">
+<meta property="og:image:width" content="1272">
+<meta property="og:image:height" content="1272">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:alt" content="《从零学AI指南手册》 - 9.11 含注意力的NMT网络">
+
+  <meta property="article:section" content="dl">
+
 
 
 	<meta itemprop="name" content="9.11 含注意力的NMT网络">
@@ -56,7 +70,7 @@ https://github.com/alex-shpak/hugo-book
 <link rel="icon" href="/favicon.png" >
 <link rel="manifest" href="/manifest.json">
 <link rel="canonical" href="https://mlwithme.github.io/dl/chapter09/8a78e8213ee04aac/">
-<link rel="stylesheet" href="/book.min.e05a209bbdff79665f7fe0efc0036069c4851a205de335e26fce75ad3570d2cd.css" integrity="sha256-4Fogm73/eWZff&#43;DvwANgacSFGiBd4zXib851rTVw0s0=" crossorigin="anonymous">
+<link rel="stylesheet" href="/book.min.a3b3c189ec36eda25846e6a5241268b0c27b5b76ed9c0b34b9b3e6d3cae2a18c.css" integrity="sha256-o7PBiew27aJYRualJBJosMJ7W3btnAs0ubPm08rioYw=" crossorigin="anonymous">
 
 
   <script defer type="module" src="/en.search.min.d6b14dbcd48978b2c41611d06e5387dc896ddf705e423dd9152973bfd6c6096a.js" integrity="sha256-1rFNvNSJeLLEFhHQblOH3Ilt33BeQj3ZFSlzv9bGCWo=" crossorigin="anonymous"></script>
@@ -3602,14 +3616,6 @@ https://github.com/alex-shpak/hugo-book
         referrerpolicy="no-referrer"
       >
     </a>
-    <button
-      class="book-page-share-btn"
-      type="button"
-      data-share-url="https://mlwithme.github.io/dl/chapter09/8a78e8213ee04aac/"
-      data-share-title="9.11 含注意力的NMT网络"
-    >
-      <span>转发分享</span>
-    </button>
   </section>
 
 
@@ -3739,34 +3745,6 @@ https://github.com/alex-shpak/hugo-book
             Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
           );
         }
-
-        document.querySelectorAll(".book-page-share-btn").forEach(function (btn) {
-          btn.addEventListener("click", async function () {
-            var url = btn.dataset.shareUrl;
-            var title = btn.dataset.shareTitle || document.title;
-            var originalText = btn.textContent;
-
-            try {
-              if (navigator.share) {
-                await navigator.share({ title: title, url: url });
-                return;
-              }
-
-              if (navigator.clipboard && url) {
-                await navigator.clipboard.writeText(url);
-                btn.textContent = "链接已复制";
-                window.setTimeout(function () {
-                  btn.textContent = originalText;
-                }, 1500);
-              }
-            } catch (err) {
-              btn.textContent = "分享失败";
-              window.setTimeout(function () {
-                btn.textContent = originalText;
-              }, 1500);
-            }
-          });
-        });
       });
     </script>
   
@@ -3819,14 +3797,6 @@ https://github.com/alex-shpak/hugo-book
         referrerpolicy="no-referrer"
       >
     </a>
-    <button
-      class="book-page-share-btn"
-      type="button"
-      data-share-url="https://mlwithme.github.io/dl/chapter09/8a78e8213ee04aac/"
-      data-share-title="9.11 含注意力的NMT网络"
-    >
-      <span>转发分享</span>
-    </button>
   </section>
 
 

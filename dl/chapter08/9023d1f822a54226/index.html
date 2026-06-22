@@ -20,21 +20,36 @@ https://github.com/alex-shpak/hugo-book
 ">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
-<meta name="color-scheme" content="light dark"><meta property="og:url" content="https://mlwithme.github.io/dl/chapter08/9023d1f822a54226/">
-	<meta property="og:site_name" content="《从零学AI指南手册》">
-	<meta property="og:title" content="8.2 TextRNN网络">
-	<meta property="og:description" content="8.2 TextRNN网络# 在7.2节内容中，我们详细介绍了如何通过RNN模型来完成文本分类任务，且当时使用的是one-hot编码形式来表示原始文本。在接下来的这节内容中，我们将会再次介绍基于RNN结构的文本分类模型TextRNN。准确来说TextRNN并不是一个某一个特定模型的名称，而是一系列以RNN模型为基础所构造的一类模型的总称。
-8.2.1 TextRNN结构# TextRNN模型的主要思想是通过循环神经网络结构将文本数据的每个词或字符作为输入，并在每个时间步骤中更新隐藏状态，以对整个序列进行特征提取。具体而言，TextRNN会先将文本序列通过一个嵌入层将one-hot编码形式的稀疏向量转换为稠密向量（Dense Vector）来表示每个词或字符；然后再将其输入到RNN中进行特征提取；最后再将提取得到的特征进行组合并完成后续的分类任务[1]。对于TextRNN模型，其整体结构如图8-2所示。
-图 8-2 TextRNN网络结构图 如图8-2所示，从下往上第1层是嵌入层；第2层的RNN层，既可以是原始RNN也可以是后续的各种变体LSTM、GRU和BiRNN等；第3层则是选取RNN的输出特征，既可以是只取最后一个时刻，也可以是取所有时刻的均值或者求和等；第4层则是最后的一个分类层。
-8.2.2 TextRNN实现# 在清楚TextRNN模型的相关原理后，我们再来看如何借助PyTorch快速实现该模型。 以下完整示例代码可以参见Code/Chapter08/C02_TextRNN/TextRNN.py文件。
-1. 前向传播
-首先需要实现模型的整个前向传播过程。从图8-2可知，整个模型整体分为3个大的部分，词嵌入层、循环神经网络层和全连接，实现代码如下所示：
-1 class TextRNN(nn.Module): 2 def __init__(self, config): 3 super(TextRNN, self).__init__() 4 if config.cell_type == &#39;RNN&#39;: 5 rnn_cell = nn.RNN 6 elif config.cell_type == &#39;LSTM&#39;: 7 rnn_cell = nn.LSTM 8 elif config.cell_type == &#39;GRU&#39;: 9 rnn_cell = nn.GRU 10 else: 11 raise ValueError(&#34;Unrecognized RNN cell type: &#34; &#43; config.cell_type) 12 out_hidden_size = config.hidden_size * (int(config.bidirectional) &#43; 1) 13 self.config = config 14 self.token_embedding = nn.Embedding(config.top_k, config.embedding_size) 15 self.rnn = rnn_cell(config.embedding_size, config.hidden_size, num_layers=config.num_layers, 16 batch_first=True, bidirectional=config.bidirectional) 17 self.classifier = nn.Sequential(nn.LayerNorm(out_hidden_size), 18 nn.Linear(out_hidden_size, out_hidden_size),nn.ReLU(inplace=True), 19 nn.Dropout(0.5),nn.Linear(out_hidden_size, config.num_classes))在上述代码中，第2行中config表示一个实例化的配置类对象，通过这样的方式可以更便捷的管理模型参数，具体可参见5.1节内容。第4~11行是根据对应的参数返回相应的循环记忆单元。第12行是计算循环神经网络输出结的维度，即在双向结构中该维度为单向结构的2倍，具体可参见7.5.3节内容。第14行是实例化得到一个词嵌入层。第15~16行是根据对应参数实例化得到循环记忆单元。第17~19行则是由两个全连接构成的分类层。
-进一步，整个前向传播计算过程的示例代码如下所示：
-1 def forward(self, x, labels=None): 2 x = self.token_embedding(x) 3 x, _ = self.rnn(x) 4 if self.config.cat_type == &#39;last&#39;: 5 x = x[:, -1] 6 elif self.config.cat_type == &#39;mean&#39;: 7 x = torch.mean(x, dim=1) 8 elif self.config.cat_type == &#39;sum&#39;: 9 x = torch.sum(x, dim=1) 10 else: 11 raise ValueError(&#34;Unrecognized cat_type: &#34; &#43; self.cat_type) 12 logits = self.classifier(x) 13 if labels is not None: 14 loss_fct = nn.CrossEntropyLoss(reduction=&#39;mean&#39;) 15 loss = loss_fct(logits, labels) 16 return loss, logits 17 else: 18 return logits在上述代码中，第2行是词嵌入层的输出结果，形状为[batch_size, src_len, embedding_size]。第3行是RNN计算后的输出结果，形状为[batch_size, src_len, out_hidden_size]。第4~11行是根据不同的组合方式对循环神经网络的输出结果进行组合，形状为[batch_size, out_hidden_size]。第12行则是最后的分类层，输出结果形状为[batch_size, num_classes]。第13~18行则是根据条件返回对应的处理结果。">
-	<meta property="og:locale" content="zh_CN">
-	<meta property="og:type" content="article">
-		<meta property="article:section" content="dl">
+<meta name="color-scheme" content="light dark">
+
+
+
+
+
+
+
+  
+
+
+
+  
+
+<meta property="og:url" content="https://mlwithme.github.io/dl/chapter08/9023d1f822a54226/">
+<meta property="og:site_name" content="《从零学AI指南手册》">
+<meta property="og:title" content="8.2 TextRNN网络">
+<meta property="og:description" content="8.2 TextRNN网络# 在7.2节内容中，我们详细介绍了如何通过RNN模型来完成文本分类任务，且当时使用的是one-hot编码形式来表示原始文本。在接下来的这节内容中，我们将会再次介绍基于RNN结构的文本分类模型TextRNN。准确来说TextRNN并不是一个某一个特定模型 …">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:type" content="article">
+<meta property="og:image" content="https://mlwithme.github.io/images/dl/logo.jpg">
+<meta property="og:image:url" content="https://mlwithme.github.io/images/dl/logo.jpg">
+<meta property="og:image:secure_url" content="https://mlwithme.github.io/images/dl/logo.jpg">
+<meta property="og:image:width" content="1272">
+<meta property="og:image:height" content="1272">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:alt" content="《从零学AI指南手册》 - 8.2 TextRNN网络">
+
+  <meta property="article:section" content="dl">
+
 
 
 	<meta itemprop="name" content="8.2 TextRNN网络">
@@ -53,7 +68,7 @@ https://github.com/alex-shpak/hugo-book
 <link rel="icon" href="/favicon.png" >
 <link rel="manifest" href="/manifest.json">
 <link rel="canonical" href="https://mlwithme.github.io/dl/chapter08/9023d1f822a54226/">
-<link rel="stylesheet" href="/book.min.e05a209bbdff79665f7fe0efc0036069c4851a205de335e26fce75ad3570d2cd.css" integrity="sha256-4Fogm73/eWZff&#43;DvwANgacSFGiBd4zXib851rTVw0s0=" crossorigin="anonymous">
+<link rel="stylesheet" href="/book.min.a3b3c189ec36eda25846e6a5241268b0c27b5b76ed9c0b34b9b3e6d3cae2a18c.css" integrity="sha256-o7PBiew27aJYRualJBJosMJ7W3btnAs0ubPm08rioYw=" crossorigin="anonymous">
 
 
   <script defer type="module" src="/en.search.min.d6b14dbcd48978b2c41611d06e5387dc896ddf705e423dd9152973bfd6c6096a.js" integrity="sha256-1rFNvNSJeLLEFhHQblOH3Ilt33BeQj3ZFSlzv9bGCWo=" crossorigin="anonymous"></script>
@@ -3598,14 +3613,6 @@ https://github.com/alex-shpak/hugo-book
         referrerpolicy="no-referrer"
       >
     </a>
-    <button
-      class="book-page-share-btn"
-      type="button"
-      data-share-url="https://mlwithme.github.io/dl/chapter08/9023d1f822a54226/"
-      data-share-title="8.2 TextRNN网络"
-    >
-      <span>转发分享</span>
-    </button>
   </section>
 
 
@@ -3759,34 +3766,6 @@ https://github.com/alex-shpak/hugo-book
             Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
           );
         }
-
-        document.querySelectorAll(".book-page-share-btn").forEach(function (btn) {
-          btn.addEventListener("click", async function () {
-            var url = btn.dataset.shareUrl;
-            var title = btn.dataset.shareTitle || document.title;
-            var originalText = btn.textContent;
-
-            try {
-              if (navigator.share) {
-                await navigator.share({ title: title, url: url });
-                return;
-              }
-
-              if (navigator.clipboard && url) {
-                await navigator.clipboard.writeText(url);
-                btn.textContent = "链接已复制";
-                window.setTimeout(function () {
-                  btn.textContent = originalText;
-                }, 1500);
-              }
-            } catch (err) {
-              btn.textContent = "分享失败";
-              window.setTimeout(function () {
-                btn.textContent = originalText;
-              }, 1500);
-            }
-          });
-        });
       });
     </script>
   
@@ -3838,14 +3817,6 @@ https://github.com/alex-shpak/hugo-book
         referrerpolicy="no-referrer"
       >
     </a>
-    <button
-      class="book-page-share-btn"
-      type="button"
-      data-share-url="https://mlwithme.github.io/dl/chapter08/9023d1f822a54226/"
-      data-share-title="8.2 TextRNN网络"
-    >
-      <span>转发分享</span>
-    </button>
   </section>
 
 

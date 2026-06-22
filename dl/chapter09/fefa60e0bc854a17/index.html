@@ -23,24 +23,36 @@ https://github.com/alex-shpak/hugo-book
 ">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
-<meta name="color-scheme" content="light dark"><meta property="og:url" content="https://mlwithme.github.io/dl/chapter09/fefa60e0bc854a17/">
-	<meta property="og:site_name" content="《从零学AI指南手册》">
-	<meta property="og:title" content="9.9 NMT网络">
-	<meta property="og:description" content="9.9 NMT网络# 在9.7节内容中，我们大致介绍了Seq2Seq架构的思想和基本原理，它通过编码器将源输入编码成一个固定维度的中间向量，然后再依靠解码器将这一中间向量解码成任务需要的目标序列。同时，这种序列到序列的网络架构也使得我们可以采用不同的网络模型来作为编码器和解码器使用，例如除了到目前为止我们已经介绍过的DNN、CNN和RNN之外，也可以是在第10章中将要介绍的自注意力模块等。在接下来的这节内容中，我们将会探索以LSTM模型为编码器和解码器的神经机器翻译模型（Neural Machine Translation, NMT）背后的原理及其实现过程。本节内容的完整示例代码可参见Code/Chapter09/C07_NMT文件夹。
-9.9.1 谷歌翻译简介# 为了让每一个人都能访问世界上的所有信息，谷歌公司在2006年4月推出了一项基于统计机器方法的语言翻译模型（Statistical Machine Translation, SMT）。在SMT模型中，输入文本必须要先翻译成英语作为中转，然后再将其翻译成对应的目标语言，因此这也导致在不同语言中翻译结果的准确性差异很大[1]。
-随着深度学习技术的迅猛发展，谷歌公司于2014年提出了一种基于Seq2Seq架构的序列学习模型，并且尝试将其应用于NMT这一任务中[2]。但是由于该模型在翻译质量、推理速度和处理低频词等方面的效果并没有得到显著提升，因此并没有将其运用于实际的翻译服务中[3]。不过由于Seq2Seq模型在网络结构上的独特优势——编码器直接将源输入编码成一个向量，然后解码器再将其解码为对应的目标序列，从而避免了事先将源输入分割成不同粒度的短语而导致的翻译结果不流畅的问题——研究人员一直在尝试通过各种方法提高NMT模型的效果。直到2016年，谷歌公司又基于Seq2Seq的NMT模型提出了GNMT模型来解决上述问题，并将其运用在了谷歌翻译服务中[4]。
-图 9-19 谷歌翻译示例图 值得一提的是随着自注意力机制（Self-Attention）的出现以及其强大的编码能力，谷歌公司也于2020年将其翻译服务中Seq2Seq的编码器部替换成了Transform中的Encoder模块（相关内容将在第10章中进行详细介绍），而解码器部分则依旧使用的是RNN模块，其主要原因在于使用RNN作为解码器在推理时的速度要远快于Transform中的Decoder模块[5]。
-谷歌神经机器翻译作为一种先进的机器翻译技术，对于改进跨语言交流和信息传播有着重要的作用。它使得机器翻译在很多情况下能够产生更流畅、准确的翻译结果，同时也是深度学习在自然语言处理领域成功应用的一个典型案例。截至2023 年8 月，谷歌翻译已经提供了超过133种语言的翻译服务，每天服务用户超5亿人[1]。
-9.9.2 统计翻译模型弊端# 尽管传统基于短语的统计翻译模型在翻译任务中有着不错的表现，但是却一直存在着一些难以克服的弊端。由于这类模型需要将输入划分成不同粒度的短语进行翻译，所以会导致最后翻译的结果在语义上并不连贯，同时也会使得在长文本翻译过程中无法解决上下文的长依赖问题容易出现局部翻译化的现象[6]。同时，这类模型需要人工设计和提取大量的特征，例如词频、短语对齐等，这些过程比较繁琐且依赖于专业知识因此并不具有良好的可扩展性，每换一种翻译场景都需要重新开始构建统计模型。
-鉴于上述原因，基于神经网络的机器翻译模型开始引起了研究人员的注意，而谷歌公司苏茨克维尔（Sutskever）等人于2014年也提出了一种基于LSTM的神经网络机器翻译模型[2]。在9.7节内容中我们已经大致介绍了这一模型的思想和基本原理，接下来我们再以一个真实的翻译任务为例来详细介绍NMT模型的具体工作原理。
-9.9.3 NMT数据集构建# 在这里我们使用到的是一组英德翻译平行语料，一共包含有 6 个文件train.de、train.en、val.de、 val.en、test_2016_flickr.de 和test_2016_flickr.en，其分别为德语训练语料、英语训练语料、德语验证语料、英语验证语料、德语测试语料和英语测试语料。同时， 这三部分的样本量分别为 29000、1014 和 1000 条。
-如下所示便是一条平行预料数据，其中第 1 行为德语，第 2 行为英语，后续我们需要完成的是搭建一个翻译模型将德语翻译为英语。
-1 Zwei junge weiße Männer sind im, Freien in der Nähe vieler Büsche. 2 Two young, White males are outside near many bushes.1. 数据集预览
-在正式介绍如何构建数据集之前，我们先通过一张图来简单了解一下整个构建流程，以便更加清楚后续的构建流程及代码实现。
-图9-20 英德翻译语料数据集构建图 如图9-20所示，左边部分为源序列，右边部分为目标序列。从图9-20可以看出，第①步需要对原始语料进行切分（Tokenize）处理，如果是对类似英文这样的语料进行处理，最简单的就是直接按空格切分即可，但注意的一点是要把其中的标点符号也切分出来。第②步则是根据源语料和目标语料切分后的字符分别构建一个词表。第③步是将切分后的字符根据词表中的索引将其转换成对应的索引序列。第④步是对同一个小批量中的样本进行填充（Padding）处理，通常情况下以最长样本的长度进行填充，如果是对目标序列进行处理则还需要在首尾分别加上&lt;BOS&gt;和&lt;EOS&gt;特殊符。第⑤步则是分别得到编码器的源输入、解码器的目标输入和目标输出，其中目标输入和目标输出是分别取前$n-1$个字符和后$n-1$个字符（$n$表示目标序列长度）。">
-	<meta property="og:locale" content="zh_CN">
-	<meta property="og:type" content="article">
-		<meta property="article:section" content="dl">
+<meta name="color-scheme" content="light dark">
+
+
+
+
+
+
+
+  
+
+
+
+  
+
+<meta property="og:url" content="https://mlwithme.github.io/dl/chapter09/fefa60e0bc854a17/">
+<meta property="og:site_name" content="《从零学AI指南手册》">
+<meta property="og:title" content="9.9 NMT网络">
+<meta property="og:description" content="9.9 NMT网络# 在9.7节内容中，我们大致介绍了Seq2Seq架构的思想和基本原理，它通过编码器将源输入编码成一个固定维度的中间向量，然后再依靠解码器将这一中间向量解码成任务需要的目标序列。同时，这种序列到序列的网络架构也使得我们可以采用不同的网络模型来作为编码器和解码器使 …">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:type" content="article">
+<meta property="og:image" content="https://mlwithme.github.io/images/dl/logo.jpg">
+<meta property="og:image:url" content="https://mlwithme.github.io/images/dl/logo.jpg">
+<meta property="og:image:secure_url" content="https://mlwithme.github.io/images/dl/logo.jpg">
+<meta property="og:image:width" content="1272">
+<meta property="og:image:height" content="1272">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:alt" content="《从零学AI指南手册》 - 9.9 NMT网络">
+
+  <meta property="article:section" content="dl">
+
 
 
 	<meta itemprop="name" content="9.9 NMT网络">
@@ -62,7 +74,7 @@ https://github.com/alex-shpak/hugo-book
 <link rel="icon" href="/favicon.png" >
 <link rel="manifest" href="/manifest.json">
 <link rel="canonical" href="https://mlwithme.github.io/dl/chapter09/fefa60e0bc854a17/">
-<link rel="stylesheet" href="/book.min.e05a209bbdff79665f7fe0efc0036069c4851a205de335e26fce75ad3570d2cd.css" integrity="sha256-4Fogm73/eWZff&#43;DvwANgacSFGiBd4zXib851rTVw0s0=" crossorigin="anonymous">
+<link rel="stylesheet" href="/book.min.a3b3c189ec36eda25846e6a5241268b0c27b5b76ed9c0b34b9b3e6d3cae2a18c.css" integrity="sha256-o7PBiew27aJYRualJBJosMJ7W3btnAs0ubPm08rioYw=" crossorigin="anonymous">
 
 
   <script defer type="module" src="/en.search.min.d6b14dbcd48978b2c41611d06e5387dc896ddf705e423dd9152973bfd6c6096a.js" integrity="sha256-1rFNvNSJeLLEFhHQblOH3Ilt33BeQj3ZFSlzv9bGCWo=" crossorigin="anonymous"></script>
@@ -3609,14 +3621,6 @@ https://github.com/alex-shpak/hugo-book
         referrerpolicy="no-referrer"
       >
     </a>
-    <button
-      class="book-page-share-btn"
-      type="button"
-      data-share-url="https://mlwithme.github.io/dl/chapter09/fefa60e0bc854a17/"
-      data-share-title="9.9 NMT网络"
-    >
-      <span>转发分享</span>
-    </button>
   </section>
 
 
@@ -3943,34 +3947,6 @@ https://github.com/alex-shpak/hugo-book
             Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
           );
         }
-
-        document.querySelectorAll(".book-page-share-btn").forEach(function (btn) {
-          btn.addEventListener("click", async function () {
-            var url = btn.dataset.shareUrl;
-            var title = btn.dataset.shareTitle || document.title;
-            var originalText = btn.textContent;
-
-            try {
-              if (navigator.share) {
-                await navigator.share({ title: title, url: url });
-                return;
-              }
-
-              if (navigator.clipboard && url) {
-                await navigator.clipboard.writeText(url);
-                btn.textContent = "链接已复制";
-                window.setTimeout(function () {
-                  btn.textContent = originalText;
-                }, 1500);
-              }
-            } catch (err) {
-              btn.textContent = "分享失败";
-              window.setTimeout(function () {
-                btn.textContent = originalText;
-              }, 1500);
-            }
-          });
-        });
       });
     </script>
   
@@ -4024,14 +4000,6 @@ https://github.com/alex-shpak/hugo-book
         referrerpolicy="no-referrer"
       >
     </a>
-    <button
-      class="book-page-share-btn"
-      type="button"
-      data-share-url="https://mlwithme.github.io/dl/chapter09/fefa60e0bc854a17/"
-      data-share-title="9.9 NMT网络"
-    >
-      <span>转发分享</span>
-    </button>
   </section>
 
 

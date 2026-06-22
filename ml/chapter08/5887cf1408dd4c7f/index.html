@@ -24,25 +24,38 @@ https://github.com/alex-shpak/hugo-book
 ">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
-<meta name="color-scheme" content="light dark"><meta property="og:url" content="https://mlwithme.github.io/ml/chapter08/5887cf1408dd4c7f/">
-	<meta property="og:site_name" content="《从零学AI指南手册》">
-	<meta property="og:title" content="8.3 决策树生成之ID3与C4.5">
-	<meta property="og:description" content="8.3 决策树生成之ID3与C4.5# 在正式介绍决策树的生成算法前，我们先将8.1.1节中介绍的几个概念重新梳理一下，同时再通过一个例子来理解整个计算过程，以便于后续更好地掌握决策树的生成算法。
-8.3.1 基本概念与定义# 1. 信息熵
-设$X$是一个取值有限的离散型随机变量（例如8.1.1节中可能夺冠的16支球队），其概率分布为$P(X=x_i)=p_i,i=1,2,...,n$（每支球队可能夺冠的概率），则随机变量$X$的信息熵定义为 $$ H(X)=-\sum\limits_{i=1}^{n}{{{p}_{i}}}\log {{p}_{i}}\tag{8-5} $$其中，若$p_i=0$，定义$0\log_20=0$，并且通常$\log$取$2$为底或$e$为底时，其熵的单位分别称为比特（Bit）或纳特（Nat）。如无特殊说明，默认以$2$为底。
-2. 条件熵
-设有随机变量$(X,Y)$，其联合概率分布$P(X={{x}_{i}},Y={{y}_{j}})={{p}_{ij}}$，其中$i=1,2,...,n，j=1,2,...,m$，条件熵$H(Y|X)$表示在已知随机变量$X$的条件下，随机变量$Y$的不确定性，其定义为 $$ H(Y|X)=\sum\limits_{i=1}^{n}{{{p}_{i}}}H(Y|X={{x}_{i}})\tag{8-6} $$其中，$p_i=P(X=x_i),i=1,2,...,n$。
-同时，当信息熵和条件熵中的概率由样本数据估计（特别是极大似然估计）得到时，所对应的信息熵与条件熵分别称为经验熵（Empirical Entropy）和经验条件熵（Empirical Conditional Entropy）。这里暂时看不懂也没关系，可结合后续计算示例来理解。
-3. 信息增益
-根据8.1.1节的内容可知，所谓信息增益指的就是事物$U$的信息熵$H(U)$，在引入外部信息$I$以后后的变化量为$H(U)-H(U|I)$，因此，可以将特征$A$对训练数据集$D$的信息增益$g(D,A)$定义为集合$D$的信息熵$H(D)$与在给定特征$A$下$D$的条件熵$H(D|A)$之差，即 $$ g(D,A)=H(D)-H(D|A)\tag{8-7} $$设训练集为$D$，$|D|$表示所有训练样本总数，同时$D$有$K$个类别$C_k,k=1,2,...,K$。$|C_k|$为属于类$C_k$的样本总数，即$\sum\nolimits_{k=1}^{K}{|{{C}_{k}}|}=|D|$ 。设特征$A$有$n$个不同的取值$a_1,a_2,...,a_n$，根据特征$A$的取值将$D$划分为$n$个子集$D_1,D_2,...,D_n$，$|D_i|$为子集$D_i$中的样本个数，即$\sum\nolimits_{i=1}^{n}{|{{D}_{i}}|=|D|}$。同时此子集$D_i$中，属于类$C_k$的样本集合为$D_{ik}$，即${{D}_{ik}}={{D}_{i}}\bigcap {{C}_{k}}$，$|D_{ik}|$为$D_{ik}$的样本个数。此时有如下定义[2]
-(1) 数据集$D$的经验熵$H(D)$为 $$ H(D)=-\sum\limits_{k=1}^{K}{\frac{|{{C}_{k}}|}{|D|}}{{\log }_{2}}\frac{|{{C}_{k}}|}{|D|}\tag{8-8} $$ 从式(8-8)可以看出，它计算的是“任意样本属于其中一个类别”这句话所包含的信息量。
-(2) 数据集$D$在特征值$A$下的经验条件熵$H(D|A)$为 $$ H(D|A)=\sum\limits_{i=1}^{n}{\frac{|{{D}_{i}}|}{|D|}}H({{D}_{i}})=-\sum\limits_{i=1}^{n}{\frac{|{{D}_{i}}|}{|D|}}\sum\limits_{k=1}^{K}{\frac{|{{D}_{ik}}|}{|{{D}_{i}}|}}{{\log }_{2}}\frac{|{{D}_{ik}}|}{|{D}_{i}|}\tag{8-9} $$ 从式(8-9)可以看出，它计算的是特征$A$在各个取值条件下“任意样本属于其中一个类别”这句话所包含的信息量。
-(3) 信息增益为 $$ g(D,A)=H(D)-H(D|A)\tag{8-10} $$8.3.2 计算示例# 如果仅看上面的公式肯定不那么容易理解，下面我们再进行举例说明。这里建议各位读者将上面的公式同下面的计算过程对比观看进行理解。表8-1同样是7.1.3节中用过的一个信用卡审批数据集，其一共包含15个样本和3个特征维度。其中特征$X^{(1)}\in A_1=\{1,0\}$表示有无工作，特征$X^{(2)}\in A_2=\{1,0\}$表示是否有房，特征${{X}^{(3)}}\in {{A}_{3}}=\{D,S,T\}$表示学历等级，$Y\in C=\{1,0\}$表示是否审批通过的类标记。
-表 8-1 计算数据示例 1. 计算信息熵$H(D)$
-根据式(8-8)可得 $$ H(D)=-\left( \frac{5}{15}{{\log }_{2}}\frac{5}{15}&#43;\frac{10}{15}{{\log }_{2}}\frac{10}{15} \right)\approx 0.918\tag{8-11} $$ 2. 计算条件熵">
-	<meta property="og:locale" content="zh_CN">
-	<meta property="og:type" content="article">
-		<meta property="article:section" content="ml">
+<meta name="color-scheme" content="light dark">
+
+
+
+
+
+  
+
+
+
+  
+
+
+
+  
+
+<meta property="og:url" content="https://mlwithme.github.io/ml/chapter08/5887cf1408dd4c7f/">
+<meta property="og:site_name" content="《从零学AI指南手册》">
+<meta property="og:title" content="8.3 决策树生成之ID3与C4.5">
+<meta property="og:description" content="8.3 决策树生成之ID3与C4.5# 在正式介绍决策树的生成算法前，我们先将8.1.1节中介绍的几个概念重新梳理一下，同时再通过一个例子来理解整个计算过程，以便于后续更好地掌握决策树的生成算法。 8.3.1 基本概念与定义# 1. 信息熵 设$X$是一个取值有限的离散型随机变量 …">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:type" content="article">
+<meta property="og:image" content="https://mlwithme.github.io/images/ml/logo.jpg">
+<meta property="og:image:url" content="https://mlwithme.github.io/images/ml/logo.jpg">
+<meta property="og:image:secure_url" content="https://mlwithme.github.io/images/ml/logo.jpg">
+<meta property="og:image:width" content="1272">
+<meta property="og:image:height" content="1272">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:alt" content="《从零学AI指南手册》 - 8.3 决策树生成之ID3与C4.5">
+
+  <meta property="article:section" content="ml">
+
 
 
 	<meta itemprop="name" content="8.3 决策树生成之ID3与C4.5">
@@ -65,7 +78,7 @@ https://github.com/alex-shpak/hugo-book
 <link rel="icon" href="/favicon.png" >
 <link rel="manifest" href="/manifest.json">
 <link rel="canonical" href="https://mlwithme.github.io/ml/chapter08/5887cf1408dd4c7f/">
-<link rel="stylesheet" href="/book.min.e05a209bbdff79665f7fe0efc0036069c4851a205de335e26fce75ad3570d2cd.css" integrity="sha256-4Fogm73/eWZff&#43;DvwANgacSFGiBd4zXib851rTVw0s0=" crossorigin="anonymous">
+<link rel="stylesheet" href="/book.min.a3b3c189ec36eda25846e6a5241268b0c27b5b76ed9c0b34b9b3e6d3cae2a18c.css" integrity="sha256-o7PBiew27aJYRualJBJosMJ7W3btnAs0ubPm08rioYw=" crossorigin="anonymous">
 
 
   <script defer type="module" src="/en.search.min.d6b14dbcd48978b2c41611d06e5387dc896ddf705e423dd9152973bfd6c6096a.js" integrity="sha256-1rFNvNSJeLLEFhHQblOH3Ilt33BeQj3ZFSlzv9bGCWo=" crossorigin="anonymous"></script>
@@ -3615,14 +3628,6 @@ https://github.com/alex-shpak/hugo-book
         referrerpolicy="no-referrer"
       >
     </a>
-    <button
-      class="book-page-share-btn"
-      type="button"
-      data-share-url="https://mlwithme.github.io/ml/chapter08/5887cf1408dd4c7f/"
-      data-share-title="8.3 决策树生成之ID3与C4.5"
-    >
-      <span>转发分享</span>
-    </button>
   </section>
 
 
@@ -3908,34 +3913,6 @@ $$<p>
             Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
           );
         }
-
-        document.querySelectorAll(".book-page-share-btn").forEach(function (btn) {
-          btn.addEventListener("click", async function () {
-            var url = btn.dataset.shareUrl;
-            var title = btn.dataset.shareTitle || document.title;
-            var originalText = btn.textContent;
-
-            try {
-              if (navigator.share) {
-                await navigator.share({ title: title, url: url });
-                return;
-              }
-
-              if (navigator.clipboard && url) {
-                await navigator.clipboard.writeText(url);
-                btn.textContent = "链接已复制";
-                window.setTimeout(function () {
-                  btn.textContent = originalText;
-                }, 1500);
-              }
-            } catch (err) {
-              btn.textContent = "分享失败";
-              window.setTimeout(function () {
-                btn.textContent = originalText;
-              }, 1500);
-            }
-          });
-        });
       });
     </script>
   
@@ -3990,14 +3967,6 @@ $$<p>
         referrerpolicy="no-referrer"
       >
     </a>
-    <button
-      class="book-page-share-btn"
-      type="button"
-      data-share-url="https://mlwithme.github.io/ml/chapter08/5887cf1408dd4c7f/"
-      data-share-title="8.3 决策树生成之ID3与C4.5"
-    >
-      <span>转发分享</span>
-    </button>
   </section>
 
 

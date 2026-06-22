@@ -27,28 +27,36 @@ https://github.com/alex-shpak/hugo-book
 ">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
-<meta name="color-scheme" content="light dark"><meta property="og:url" content="https://mlwithme.github.io/dl/chapter04/911b961cc5d949b6/">
-	<meta property="og:site_name" content="《从零学AI指南手册》">
-	<meta property="og:title" content="4.7 NIN网络">
-	<meta property="og:description" content="4.7 NIN网络# 在4.6节内容中，我们详细介绍了一种可复用的网络模型VGG，它通过一个个小的网络块来堆叠形成整个网络结构。在接下来的这节内容中，我们将向大家介绍另外一种也是基于这种“块”思想的网络模型——网络中的网络（Network in Network, NiN）[1]。
-4.7.1 NIN动机# 网络中的网络是新加坡国立大学2014年于ICLR会议上所提出的一种模型。论文作者认为，传统的卷积神经网络都是通过卷积和池化操作来提取特征并且使用全连接层进行分类，一方面传统的卷积操作本质上也仅仅只是一种泛化的线性模型，它并不足以提取得到更加高级且抽象的特征，尤其是当下游任务中特征类别是非线性可分的情况；另一方面全连接层的参数量较大导致模型过于复杂，容易使得模型出现过拟合的现象。
-因此，作者提出了另外一种微型网络块来代替卷积操作并以此来构建整个网络模型，同时也摒弃了全连接层直接通过全局平均池化来完成最后的维度转换过程，以此来提高模型的特征表达能力和泛化性能。
-4.7.2 NIN结构# 在正式介绍整个NIN的网络结构前我们先弄清楚其中的两个核心部分：多层感知机卷积（Multilayer Perceptron Convolution）和全局平均池化（Global Average Pooling）。在理解了这两部分内容之后，整个网络结构就非常容易理解了。
-1. 多层感知机卷积
-如图4-39所示，左侧为原始的卷积操作，右侧为论文中所提出的多层感知机卷积操作。相较于普通的卷积结构，多层感知机卷积结构是在原有的卷积基础上又增加了一个多层感知机来进一步提高模型的特征表达能力。
-图 4-39. 线性卷积与多层感知机卷积对比结构图 在多层感知机卷积结构中，卷积操作后的两个全连接层并不是传统意义上的全连接层，而是采用了卷积核大小为$1\times1$的卷积操作进行代替。因为$1\times1$的卷积操作相当于卷积核在执行卷积的过程中对不同通道上同一位置处的特征值进行了一次线性组合，这类似于传统全连接层的计算方式。同时，使用$1\times1$的卷积操作一方面能够根据训练得到的权重参数来确定每个特征通道的重要性占比（这也类似于注意力机制的思想）并融合形成一个通道，使得模型具有跨特征图交互的能力；另一方面也能够很方便地与前后层的卷积操作进行转换。最后，在多层感知机卷积结构中，每个卷积层之后都通过ReLU激活函数进行了一次非线性变换。
-2. 全局平均池化操作
-在传统的卷积神经网络中，卷积结构均被视为一个特征提取器，在对原始输入进行深度特征提取后通常会通过多个全连接层来完成最后的分类任务，而这种做法的弊端便是引入了大量的权重参数并且模型容易出现过拟合现象。在论文中，作者提出通过平均池化操作来解决这一个问题。具体地，在最后一个卷积层操作中为每个分类类别均生成一个特征图，然后取整个特征图的平均值来作为对应类别的置信度预测输出，这样既降低了模型的参数量同时也充分利用了特征图空间信息。因此，这也就意味着如果下游任务具有$K$个分类类别，那么模型最后的卷积输出一定是有$K$个通道数。
-3. 整体网络结构
-在介绍完多层感知机卷积块和全局平均池化这两项技术后再来看整个NIN的网络结构就比较清晰了。
-图 4-40. NIN网络结构图 如图4-40所示便是NINI网络模型的结构图，可以明显地发现整个网络是由多个多层感知机卷积块所构成，而最右侧则是进行全局平均池化并通过Softmax层完成分类。
-4.7.3 NIN实现# 在介绍完整个网络结构后我们再来看如何通过PyTorch进行实现。根据4.7.2节内容的介绍，我们需要先实现最基础的多层感知机卷积块，然后再以此为基础来构建整个网络模型。以下完整示例代码可以参见Code/Chapter04/C06_NIN/文件。
-1. 辅助模块
-首先需要实现一个辅助函数来完成多层感知机卷积块的计算过程，实现代码如下所示：
-1 def nin_block(in_chs, out_chs=None, k_size=5, s=1, p=2): 2 nin_seq = nn.Sequential( 3 nn.Conv2d(in_chs, out_chs[0], k_size, s, p), 4 nn.ReLU(inplace=True), 5 nn.Conv2d(out_chs[0], out_chs[1], 1, 1), 6 nn.ReLU(inplace=True), 7 nn.Conv2d(out_chs[1], out_chs[2], 1, 1), 8 nn.ReLU(inplace=True)) 9 return nin_seq在上述代码中，第1行用于传入对应块的超参数信息，其中in_chs表示第1个卷积层的输入通道数，out_chs为一个列表表示3个卷积层各自的输出通道数，s和p分别表示第1个卷积层的步长和填充数。第3~4行为多层感知机卷积块中的第1个正常卷积层。第5~8行则是对应的两个$1\times1$卷积操作。">
-	<meta property="og:locale" content="zh_CN">
-	<meta property="og:type" content="article">
-		<meta property="article:section" content="dl">
+<meta name="color-scheme" content="light dark">
+
+
+
+
+
+
+
+  
+
+
+
+  
+
+<meta property="og:url" content="https://mlwithme.github.io/dl/chapter04/911b961cc5d949b6/">
+<meta property="og:site_name" content="《从零学AI指南手册》">
+<meta property="og:title" content="4.7 NIN网络">
+<meta property="og:description" content="4.7 NIN网络# 在4.6节内容中，我们详细介绍了一种可复用的网络模型VGG，它通过一个个小的网络块来堆叠形成整个网络结构。在接下来的这节内容中，我们将向大家介绍另外一种也是基于这种“块”思想的网络模型——网络中的网络（Network in Network, NiN）[1]。 …">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:type" content="article">
+<meta property="og:image" content="https://mlwithme.github.io/images/dl/logo.jpg">
+<meta property="og:image:url" content="https://mlwithme.github.io/images/dl/logo.jpg">
+<meta property="og:image:secure_url" content="https://mlwithme.github.io/images/dl/logo.jpg">
+<meta property="og:image:width" content="1272">
+<meta property="og:image:height" content="1272">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:alt" content="《从零学AI指南手册》 - 4.7 NIN网络">
+
+  <meta property="article:section" content="dl">
+
 
 
 	<meta itemprop="name" content="4.7 NIN网络">
@@ -74,7 +82,7 @@ https://github.com/alex-shpak/hugo-book
 <link rel="icon" href="/favicon.png" >
 <link rel="manifest" href="/manifest.json">
 <link rel="canonical" href="https://mlwithme.github.io/dl/chapter04/911b961cc5d949b6/">
-<link rel="stylesheet" href="/book.min.e05a209bbdff79665f7fe0efc0036069c4851a205de335e26fce75ad3570d2cd.css" integrity="sha256-4Fogm73/eWZff&#43;DvwANgacSFGiBd4zXib851rTVw0s0=" crossorigin="anonymous">
+<link rel="stylesheet" href="/book.min.a3b3c189ec36eda25846e6a5241268b0c27b5b76ed9c0b34b9b3e6d3cae2a18c.css" integrity="sha256-o7PBiew27aJYRualJBJosMJ7W3btnAs0ubPm08rioYw=" crossorigin="anonymous">
 
 
   <script defer type="module" src="/en.search.min.d6b14dbcd48978b2c41611d06e5387dc896ddf705e423dd9152973bfd6c6096a.js" integrity="sha256-1rFNvNSJeLLEFhHQblOH3Ilt33BeQj3ZFSlzv9bGCWo=" crossorigin="anonymous"></script>
@@ -3621,14 +3629,6 @@ https://github.com/alex-shpak/hugo-book
         referrerpolicy="no-referrer"
       >
     </a>
-    <button
-      class="book-page-share-btn"
-      type="button"
-      data-share-url="https://mlwithme.github.io/dl/chapter04/911b961cc5d949b6/"
-      data-share-title="4.7 NIN网络"
-    >
-      <span>转发分享</span>
-    </button>
   </section>
 
 
@@ -3778,34 +3778,6 @@ https://github.com/alex-shpak/hugo-book
             Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
           );
         }
-
-        document.querySelectorAll(".book-page-share-btn").forEach(function (btn) {
-          btn.addEventListener("click", async function () {
-            var url = btn.dataset.shareUrl;
-            var title = btn.dataset.shareTitle || document.title;
-            var originalText = btn.textContent;
-
-            try {
-              if (navigator.share) {
-                await navigator.share({ title: title, url: url });
-                return;
-              }
-
-              if (navigator.clipboard && url) {
-                await navigator.clipboard.writeText(url);
-                btn.textContent = "链接已复制";
-                window.setTimeout(function () {
-                  btn.textContent = originalText;
-                }, 1500);
-              }
-            } catch (err) {
-              btn.textContent = "分享失败";
-              window.setTimeout(function () {
-                btn.textContent = originalText;
-              }, 1500);
-            }
-          });
-        });
       });
     </script>
   
@@ -3859,14 +3831,6 @@ https://github.com/alex-shpak/hugo-book
         referrerpolicy="no-referrer"
       >
     </a>
-    <button
-      class="book-page-share-btn"
-      type="button"
-      data-share-url="https://mlwithme.github.io/dl/chapter04/911b961cc5d949b6/"
-      data-share-title="4.7 NIN网络"
-    >
-      <span>转发分享</span>
-    </button>
   </section>
 
 

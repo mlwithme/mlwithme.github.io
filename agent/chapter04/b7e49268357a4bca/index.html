@@ -24,25 +24,36 @@ Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要
 ">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
-<meta name="color-scheme" content="light dark"><meta property="og:url" content="https://mlwithme.github.io/agent/chapter04/b7e49268357a4bca/">
-	<meta property="og:site_name" content="《从零学AI指南手册》">
-	<meta property="og:title" content="4.5 复杂问题拆解与ReAct框架">
-	<meta property="og:description" content="4.5 复杂问题拆解与ReAct框架# 在上一小节的内容中，我们直接使用了 LangChain 中的 create_agent() 来创建智能体，并让它能够在一次请求中多次调用工具，所以即便是一个用户请求中包含有多个子问题，它也能够持续迭代，直到得到最终的答案。站在使用者的角度来看，这一切似乎合情合理也应该如此，但如果继续追问其内部机制就会发现，这背后对应的正是 Agent 领域中最重要的一类思想。
-4.5.1 ReAct 出现的动机# 在不借助工具的情况下，大模型处理问题的方式通常可以概括为“一次输入，一次输出”。用户给出问题后，模型基于参数中已经学到的知识直接生成答案，其流程如图4-6所示。
-图 4-6 大模型处理问题流程 根据图4-6可知，虽然这种方式在简单问答中已经足够有效，但它有两个明显的局限：
-第一，模型无法主动接触外部世界。如果问题依赖最新信息、私有知识库或运行时环境，模型即使具备较强的语言能力，也只能依赖训练阶段形成的内部记忆进行猜测。当然，这一点我们已经可以通过外部工具来解决。
-第二，模型虽然可以在一次回答中表现出一定的推理能力，但这种推理是“封闭的”。一旦中间某一步判断错误，后续答案往往会沿着错误方向继续展开，从而产生事实性幻觉或不可靠的结论。
-例如，在上一节内容的示例中，当用户提出“本书主角是谁？找到主角后，再继续说明他的出生背景”这类问题时，模型实际上需要完成多个连续动作：先判断是否需要检索，再提炼一个更适合搜索的查询词，然后读取检索结果，最后根据新得到的信息决定下一步还要不要继续查找。显然，这已经不是一次性生成答案能够稳定完成的任务，而是一个需要多轮中间决策的过程。
-为了解决这一问题，研究员姚顺雨[1] 在2022年10月提出了推理与行动（Reasoning and Acting, ReAct）决策框架，它的核心出发点是不要强迫模型一次性给出最终答案，而是允许模型在推理过程中主动采取行动，并根据行动得到的观察结果继续推进后续推理，直到得到最终答案。
-4.5.2 ReAct 决策原理# 在推理与行动中，“推理”表示模型围绕当前任务形成的中间思考，“行动”则表示模型基于当前判断采取的动作，例如搜索、查询数据库、调用函数或访问工具。如果只看定义，ReAct 很容易被误解为让模型先想一想再调工具，但它真正重要的地方不在于“先想后做”这4个字，而在于它把复杂任务拆成了一个可以反复循环的过程，如图4-7所示。
-图 4-7 ReAct 决策原理 在图4-7中，思考（Thought）表示模型的中间推理，它的作用是分解目标、规划下一步或解释为什么要调用某个工具；行动（Action）表示模型决定执行的动作，通常对应一次工具调用；观察（Observation）表示工具执行后的结果，它会重新进入上下文，成为下一轮推理的依据。
-进一步，根据图4-7可知，在整个循环中模型并不会立即产生最终答案，而是首先会根据当前任务形成一个中间判断，决定是否需要调用某个工具，即思考过程；然后调用工具并返回结果，即行动过程；其次根据工具返回的结果修正后续判断，即观察过程；最后在条件满足时再输出最终答案。也正因为如此，我们在第4.4节看到的 RAG Agent 才能够先拆问题、再检索、再继续检索，最后组合出完整答案。
-从这个角度看，ReAct 并不是一个单独的工具调用技巧，而是一种围绕推理驱动行动、行动反哺推理而组织起来的任务求解范式。
-4.5.3 ReAct 的基本执行流程# 为了更直观地理解这一点，我们来看一个简单的例子。假设用户的问题是：“《哈利波特》的作者出生在哪个国家？” 此时模型如果直接回答，完全可能因为模型能力或记忆偏差或知识不完整而出错，但是在 ReAct 框架下，更合理的过程应当是：
-Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要先确认《哈利波特》的作者是谁。 Action: Search(&#34;哈利波特 作者&#34;) Observation: J.K. Rowling Thought: 现在我已经知道作者，需要继续查询她的出生国家。 Action: Search(&#34;J.K. Rowling 出生国家&#34;) Observation: United Kingdom Final Answer: 《哈利波特》的作者是 J.K. Rowling，出生于英国。从上述过程可以看出，ReAct 并不要求模型一开始就具备完整答案，而是允许它在中途通过行动补充信息。这样模型的推理不再完全依赖内部记忆，而是可以在关键节点引入外部证据；其次，整个求解过程具有更强的可解释性，我们不仅看到最终答案，也能看到模型为何进行了某一步操作，以及这一步操作返回了什么信息。">
-	<meta property="og:locale" content="zh_CN">
-	<meta property="og:type" content="article">
-		<meta property="article:section" content="agent">
+<meta name="color-scheme" content="light dark">
+
+
+
+
+
+
+
+  
+
+
+
+  
+
+<meta property="og:url" content="https://mlwithme.github.io/agent/chapter04/b7e49268357a4bca/">
+<meta property="og:site_name" content="《从零学AI指南手册》">
+<meta property="og:title" content="4.5 复杂问题拆解与ReAct框架">
+<meta property="og:description" content="4.5 复杂问题拆解与ReAct框架# 在上一小节的内容中，我们直接使用了 LangChain 中的 create_agent() 来创建智能体，并让它能够在一次请求中多次调用工具，所以即便是一个用户请求中包含有多个子问题，它也能够持续迭代，直到得到最终的答案。站在使用者的角度来 …">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:type" content="article">
+<meta property="og:image" content="https://mlwithme.github.io/images/dl/logo.jpg">
+<meta property="og:image:url" content="https://mlwithme.github.io/images/dl/logo.jpg">
+<meta property="og:image:secure_url" content="https://mlwithme.github.io/images/dl/logo.jpg">
+<meta property="og:image:width" content="1272">
+<meta property="og:image:height" content="1272">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:alt" content="《从零学AI指南手册》 - 4.5 复杂问题拆解与ReAct框架">
+
+  <meta property="article:section" content="agent">
+
 
 
 	<meta itemprop="name" content="4.5 复杂问题拆解与ReAct框架">
@@ -65,7 +76,7 @@ Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要
 <link rel="icon" href="/favicon.png" >
 <link rel="manifest" href="/manifest.json">
 <link rel="canonical" href="https://mlwithme.github.io/agent/chapter04/b7e49268357a4bca/">
-<link rel="stylesheet" href="/book.min.e05a209bbdff79665f7fe0efc0036069c4851a205de335e26fce75ad3570d2cd.css" integrity="sha256-4Fogm73/eWZff&#43;DvwANgacSFGiBd4zXib851rTVw0s0=" crossorigin="anonymous">
+<link rel="stylesheet" href="/book.min.a3b3c189ec36eda25846e6a5241268b0c27b5b76ed9c0b34b9b3e6d3cae2a18c.css" integrity="sha256-o7PBiew27aJYRualJBJosMJ7W3btnAs0ubPm08rioYw=" crossorigin="anonymous">
 
 
   <script defer type="module" src="/en.search.min.d6b14dbcd48978b2c41611d06e5387dc896ddf705e423dd9152973bfd6c6096a.js" integrity="sha256-1rFNvNSJeLLEFhHQblOH3Ilt33BeQj3ZFSlzv9bGCWo=" crossorigin="anonymous"></script>
@@ -3614,14 +3625,6 @@ Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要
         referrerpolicy="no-referrer"
       >
     </a>
-    <button
-      class="book-page-share-btn"
-      type="button"
-      data-share-url="https://mlwithme.github.io/agent/chapter04/b7e49268357a4bca/"
-      data-share-title="4.5 复杂问题拆解与ReAct框架"
-    >
-      <span>转发分享</span>
-    </button>
   </section>
 
 
@@ -3775,34 +3778,6 @@ Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要
             Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
           );
         }
-
-        document.querySelectorAll(".book-page-share-btn").forEach(function (btn) {
-          btn.addEventListener("click", async function () {
-            var url = btn.dataset.shareUrl;
-            var title = btn.dataset.shareTitle || document.title;
-            var originalText = btn.textContent;
-
-            try {
-              if (navigator.share) {
-                await navigator.share({ title: title, url: url });
-                return;
-              }
-
-              if (navigator.clipboard && url) {
-                await navigator.clipboard.writeText(url);
-                btn.textContent = "链接已复制";
-                window.setTimeout(function () {
-                  btn.textContent = originalText;
-                }, 1500);
-              }
-            } catch (err) {
-              btn.textContent = "分享失败";
-              window.setTimeout(function () {
-                btn.textContent = originalText;
-              }, 1500);
-            }
-          });
-        });
       });
     </script>
   
@@ -3858,14 +3833,6 @@ Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要
         referrerpolicy="no-referrer"
       >
     </a>
-    <button
-      class="book-page-share-btn"
-      type="button"
-      data-share-url="https://mlwithme.github.io/agent/chapter04/b7e49268357a4bca/"
-      data-share-title="4.5 复杂问题拆解与ReAct框架"
-    >
-      <span>转发分享</span>
-    </button>
   </section>
 
 

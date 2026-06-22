@@ -30,31 +30,38 @@ Stacking的核心思想为并行地训练一系列各自独立的不同类模型
 ">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
-<meta name="color-scheme" content="light dark"><meta property="og:url" content="https://mlwithme.github.io/ml/chapter09/9eff4004fd6c437d/">
-	<meta property="og:site_name" content="《从零学AI指南手册》">
-	<meta property="og:title" content="9.1 集成学习算法">
-	<meta property="og:description" content="经过前面几章内容的学习，我们已经了解了机器学习中的多种分类和回归模型。现在有一个问题，这么多模型究竟哪一个最好呢？以分类任务为例，当拿到一个实际的数据集时，如果是你，你会选择哪种模型进行建模呢？最笨的方法就是挨个都试一下，这样做有没有道理呢？还别说，在实际的情况中真的可能会都去试一下。但是另外一种更常见的做法就是采用集成学习的思想来进行建模，也就是本章中将要介绍的内容。
-整个第9章的学习路线如图9-1所示，首先我们将介绍集成学习的基本思想和并以随机森林为例来介绍scikit-learn建模过程，然后介绍集成学习中应用最为广泛的随机森林算法及其对应的特征重要评估方法，最后再来介绍其它几种常见的集成学习算法。
-图 9-1 集成学习算法学习路线图 9.1 集成学习算法# 9.1.1 集成学习思想# 假如现在选择A、B、C这3个模型进行建模，最后得到结果是： A的分类准确率为0.93，B的分类准确率为0.95，C的分类准确率为0.88。那最终应该选择哪一个模型呢？是模型B吗？
-假设现在一共有100个样本，其标签为二分类（正、负两类），3个模型的部分分类结果如表9-1所示。
-表 9-1 不同模型分类结果对比表 在表9-1中的5个样本，模型A和模型C均能分类正确，而模型B不能分类正确，但如果此时将这3个模型一起用于分类任务的预测，并且对于每个样本的最终输出结果采用基于投票的规则在3个模型的输出结果中进行选择。例如表9-1中的第1个样本，模型A和模型C均判定为“负类”只有模型B判定为“正类”，则最后的输出便为“负类”。那么此时，我们就可以得到一个分类准确率为1的“混合”模型。
-注意： 在其余的95个样本中，假设根据投票规则均能分类正确。
-9.1.2 集成学习种类# 在机器学习中，基于这种组合思想来提高模型精度的方法被称为集成学习（Ensemble Learning）。俗话说“三个臭皮匠，赛过诸葛亮”，这句话就完美阐述了集成学习的潜在思想——通过将多个模型结合在一起来提高整体的泛化能力[1]。常见的集成模型主要包括以下3种：
-1. Bagging集成学习
-Bagging的核心思想为并行地训练一系列各自相互独立的同类模型，然后将各个模型的输出结果按照某种策略进行组合并输出得到最终结果。例如在分类中可采用投票策略，而在回归中可采用平均策略，在9.2节中将要介绍到了随机森林便是这一集成学习的典型应用。通常来讲，模型越容易过拟合，则越适用于Bagging集成学习方法。
-2. Boosting集成学习
-Boosting的核心思想为先串行地训练一系列前后依赖的同类模型，即后一个模型用来对前一个模型的输出结果进行修正，最后通过某种策略将所有的模型组合起来并输出最终的结果，在9.4节、9.5节和9.6节中将会详细介绍几种常见Boosting算法的原理及实现过程。通常来讲，模型越容易欠拟合，则越适用于Boosting集成学习方法。
-3. Stacking集成学习
-Stacking的核心思想为并行地训练一系列各自独立的不同类模型，然后将各个模型的输出结果作为输入来训练一个新模型（例如： 逻辑回归），并通过这个新模型来输出最终预测的结果[2]。通常来讲，Stacking集成学习也适用于欠拟合的机器学习模型。
-下面，我们来大致介绍一下各类集成模型中常见的算法和使用示例。
-9.1.3 Bagging集成学习# Bagging全称为Bootstrap Aggregation，而这两个单词也分别代表了Bagging在执行过程中的两个步骤：①Bootstrap Samples； ②Aggregate Outputs。总结起来就是Bagging首先从原始数据中随机抽取多组包含若干数量样本的子训练集，并且对于各子训练集来讲再随机抽取其中若干特征维度作为模型输入；然后分别以不同的子训练集来训练并得到不同的基模型，同时将各个基模型的预测结果进行聚合得到最终的输出，即 $$ y=\frac{1}{M}\sum\limits_{m=1}^{M}{{{f}_{m}}}(x)\tag{9-1} $$ 其中，$M$表示基模型的数量，$f_m(x)$表示不同的基模型。
-同时，由于Bagging的策略是取所有基模型的“平均”值作为最终模型的输出结果，所以Bagging集成方法能够很好地降低模型高方差（过拟合）的情况，因此通常来讲，在使用Bagging集成方法的时候，可以尽量使每个基模型都出现过拟合的现象。下面介绍在sklearn中如何使用Bagging集成学习方法。
-1. Bagging on KNN
-在sklearn中，可以通过语句from sklearn.ensemble import BaggingClassifier导入Bagging集成学习方法中的分类模型。下面先来介绍BaggingClassifier类中常见的重要参数及其含义，示例代码如下：
-1 def __init__(self, base_estimator=None, n_estimators=10, 2 max_samples=1.0, max_features=1.0, bootstrap=True, 3 bootstrap_features=False, n_jobs=None): 在上述代码中，第1行base_estimator表示所使用的基模型，例如可以是K近邻或者逻辑回归等； n_estimators表示需要同时训练多少个基模型。第2行 max_samples表示每个子训练集中最大的样本数量，其可以是整数也可以是0~1的浮点数（此时表示在总样本数中的占比）； max_features表示子训练集中特征维度的数量，由于采用的是随机抽样所以不同的子训练集特征维度可能不一样； bootstrap=True表示在同一子训练集中同一样本可以重复抽样出现。第3行 bootstrap_features=False表示在同一子训练集中同一特征维度不能重复出现，如果设置为True，则在极端情况下所有的特征维度可能都一样； n_jobs表示同时要使用多个CPU核并行进行计算。">
-	<meta property="og:locale" content="zh_CN">
-	<meta property="og:type" content="article">
-		<meta property="article:section" content="ml">
+<meta name="color-scheme" content="light dark">
+
+
+
+
+
+  
+
+
+
+  
+
+
+
+  
+
+<meta property="og:url" content="https://mlwithme.github.io/ml/chapter09/9eff4004fd6c437d/">
+<meta property="og:site_name" content="《从零学AI指南手册》">
+<meta property="og:title" content="9.1 集成学习算法">
+<meta property="og:description" content="经过前面几章内容的学习，我们已经了解了机器学习中的多种分类和回归模型。现在有一个问题，这么多模型究竟哪一个最好呢？以分类任务为例，当拿到一个实际的数据集时，如果是你，你会选择哪种模型进行建模呢？最笨的方法就是挨个都试一下，这样做有没有道理呢？还别说，在实际的情况中真的可能会都去试 …">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:type" content="article">
+<meta property="og:image" content="https://mlwithme.github.io/images/ml/logo.jpg">
+<meta property="og:image:url" content="https://mlwithme.github.io/images/ml/logo.jpg">
+<meta property="og:image:secure_url" content="https://mlwithme.github.io/images/ml/logo.jpg">
+<meta property="og:image:width" content="1272">
+<meta property="og:image:height" content="1272">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:alt" content="《从零学AI指南手册》 - 9.1 集成学习算法">
+
+  <meta property="article:section" content="ml">
+
 
 
 	<meta itemprop="name" content="9.1 集成学习算法">
@@ -83,7 +90,7 @@ Stacking的核心思想为并行地训练一系列各自独立的不同类模型
 <link rel="icon" href="/favicon.png" >
 <link rel="manifest" href="/manifest.json">
 <link rel="canonical" href="https://mlwithme.github.io/ml/chapter09/9eff4004fd6c437d/">
-<link rel="stylesheet" href="/book.min.e05a209bbdff79665f7fe0efc0036069c4851a205de335e26fce75ad3570d2cd.css" integrity="sha256-4Fogm73/eWZff&#43;DvwANgacSFGiBd4zXib851rTVw0s0=" crossorigin="anonymous">
+<link rel="stylesheet" href="/book.min.a3b3c189ec36eda25846e6a5241268b0c27b5b76ed9c0b34b9b3e6d3cae2a18c.css" integrity="sha256-o7PBiew27aJYRualJBJosMJ7W3btnAs0ubPm08rioYw=" crossorigin="anonymous">
 
 
   <script defer type="module" src="/en.search.min.d6b14dbcd48978b2c41611d06e5387dc896ddf705e423dd9152973bfd6c6096a.js" integrity="sha256-1rFNvNSJeLLEFhHQblOH3Ilt33BeQj3ZFSlzv9bGCWo=" crossorigin="anonymous"></script>
@@ -3633,14 +3640,6 @@ Stacking的核心思想为并行地训练一系列各自独立的不同类模型
         referrerpolicy="no-referrer"
       >
     </a>
-    <button
-      class="book-page-share-btn"
-      type="button"
-      data-share-url="https://mlwithme.github.io/ml/chapter09/9eff4004fd6c437d/"
-      data-share-title="9.1 集成学习算法"
-    >
-      <span>转发分享</span>
-    </button>
   </section>
 
 
@@ -3778,34 +3777,6 @@ $$<p>
             Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
           );
         }
-
-        document.querySelectorAll(".book-page-share-btn").forEach(function (btn) {
-          btn.addEventListener("click", async function () {
-            var url = btn.dataset.shareUrl;
-            var title = btn.dataset.shareTitle || document.title;
-            var originalText = btn.textContent;
-
-            try {
-              if (navigator.share) {
-                await navigator.share({ title: title, url: url });
-                return;
-              }
-
-              if (navigator.clipboard && url) {
-                await navigator.clipboard.writeText(url);
-                btn.textContent = "链接已复制";
-                window.setTimeout(function () {
-                  btn.textContent = originalText;
-                }, 1500);
-              }
-            } catch (err) {
-              btn.textContent = "分享失败";
-              window.setTimeout(function () {
-                btn.textContent = originalText;
-              }, 1500);
-            }
-          });
-        });
       });
     </script>
   
@@ -3860,14 +3831,6 @@ $$<p>
         referrerpolicy="no-referrer"
       >
     </a>
-    <button
-      class="book-page-share-btn"
-      type="button"
-      data-share-url="https://mlwithme.github.io/ml/chapter09/9eff4004fd6c437d/"
-      data-share-title="9.1 集成学习算法"
-    >
-      <span>转发分享</span>
-    </button>
   </section>
 
 

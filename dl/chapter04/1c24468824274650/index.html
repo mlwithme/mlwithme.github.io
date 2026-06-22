@@ -27,28 +27,36 @@ https://github.com/alex-shpak/hugo-book
 ">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
-<meta name="color-scheme" content="light dark"><meta property="og:url" content="https://mlwithme.github.io/dl/chapter04/1c24468824274650/">
-	<meta property="og:site_name" content="《从零学AI指南手册》">
-	<meta property="og:title" content="4.10 DenseNet网络">
-	<meta property="og:description" content="4.10 DenseNet网络# 在4.9节内容中，我们详细介绍了ResNet模型的原理和实现方法，它的成功不仅解决了深度神经网络的退化问题而且在ImageNet等大型数据集上有着很好的表现，成为了深度学习领域的重要成果之一。因此，ResNet也为后续的网络设计提供了一种新的思考方向，启发了后续许多网络结构的设计，例如在本节内容中将要介绍的DenseNet模型。
-4.10.1 DenseNet动机# 在传统的卷积神经网络中每一层的输入只来自于上一层的输出，这导致了每一层的特征图只能连接到相邻的下一层而无法跨层连接，这使得随着网络深度增加不仅出现了梯度消失或爆炸的现象，而且还出现了网络退化的问题。虽然残差网络的出现使得这两个问题在很大程度上得到了缓解，但是随着网络模型加深依旧存在着梯度消失的问题；其次，在传统的卷积神经网络中需要通过增加网络深度的方式来提高特征的表达能力从而导致模型参数急剧增加；最后，由于每一层的特征只能连接到近邻的后一层，使得浅层的特征可能无法充分传递到深层网络中导致特征传递不充分[1]。
-受到ResNet残差结构连接方式的启发，作者提出了一种基于密集连接的网络结构DenseNet[1]。DenseNet通过将上一层和前面所有层的输出拼接起来并作为当前层的输入，从而实现：①允许梯度更加直接地传递到浅层网络有助于缓解梯度消失的问题；②通过特征共享的方式来增加特征的表达能力从而降低了模型的参数量；③使得特征能在网络层中更加自由地传递有助于特征的充分利用。
-4.10.2 DenseNet结构# 整体来说，DenseNet模型主要由密集连接层和迁移层所构成，而两者的核心也都是由卷积层所构成，后续整个DenseNet网络也将基于这两个部分来进行构建。下面开始分别就这两部分进行介绍。
-1. 理解密集连接层
-对于密集连接层来说，它是由一个个密集块所构成，而密集块则是由两个基础的卷积层所构成，整个密集块的结构如图4-48所示。
-图 4-48. 密集块结构图 在图4-48中，首先是一个卷积核大小为$1\times1$的卷积层，其卷积核的个数为$4K$，$K$为论文中所指的增长率（Growth Rate）用于控制密集块输出的特征通道数，4可以理解为控制系数用于调节两个卷积层之间的特征通道数，紧接着最后便是一个$3\times3$的卷积层。同时从这里可以看出，对于每个卷积层来说其先进行了归一化，然后是非线性变换操作，最后才是线性变换，即“BN&#43;ReLU&#43;Conv”的顺序；而在ResNet中这一顺序为“Conv&#43;BN&#43;ReLU”。
-进一步，由多个密集块便可以构造得到一个密集连接层，如图4-49所示。
-图 4-49. 密集连接层（含3个密集块）图 如图4-49所示，对于传统的网络结构来说$L$层网络便有$L$条连接，而在密集连接层中则有$\frac{L}{2}(L&#43;1)$条连接，而这一连接方式也DenseNet名字的由来。在图4-49中，对于第1个密集块来说，假定其输入形状的长、宽和通道数分别为$m$、$n$和$c$则其输出形状便是$m\times n\times K$；对于第2个密集块来说其输入便是第1个密集块的输入和第1个密集块输出的组合，即形状为$m\times n\times (K&#43;c)$，且其输出同样为$m\times n\times K$；以此类推，第3个密集块的输入形状便是$m\times n\times (2\cdot K&#43;c)$，其输出形状依然为$m\times n\times K$。
-由此可以得出，对于第$l$个密集块来说，其输入通道数为$(l-1)\cdot K&#43;c$，其中$l=1,2...,L$，这个递推公式在模型实现时还会用到。
-2. 理解迁移层
-根据图4-49可知，对于每个密集连接层来说其输出特征图的通道数和长宽均没有发生改变，因此作者提出了迁移层（Transition Layer）的概念来逐一对密集连接层的输出特征进行压缩，其结构如图4-50所示。
-图 4-50. 迁移层图 在图4-50中，首先同样是一个卷积核大小为$1\times1$的卷积层，其卷积核的个数为$\theta m$，其中$m$表示输入通道数，$\theta$表示通道压缩率（ Compression Factor），默认为0.5即通道数减半；最后是一个窗口大小为$2\times 2$的平均池化层。
-3. 整体网络结构
-在清楚密集连接层和迁移层的构造原理后，我们便可以构造得到最终的DenseNet网络模型。同ResNet一样，我们可以通过配置不同的密集连接数量返回得到不同的DenseNet结构，如论文中给出的DenseNet121、DenseNet169、DenseNet201和DenseNet264。为了方便后续介绍以及与ResNet18大致保持一致，下面我们将以DenseNet21为例进行介绍，其网络结构信息如表4-4所示。
-表 4-4 DenseNet18网络结构信息表 网络层 输出形状 18-layer Convolution $112\times112$ $\begin{bmatrix}7\times7,&amp;64\end{bmatrix}\times1$ Pooling $56\times56$ Max Pooling DenseLayer1 $56\times56$ $\begin{bmatrix}1\times1\\ 3\times3\end{bmatrix}\times2$ Transition1 $28\times28$ $1\times1$ Conv, $2\times2$ Average Pooling DenseLayer2 $28\times28$ $\begin{bmatrix}1\times1\\ 3\times3\end{bmatrix}\times2$ Transition2 $14\times14$ $1\times1$ Conv, $2\times2$ Average Pooling DenseLayer3 $14\times14$ $\begin{bmatrix}1\times1\\ 3\times3\end{bmatrix}\times2$ Transition3 $7\times7$ $1\times1$ Conv, $2\times2$ Average Pooling DenseLayer4 $7\times7$ $\begin{bmatrix}1\times1\\ 3\times3\end{bmatrix}\times2$ ClassificatinLayer $1\times1$ $7\times7$ Global Average Pooling, softmax 如表4-4所示，从上到下ResNet21一共有10个部分，其中第2列表示每个部分特征图输出的形状；第3列表示各层对应的参数信息，以DenseLayer1这一行为例，其表示一共使用了2个密集块结构且每个密集层由两个卷积层构成。由此，根据表4-4中的结构信息便可以得到如图4-51所示的网络结构图。">
-	<meta property="og:locale" content="zh_CN">
-	<meta property="og:type" content="article">
-		<meta property="article:section" content="dl">
+<meta name="color-scheme" content="light dark">
+
+
+
+
+
+
+
+  
+
+
+
+  
+
+<meta property="og:url" content="https://mlwithme.github.io/dl/chapter04/1c24468824274650/">
+<meta property="og:site_name" content="《从零学AI指南手册》">
+<meta property="og:title" content="4.10 DenseNet网络">
+<meta property="og:description" content="4.10 DenseNet网络# 在4.9节内容中，我们详细介绍了ResNet模型的原理和实现方法，它的成功不仅解决了深度神经网络的退化问题而且在ImageNet等大型数据集上有着很好的表现，成为了深度学习领域的重要成果之一。因此，ResNet也为后续的网络设计提供了一种新的思考 …">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:type" content="article">
+<meta property="og:image" content="https://mlwithme.github.io/images/dl/logo.jpg">
+<meta property="og:image:url" content="https://mlwithme.github.io/images/dl/logo.jpg">
+<meta property="og:image:secure_url" content="https://mlwithme.github.io/images/dl/logo.jpg">
+<meta property="og:image:width" content="1272">
+<meta property="og:image:height" content="1272">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:alt" content="《从零学AI指南手册》 - 4.10 DenseNet网络">
+
+  <meta property="article:section" content="dl">
+
 
 
 	<meta itemprop="name" content="4.10 DenseNet网络">
@@ -74,7 +82,7 @@ https://github.com/alex-shpak/hugo-book
 <link rel="icon" href="/favicon.png" >
 <link rel="manifest" href="/manifest.json">
 <link rel="canonical" href="https://mlwithme.github.io/dl/chapter04/1c24468824274650/">
-<link rel="stylesheet" href="/book.min.e05a209bbdff79665f7fe0efc0036069c4851a205de335e26fce75ad3570d2cd.css" integrity="sha256-4Fogm73/eWZff&#43;DvwANgacSFGiBd4zXib851rTVw0s0=" crossorigin="anonymous">
+<link rel="stylesheet" href="/book.min.a3b3c189ec36eda25846e6a5241268b0c27b5b76ed9c0b34b9b3e6d3cae2a18c.css" integrity="sha256-o7PBiew27aJYRualJBJosMJ7W3btnAs0ubPm08rioYw=" crossorigin="anonymous">
 
 
   <script defer type="module" src="/en.search.min.d6b14dbcd48978b2c41611d06e5387dc896ddf705e423dd9152973bfd6c6096a.js" integrity="sha256-1rFNvNSJeLLEFhHQblOH3Ilt33BeQj3ZFSlzv9bGCWo=" crossorigin="anonymous"></script>
@@ -3619,14 +3627,6 @@ https://github.com/alex-shpak/hugo-book
         referrerpolicy="no-referrer"
       >
     </a>
-    <button
-      class="book-page-share-btn"
-      type="button"
-      data-share-url="https://mlwithme.github.io/dl/chapter04/1c24468824274650/"
-      data-share-title="4.10 DenseNet网络"
-    >
-      <span>转发分享</span>
-    </button>
   </section>
 
 
@@ -3842,34 +3842,6 @@ https://github.com/alex-shpak/hugo-book
             Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
           );
         }
-
-        document.querySelectorAll(".book-page-share-btn").forEach(function (btn) {
-          btn.addEventListener("click", async function () {
-            var url = btn.dataset.shareUrl;
-            var title = btn.dataset.shareTitle || document.title;
-            var originalText = btn.textContent;
-
-            try {
-              if (navigator.share) {
-                await navigator.share({ title: title, url: url });
-                return;
-              }
-
-              if (navigator.clipboard && url) {
-                await navigator.clipboard.writeText(url);
-                btn.textContent = "链接已复制";
-                window.setTimeout(function () {
-                  btn.textContent = originalText;
-                }, 1500);
-              }
-            } catch (err) {
-              btn.textContent = "分享失败";
-              window.setTimeout(function () {
-                btn.textContent = originalText;
-              }, 1500);
-            }
-          });
-        });
       });
     </script>
   
@@ -3921,14 +3893,6 @@ https://github.com/alex-shpak/hugo-book
         referrerpolicy="no-referrer"
       >
     </a>
-    <button
-      class="book-page-share-btn"
-      type="button"
-      data-share-url="https://mlwithme.github.io/dl/chapter04/1c24468824274650/"
-      data-share-title="4.10 DenseNet网络"
-    >
-      <span>转发分享</span>
-    </button>
   </section>
 
 

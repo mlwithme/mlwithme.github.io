@@ -19,20 +19,36 @@ https://github.com/alex-shpak/hugo-book
 ">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
-<meta name="color-scheme" content="light dark"><meta property="og:url" content="https://mlwithme.github.io/dl/chapter04/de007462967e4701/">
-	<meta property="og:site_name" content="《从零学AI指南手册》">
-	<meta property="og:title" content="4.5 AlexNet网络">
-	<meta property="og:description" content="4.5 AlexNet网络# 在第3章及本章开篇内容中，我们多次提及如何有效地对输入数据进行特征提取，然后再将提取得到的特征输入到下游任务模型是深度学习中的一个重要研究方向，而这又尤其体现在图像处理领域中。自卷积操作问世以来，如何设计一个有效的网络结构就成为了一个热门的研究方向。研究者们通过设计不同网络结构来对输入的图像进行特征提取，并且都希望设计出的模型能够表现出强大的学习能力，以此来提高下游任务的精度。
-2012年AlexNet[1]模型在ImageNet图像识别（关于该数据集的介绍见5.4.1节内容）大赛中一战成名，在1000分类的测试集上分别取得了$62\%$的Top-1准确率和$83\%$的Top-5（即预测概率最大的前5个中包含有正确标签）的成绩，其名称也取自于第一作者的名字Alex Krizhevsky。在本节内容中我们将会详细介绍AlexNet网络模型的原理及其实现过程。
-4.5.1 AlexNet动机# 虽然传统的机器学习模型可以通过扩充数据集来提升模型在图像识别这方面的效果，但是在现实环境中物体的呈现形式变化多样，因此想要模型有一个较好的效果则需要使用更大的数据集。同时，为了使得模型能够从数百万张图片中学习识别上千个类别我们就需要一个具有强大学习能力的模型。然而，在这样一个复杂的任务场景中即使是使用像ImageNet这样大规模的数据集也无法完全解决这个问题，因此模型还应该具有相应的先验知识来弥补在数据上的不足。
-基于这样的想法，论文作者采用了卷积作为基础模块来构建网络，并通过增加卷积层的深度和宽度来控制模型的学习能力。此外，AlexNet模型的设计还包括使用了GPU来加速网络训练，这也是该模型成功的一个关键因素。AlexNet的提出标志着深度学习在计算机视觉领域的应用开始得到广泛的认可和使用。
-4.5.2 AlexNet结构# 简单来说，AlexNet的整体网络结构可以看做是以LeNet5模型为基础的改进版本。AlexNet采用了5层卷积加3层全连接的网络结构，如图4-31所示便是论文中AlexNet模型的网络结构图。
-图 4-31. 原始AlexNet网络结构图 从图4-31可以发现，整个网络结构分为了上下两层，其原因在于受限于当时GPU显存的大小不得已而为之。但现在就大可不必这样做，直接将两者合并在一起即可，因此可以重新将其画成如图4-32所示的形式。
-图 4-32. AlexNet网络结构图 如图4-32所示便是重画后的网络结构图，其中网络结构上面的标识表示各个操作之后结果的维度信息，下面的标识表示各个操作对应的参数信息。根据图4-32可知，虽然AlexNet与LeNet的设计理念非常相似，但也有着显著的区别。AlexNet第1层中卷积窗口的大小是11，这是因为ImageNet数据集中图片的大小是MNIST的近10倍，所以需要更大的卷积窗口来进行特征提取。第2层中的卷积窗口大小减小到5，之后全采用大小为3的卷积窗口进行卷积。此外，第1、第2和第5个卷积层之后都使用了窗口大小为3、步幅为2的最大池化层，紧接着最后一个卷积层的是2个输出个数为$4096$的全连接层。最后，据图4-32所示的网络结构可以得出表4-2中所示的参数信息。
-表 4-2. AlexNet模型参数表 网络层 输入形状 参数 输出形状 参数量 ①卷积层 [1,3,224,224] kernel=[3,11,11,96],S=4,P=2 [1,96,55,55] $34944$ 池化层 [1,96,55,55] kernel=[3,3],S=2 [1,96,27,27] $0$ ②卷积层 [1,96,27,27] kernel=[96,5,5,256],S=1，P=2 [1,256,27,27] $614656$ 池化层 [1,256,27,27] kernel=[3,3],S=2 [1,256,13,13] $0$ ③卷积层 [1,256,13,13] kernel=[256,3,3,384],S=1，P=1 [1,384,13,13] $885120$ ④卷积层 [1,384,13,13] kernel=[384,3,3,384],S=1，P=1 [1,384,13,13] $1327488$ ⑤卷积层 [1,384,13,13] kernel=[384,3,3,256],S=1，P=1 [1,256,13,13] $884992$ 池化层 [1,256,13,13] kernel=[3,3],S=2 [1,256,6,6] $0$ ⑥全连接层 [1,256,6,6] weight=[256*6*6,4096] [1,4096] $37752832$ ⑦全连接层 [1,4096] weight=[4096,4096] [1,4096] $16781312$ ⑧全连接层 [1,4096] weight=[4096,1000] [1,1000] $4097000$ 其中输入形状和输出形状的4个维度分别为[batch_size,in_channels,width,height]，卷积核形状的4个维度分别为[in_channels,w,w,out_channels]。从表4-2可以看出，AlexNet网络结构的参数量大约在6千万左右，而倒数第1个全连接几乎就占了$60\%$左右。假如每个权重参数均使用32位浮点数进行表示，则每个权重参数将占用4个字节，则AlexNet模型的大小约为230MB。">
-	<meta property="og:locale" content="zh_CN">
-	<meta property="og:type" content="article">
-		<meta property="article:section" content="dl">
+<meta name="color-scheme" content="light dark">
+
+
+
+
+
+
+
+  
+
+
+
+  
+
+<meta property="og:url" content="https://mlwithme.github.io/dl/chapter04/de007462967e4701/">
+<meta property="og:site_name" content="《从零学AI指南手册》">
+<meta property="og:title" content="4.5 AlexNet网络">
+<meta property="og:description" content="4.5 AlexNet网络# 在第3章及本章开篇内容中，我们多次提及如何有效地对输入数据进行特征提取，然后再将提取得到的特征输入到下游任务模型是深度学习中的一个重要研究方向，而这又尤其体现在图像处理领域中。自卷积操作问世以来，如何设计一个有效的网络结构就成为了一个热门的研究方向。 …">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:type" content="article">
+<meta property="og:image" content="https://mlwithme.github.io/images/dl/logo.jpg">
+<meta property="og:image:url" content="https://mlwithme.github.io/images/dl/logo.jpg">
+<meta property="og:image:secure_url" content="https://mlwithme.github.io/images/dl/logo.jpg">
+<meta property="og:image:width" content="1272">
+<meta property="og:image:height" content="1272">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:alt" content="《从零学AI指南手册》 - 4.5 AlexNet网络">
+
+  <meta property="article:section" content="dl">
+
 
 
 	<meta itemprop="name" content="4.5 AlexNet网络">
@@ -50,7 +66,7 @@ https://github.com/alex-shpak/hugo-book
 <link rel="icon" href="/favicon.png" >
 <link rel="manifest" href="/manifest.json">
 <link rel="canonical" href="https://mlwithme.github.io/dl/chapter04/de007462967e4701/">
-<link rel="stylesheet" href="/book.min.e05a209bbdff79665f7fe0efc0036069c4851a205de335e26fce75ad3570d2cd.css" integrity="sha256-4Fogm73/eWZff&#43;DvwANgacSFGiBd4zXib851rTVw0s0=" crossorigin="anonymous">
+<link rel="stylesheet" href="/book.min.a3b3c189ec36eda25846e6a5241268b0c27b5b76ed9c0b34b9b3e6d3cae2a18c.css" integrity="sha256-o7PBiew27aJYRualJBJosMJ7W3btnAs0ubPm08rioYw=" crossorigin="anonymous">
 
 
   <script defer type="module" src="/en.search.min.d6b14dbcd48978b2c41611d06e5387dc896ddf705e423dd9152973bfd6c6096a.js" integrity="sha256-1rFNvNSJeLLEFhHQblOH3Ilt33BeQj3ZFSlzv9bGCWo=" crossorigin="anonymous"></script>
@@ -3596,14 +3612,6 @@ https://github.com/alex-shpak/hugo-book
         referrerpolicy="no-referrer"
       >
     </a>
-    <button
-      class="book-page-share-btn"
-      type="button"
-      data-share-url="https://mlwithme.github.io/dl/chapter04/de007462967e4701/"
-      data-share-title="4.5 AlexNet网络"
-    >
-      <span>转发分享</span>
-    </button>
   </section>
 
 
@@ -3932,34 +3940,6 @@ https://github.com/alex-shpak/hugo-book
             Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
           );
         }
-
-        document.querySelectorAll(".book-page-share-btn").forEach(function (btn) {
-          btn.addEventListener("click", async function () {
-            var url = btn.dataset.shareUrl;
-            var title = btn.dataset.shareTitle || document.title;
-            var originalText = btn.textContent;
-
-            try {
-              if (navigator.share) {
-                await navigator.share({ title: title, url: url });
-                return;
-              }
-
-              if (navigator.clipboard && url) {
-                await navigator.clipboard.writeText(url);
-                btn.textContent = "链接已复制";
-                window.setTimeout(function () {
-                  btn.textContent = originalText;
-                }, 1500);
-              }
-            } catch (err) {
-              btn.textContent = "分享失败";
-              window.setTimeout(function () {
-                btn.textContent = originalText;
-              }, 1500);
-            }
-          });
-        });
       });
     </script>
   
@@ -4012,14 +3992,6 @@ https://github.com/alex-shpak/hugo-book
         referrerpolicy="no-referrer"
       >
     </a>
-    <button
-      class="book-page-share-btn"
-      type="button"
-      data-share-url="https://mlwithme.github.io/dl/chapter04/de007462967e4701/"
-      data-share-title="4.5 AlexNet网络"
-    >
-      <span>转发分享</span>
-    </button>
   </section>
 
 

@@ -20,21 +20,36 @@ https://github.com/alex-shpak/hugo-book
 ">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
-<meta name="color-scheme" content="light dark"><meta property="og:url" content="https://mlwithme.github.io/dl/chapter10/90ea8d3e090d48b4/">
-	<meta property="og:site_name" content="《从零学AI指南手册》">
-	<meta property="og:title" content="10.12 BERT从零训练">
-	<meta property="og:description" content="10.12 BERT从零训练# 在前面几节内容中我们已经介绍了几种常见的基于BERT预训练模型的下游任务，在接下来的这节内容中我们将会介绍如何从零实现整个NSP和MLM任务并从头训练BERT模型。通常来说，我们既可以通过MLM和NSP这两个任务来从头训练一个BERT模型，当然也可以在开源预训练模型的基础上再次通过MLM和NSP任务来在特定语料中对模型进行微调，以使得整个模型参数更加符合这一场景，并且一般来说更加倾向于第2种做法。
-在10.6节内容中我们已经就MLM和NSP这两个任务的原理做了详细介绍，所以这里就不再赘述。一言以蔽之，MLM就是随机掩盖掉部分字符让模型来预测，而NSP则是同时输入模型两句话让模型判断后一句话是否真的为前一句话的下一句话，最终通过这两个任务来训练BERT模型中的权重参数。
-10.12.1 构建流程与格式化# 1. 数据集构建流程
-在正式介绍数据预处理之前，我们依旧先通过一张流程图来了解一下整个数据集的构建流程。
-图 10-38 MLM和NSP数据集构建流程图 如图10-38所示便是整个NSP和MLM任务数据集的构建流程。第①②步是根据原始语料来构造NSP任务所需要的输入和标签。第③步则是随机掩盖掉部分字符来构造MLM任务的输入，并同时进行填充处理。第④步则是根据第③步处理后的结果来构造MLM任务的标签值，其中[P]表示填充的含 义，这样做的目的是为了方面在计算损失时直接忽略那些不需要进行预测的位置。在大致清楚了整个数据集的构建流程后，我们下面就可以一步一步来完成数据集的构建。
-同时，为了能够使得整个数据预处理代码具有通用性，同时支持构造不同场景语料下的训练数据集，因此我们需要为每一类不同的数据源定义一个格式化函数来完成标准化的输入。这样即使是换了不同的语料只需要重写一个针对该数据集的格式化函数即可，其余部分的代码都不需要进行改动。
-2. 英文数据格式化
-这里首先以英文维基百科数据wiki2 [1]为例来介绍如何得到格式化后的标准数据。如下所示便是wiki2中的原始文本数据的存储形式：
-1 The development of [UNK] powder , based on [UNK] or [UNK] , by the French inventor Paul [UNK] in 1884 was a further step allowing smaller charges of propellant with longer barrels . The guns of the pre @-@ [UNK] battleships of the 1890s tended to be smaller in calibre... 2 The nature of the projectiles also changed during the ironclad period . Initially , the best armor @-@ piercing [UNK] was a solid cast @-@ iron shot . Later , shot of [UNK] iron , a harder iron alloy , gave better armor @-@ piercing qualities . Eventually the armor @-@ piercing shell was developed .在上述示例数据中，每一行都表示一个段落，其由一句话或多句话组成。此时我们需要在目录utils下新建create_pretraining_data.py模块，然后定义一个函数来对其进行预处理：">
-	<meta property="og:locale" content="zh_CN">
-	<meta property="og:type" content="article">
-		<meta property="article:section" content="dl">
+<meta name="color-scheme" content="light dark">
+
+
+
+
+
+
+
+  
+
+
+
+  
+
+<meta property="og:url" content="https://mlwithme.github.io/dl/chapter10/90ea8d3e090d48b4/">
+<meta property="og:site_name" content="《从零学AI指南手册》">
+<meta property="og:title" content="10.12 BERT从零训练">
+<meta property="og:description" content="10.12 BERT从零训练# 在前面几节内容中我们已经介绍了几种常见的基于BERT预训练模型的下游任务，在接下来的这节内容中我们将会介绍如何从零实现整个NSP和MLM任务并从头训练BERT模型。通常来说，我们既可以通过MLM和NSP这两个任务来从头训练一个BERT模型，当然也可 …">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:type" content="article">
+<meta property="og:image" content="https://mlwithme.github.io/images/dl/logo.jpg">
+<meta property="og:image:url" content="https://mlwithme.github.io/images/dl/logo.jpg">
+<meta property="og:image:secure_url" content="https://mlwithme.github.io/images/dl/logo.jpg">
+<meta property="og:image:width" content="1272">
+<meta property="og:image:height" content="1272">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:alt" content="《从零学AI指南手册》 - 10.12 BERT从零训练">
+
+  <meta property="article:section" content="dl">
+
 
 
 	<meta itemprop="name" content="10.12 BERT从零训练">
@@ -53,7 +68,7 @@ https://github.com/alex-shpak/hugo-book
 <link rel="icon" href="/favicon.png" >
 <link rel="manifest" href="/manifest.json">
 <link rel="canonical" href="https://mlwithme.github.io/dl/chapter10/90ea8d3e090d48b4/">
-<link rel="stylesheet" href="/book.min.e05a209bbdff79665f7fe0efc0036069c4851a205de335e26fce75ad3570d2cd.css" integrity="sha256-4Fogm73/eWZff&#43;DvwANgacSFGiBd4zXib851rTVw0s0=" crossorigin="anonymous">
+<link rel="stylesheet" href="/book.min.a3b3c189ec36eda25846e6a5241268b0c27b5b76ed9c0b34b9b3e6d3cae2a18c.css" integrity="sha256-o7PBiew27aJYRualJBJosMJ7W3btnAs0ubPm08rioYw=" crossorigin="anonymous">
 
 
   <script defer type="module" src="/en.search.min.d6b14dbcd48978b2c41611d06e5387dc896ddf705e423dd9152973bfd6c6096a.js" integrity="sha256-1rFNvNSJeLLEFhHQblOH3Ilt33BeQj3ZFSlzv9bGCWo=" crossorigin="anonymous"></script>
@@ -3597,14 +3612,6 @@ https://github.com/alex-shpak/hugo-book
         referrerpolicy="no-referrer"
       >
     </a>
-    <button
-      class="book-page-share-btn"
-      type="button"
-      data-share-url="https://mlwithme.github.io/dl/chapter10/90ea8d3e090d48b4/"
-      data-share-title="10.12 BERT从零训练"
-    >
-      <span>转发分享</span>
-    </button>
   </section>
 
 
@@ -3744,34 +3751,6 @@ https://github.com/alex-shpak/hugo-book
             Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
           );
         }
-
-        document.querySelectorAll(".book-page-share-btn").forEach(function (btn) {
-          btn.addEventListener("click", async function () {
-            var url = btn.dataset.shareUrl;
-            var title = btn.dataset.shareTitle || document.title;
-            var originalText = btn.textContent;
-
-            try {
-              if (navigator.share) {
-                await navigator.share({ title: title, url: url });
-                return;
-              }
-
-              if (navigator.clipboard && url) {
-                await navigator.clipboard.writeText(url);
-                btn.textContent = "链接已复制";
-                window.setTimeout(function () {
-                  btn.textContent = originalText;
-                }, 1500);
-              }
-            } catch (err) {
-              btn.textContent = "分享失败";
-              window.setTimeout(function () {
-                btn.textContent = originalText;
-              }, 1500);
-            }
-          });
-        });
       });
     </script>
   
@@ -3822,14 +3801,6 @@ https://github.com/alex-shpak/hugo-book
         referrerpolicy="no-referrer"
       >
     </a>
-    <button
-      class="book-page-share-btn"
-      type="button"
-      data-share-url="https://mlwithme.github.io/dl/chapter10/90ea8d3e090d48b4/"
-      data-share-title="10.12 BERT从零训练"
-    >
-      <span>转发分享</span>
-    </button>
   </section>
 
 

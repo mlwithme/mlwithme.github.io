@@ -21,22 +21,36 @@ https://github.com/alex-shpak/hugo-book
 ">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
-<meta name="color-scheme" content="light dark"><meta property="og:url" content="https://mlwithme.github.io/dl/chapter05/211b26bdd8f248ac/">
-	<meta property="og:site_name" content="《从零学AI指南手册》">
-	<meta property="og:title" content="5.4 模型的迁移学习">
-	<meta property="og:description" content="5.4 模型的迁移学习# 在前面几节内容中，我们详细介绍了PyTorch中模型的保存及载入推理和复用等过程。在有了前期这些基础知识后，接下来我们再来介绍关于模型迁移学习（Transfer Learning）部分的内容。
-5.4.1 迁移学习# 在深度神经网络中由于模型通常都含有大量的可学习参数，所以在训练数据不充分的情况下模型极易出现过拟合或者泛化能力差的情况。而另一方面，数据样本的标注又是一项既耗费时间又耗费财力的工作[6]，尤其是在一些需要业务专家介入的复杂任务标注中。因此，如何利用有限的数据来训练模型便成为了热门的研究方向。受到人类学习的启发——人类在学习并解决一个新问题的时候，总是可以依赖于先前所拥有的经验并迅速迁移到当前的场景中——研究人员开始提出一种两段式的学习框架，即先在一个通用的大规模数据集上训练得到一个预训练模型（Pre-trained Model），然后针对于特定的任务场景再根据少量的标注数据对整个模型进行微调（Fine-tuning），而这也被称为迁移学习。
-在深度学习中迁移学习主要起源于图像处理领域，其背后的理念是如果一个模型是基于足够大且通用的数据集所训练得到，那么该模型将可以有效地充当视觉领域的通用模型，随后便可以直接将这些学习到的模型参数迁移到下游任务中而不必再从头开始训练整个模型[1]。
-在图像处理领域中ImageNet是一个非常著名的大型通用数据集，它是由李飞飞团队于2007年所发起构建的一个项目，包含有超过1400万张手动标注的图片，旨在为世界各地的研究人员提供用于训练大规模物体识别模型的图像数据。[2]。自2010年以来，ImageNet项目每年都举办了一次大规模视觉识别挑战赛（ILSVRC），挑战赛使用了1000个类别的图片用于正确分类和检测目标及场景[3]。如图5-20所示便是ImageNet数据集中的部分图像。
-图 5-20. ImageNet数据集示例图 根据4.2.3节内容可知，越是靠近输出层特征越抽象，越是靠近输入层的特征越具体。因此假如现在有一个开源的图片分类模型A是基于ImageNet数据集训练而来，如果在某任务场景中需要训练另外一个10分类模型B用于汽车型号的分类，那么便可以直接取模型A中的前若干层（靠近输入层）网络作为特征提取器，然后在此基础上再加入一个新的全连接分类层来构造得到模型B完成整个10分类任务，此时称模型A为预训练（Pre-trained）模型。同时，通常来说还可以根据是否让预训练模型中的参数参与整个模型的训练这两种方式来完成模型的迁移学习任务[4]。
-在接下来的内容中，我们将会通过一个实际的示例来对模型的迁移学习过程进行介绍。以下完整示例代码可参见Code/Chapter05/C05_ModelTrans/文件夹。
-5.4.2 模型定义与比较# 在4.4节内容中，我们详细介绍了LeNet5网络模型的原理及现实过程，并且同时根据5.3节的介绍我们也清楚了模型的保存与复用。现在假设有一个LeNet6网络模型，它是在LeNet5的基础上多增加了一个全连接层，此时便可以通过迁移学习将LeNet5模型中的部分参数用于LeNet6模型中。具体地，LeNet6模型结构的实现代码如下所示：
-1 class LeNet6(nn.Module): 2 def __init__(self, ): 3 super(LeNet6, self).__init__() 4 self.conv = nn.Sequential( 5 nn.Conv2d(in_channels=1, out_channels=6, 6 kernel_size=5, padding=2), 7 nn.ReLU(), nn.MaxPool2d(2, 2), nn.Conv2d(6, 16, 5), 8 nn.ReLU(),nn.MaxPool2d(2, 2)) 9 self.fc = nn.Sequential( 10 nn.Flatten(),nn.Linear(16 * 5 * 5, 120), 11 nn.ReLU(),nn.Linear(120, 84),nn.ReLU(), 12 nn.Linear(84, 64),nn.ReLU(),nn.Linear(64, 10))在上述代码中，第1~11行是LeNet5模型的前4层。第12行便是LeNet6模型中新加入的一个网络层。
-在模型定义结束后，便可以输出模型中对应的参数信息。同时，为了完成后续模型的迁移过程这里也将LeNet5保存在本地权重参数载入输出以便两者进行对比，示例代码如下所示：
-1 if __name__ == &#39;__main__&#39;: 2 print(&#34;\n=====Model paras in LeNet6:&#34;) 3 model = LeNet6() 4 for (name, param) in model.state_dict().items(): 5 print(name, param.size()) 6 7 model_save_path = os.path.join(&#39;../C04_ModelSaving&#39;, &#39;lenet5.pt&#39;) 8 print(&#34;\n=====Model paras in LeNet5:&#34;) 9 loaded_paras = torch.load(model_save_path) 10 for (name, param) in loaded_paras.items(): 11 print(name, param.size())在上述代码中，第2~5行是输出LeNet6模型中各个权重参数的名称和形状信息。第7~11行则是载入上一节中持久化保存到本地的LeNet5权重参数，并同时也输出每个参数的名称和形状。">
-	<meta property="og:locale" content="zh_CN">
-	<meta property="og:type" content="article">
-		<meta property="article:section" content="dl">
+<meta name="color-scheme" content="light dark">
+
+
+
+
+
+
+
+  
+
+
+
+  
+
+<meta property="og:url" content="https://mlwithme.github.io/dl/chapter05/211b26bdd8f248ac/">
+<meta property="og:site_name" content="《从零学AI指南手册》">
+<meta property="og:title" content="5.4 模型的迁移学习">
+<meta property="og:description" content="5.4 模型的迁移学习# 在前面几节内容中，我们详细介绍了PyTorch中模型的保存及载入推理和复用等过程。在有了前期这些基础知识后，接下来我们再来介绍关于模型迁移学习（Transfer Learning）部分的内容。 5.4.1 迁移学习# 在深度神经网络中由于模型通常都含有大 …">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:type" content="article">
+<meta property="og:image" content="https://mlwithme.github.io/images/dl/logo.jpg">
+<meta property="og:image:url" content="https://mlwithme.github.io/images/dl/logo.jpg">
+<meta property="og:image:secure_url" content="https://mlwithme.github.io/images/dl/logo.jpg">
+<meta property="og:image:width" content="1272">
+<meta property="og:image:height" content="1272">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:alt" content="《从零学AI指南手册》 - 5.4 模型的迁移学习">
+
+  <meta property="article:section" content="dl">
+
 
 
 	<meta itemprop="name" content="5.4 模型的迁移学习">
@@ -56,7 +70,7 @@ https://github.com/alex-shpak/hugo-book
 <link rel="icon" href="/favicon.png" >
 <link rel="manifest" href="/manifest.json">
 <link rel="canonical" href="https://mlwithme.github.io/dl/chapter05/211b26bdd8f248ac/">
-<link rel="stylesheet" href="/book.min.e05a209bbdff79665f7fe0efc0036069c4851a205de335e26fce75ad3570d2cd.css" integrity="sha256-4Fogm73/eWZff&#43;DvwANgacSFGiBd4zXib851rTVw0s0=" crossorigin="anonymous">
+<link rel="stylesheet" href="/book.min.a3b3c189ec36eda25846e6a5241268b0c27b5b76ed9c0b34b9b3e6d3cae2a18c.css" integrity="sha256-o7PBiew27aJYRualJBJosMJ7W3btnAs0ubPm08rioYw=" crossorigin="anonymous">
 
 
   <script defer type="module" src="/en.search.min.d6b14dbcd48978b2c41611d06e5387dc896ddf705e423dd9152973bfd6c6096a.js" integrity="sha256-1rFNvNSJeLLEFhHQblOH3Ilt33BeQj3ZFSlzv9bGCWo=" crossorigin="anonymous"></script>
@@ -3601,14 +3615,6 @@ https://github.com/alex-shpak/hugo-book
         referrerpolicy="no-referrer"
       >
     </a>
-    <button
-      class="book-page-share-btn"
-      type="button"
-      data-share-url="https://mlwithme.github.io/dl/chapter05/211b26bdd8f248ac/"
-      data-share-title="5.4 模型的迁移学习"
-    >
-      <span>转发分享</span>
-    </button>
   </section>
 
 
@@ -3787,34 +3793,6 @@ https://github.com/alex-shpak/hugo-book
             Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
           );
         }
-
-        document.querySelectorAll(".book-page-share-btn").forEach(function (btn) {
-          btn.addEventListener("click", async function () {
-            var url = btn.dataset.shareUrl;
-            var title = btn.dataset.shareTitle || document.title;
-            var originalText = btn.textContent;
-
-            try {
-              if (navigator.share) {
-                await navigator.share({ title: title, url: url });
-                return;
-              }
-
-              if (navigator.clipboard && url) {
-                await navigator.clipboard.writeText(url);
-                btn.textContent = "链接已复制";
-                window.setTimeout(function () {
-                  btn.textContent = originalText;
-                }, 1500);
-              }
-            } catch (err) {
-              btn.textContent = "分享失败";
-              window.setTimeout(function () {
-                btn.textContent = originalText;
-              }, 1500);
-            }
-          });
-        });
       });
     </script>
   
@@ -3866,14 +3844,6 @@ https://github.com/alex-shpak/hugo-book
         referrerpolicy="no-referrer"
       >
     </a>
-    <button
-      class="book-page-share-btn"
-      type="button"
-      data-share-url="https://mlwithme.github.io/dl/chapter05/211b26bdd8f248ac/"
-      data-share-title="5.4 模型的迁移学习"
-    >
-      <span>转发分享</span>
-    </button>
   </section>
 
 

@@ -20,21 +20,38 @@ https://github.com/alex-shpak/hugo-book
 ">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
-<meta name="color-scheme" content="light dark"><meta property="og:url" content="https://mlwithme.github.io/ml/chapter11/f95259c359b146ba/">
-	<meta property="og:site_name" content="《从零学AI指南手册》">
-	<meta property="og:title" content="11.9 聚类K值选取与分析">
-	<meta property="og:description" content="11.9 聚类K值选取与分析# 在前面几节内容中，我们陆续介绍了3种常见的聚类算法原理及其实现 、4种常见的聚类外部评价指标和3种常见的聚类内部评价指标，对于聚类算法的主体内容算是介绍得差不多了，但是还遗留了最后一个问题——K值的选取。通常来说在实际场景中数据集的标签都是未知的，相反恰好需要通过聚类结果来辅助将各个簇的样本区分开。那到底应该如何选取K值呢？
-经过上一节内容的介绍，有读者可能会说，以不同的K值为超参数，以某种内部评价指标为标准，通过交叉验证来选择最佳K值不就行了吗？虽然这种想法看起来有道理，但实际上却行不通。以轮廓系数为例，根据轮廓系数的原理可知我们并不能够严格得出在最佳K值的情况下轮廓系数同样也能够取得最大值。因此，我们常常就需要借助一些其它手段来对K值进行分析。
-在聚类分析中，有两种常见的方法用于K值的选择，分别是肘部法和轮廓系数法，下面分别逐一进行介绍。
-11.9.1 K值分析肘部法原理# 根据11.1节内容的介绍我们知道，基于Kmeans聚类框架下的聚类算法在最小化目标函数时本质上就是最小化整个簇内距离。根据簇内距离的定义可知，当K值越小时那么簇内距离便会越大；而当K值越大时那么簇内距离便会越小，极端一点在K值等于样本数量时，那么此时的簇内距离可以取到最小值0。
-进一步，根据分析可知，在K值由小变大的过程中，随着K值的增大簇内距离便会逐步减小，但是当K值取得最优解后簇内距离便不会出现明显的降幅。此时可以想象这么一个场景，假设某数据集以不同的K值进行聚类处理并同时计算得到对应的簇内距离和，再以不同的K值为横坐标，簇内距离为纵坐标进行可视化，便可以得到类似如图11-19所示的结果。
-图 11-19 肘部法原理图 如图11-19所示，可以发现刚开始随着K值的增大簇内距离开始急剧减小，当K值大于4之后簇内距离的减少幅度便开始明显降低，因此便可以经验性地得出4是该数据集对应K值的最优解。之所以可以凭借这样的经验进行判断是因为，当K值小于最优解时K值每增加1也就代表多了1个簇结构，整个簇内距离和自然会得到大幅下降；而当K值大于最优解之后K值每增加1也就仅仅只是将原本一个正常的簇结构一分为二了，因此即便整个簇内距离和有所降低，但是幅度也不会太大。
-基于这样的经验性准则便可以根据类似图11-19中的方法来进行K值的选取。同时，由于图11-19中的变化曲线类似于我们手臂的肘部，因此该方法被称之为肘部法。
-11.9.2 K值分析肘部法实现# 在介绍完肘部法的分析原理以后再来看如何实现这一可视化过程，完整示例代码可参见 AllBooKCode/Chapter11/C12_elbow_analysis.py 文件。这里首先需要定义一个函数来根据聚类结果计算簇内距离和并进行可视化，示例代码如下：
-1 def elbow_analysis(X, range_n_clusters, all_cluster_labels, all_centers): 2 all_dist = [] 3 for n, n_clusters in enumerate(range_n_clusters): 4 cluster_labels = all_cluster_labels[n] 5 centers = all_centers[n] 6 dist = 0 7 for i in range(n_clusters): # 遍历每一个簇，计算当前簇的簇内距离 8 x_data = X[cluster_labels == i] 9 tmp = np.sum((x_data - centers[i]) ** 2, axis=1) 10 dist &#43;= np.sum(np.sqrt(tmp)) # 累计当前聚类结果下所有簇的簇内距离和 11 all_dist.append(dist) 12 plt.plot(range_n_clusters, all_dist) # 绘制肘部曲线 13 plt.scatter(range_n_clusters, all_dist) # 绘制各个点 14 15 for i in range(len(range_n_clusters)): # 在图上进行K值标记 16 plt.annotate(f&#34;k = {range_n_clusters[i]}&#34;, 17 xy=(range_n_clusters[i], all_dist[i]), fontsize=14, 18 xytext=(range_n_clusters[i] &#43; 0.1, all_dist[i])) 19 plt.xlim(range_n_clusters[0] - 0.5, range_n_clusters[-1] &#43; 0.8) # 调整范围 20 plt.ylim(all_dist[-1] * 0.9, all_dist[0] &#43; all_dist[-1] * 0.1) 21 plt.yticks([]) # 去掉y轴上的刻度显示 22 plt.xlabel(&#34;K&#34;, fontsize=13) 23 plt.ylabel(&#34;distance&#34;, fontsize=13) 24 plt.show()在上述代码中，第1行X表示原始的训练样本为一个 [n_samples, n_features]的二维矩阵；range_n_clusters是K值的取值范围，为一个普通的列表；all_cluster_labels是一个普通列表，每个元素为一个一维向量，即某一K值下的聚类标签；all_centers也是一个普通的列表，每个元素为一个[n_clusters,n_features]的二维矩阵，即某一K值下的聚类簇中心。第3~5行开始遍历不同的K取值，并取对应的聚类结果和聚类簇中心。第7~10行是遍历每一个簇并累加得到所有簇的簇内距离和。第12~13行是对计算得到的结果进行可视化。第15~18行是在图中进行标记。第20~24行是调整坐标轴范围等。">
-	<meta property="og:locale" content="zh_CN">
-	<meta property="og:type" content="article">
-		<meta property="article:section" content="ml">
+<meta name="color-scheme" content="light dark">
+
+
+
+
+
+  
+
+
+
+  
+
+
+
+  
+
+<meta property="og:url" content="https://mlwithme.github.io/ml/chapter11/f95259c359b146ba/">
+<meta property="og:site_name" content="《从零学AI指南手册》">
+<meta property="og:title" content="11.9 聚类K值选取与分析">
+<meta property="og:description" content="11.9 聚类K值选取与分析# 在前面几节内容中，我们陆续介绍了3种常见的聚类算法原理及其实现 、4种常见的聚类外部评价指标和3种常见的聚类内部评价指标，对于聚类算法的主体内容算是介绍得差不多了，但是还遗留了最后一个问题——K值的选取。通常来说在实际场景中数据集的标签都是未知的， …">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:type" content="article">
+<meta property="og:image" content="https://mlwithme.github.io/images/ml/logo.jpg">
+<meta property="og:image:url" content="https://mlwithme.github.io/images/ml/logo.jpg">
+<meta property="og:image:secure_url" content="https://mlwithme.github.io/images/ml/logo.jpg">
+<meta property="og:image:width" content="1272">
+<meta property="og:image:height" content="1272">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:alt" content="《从零学AI指南手册》 - 11.9 聚类K值选取与分析">
+
+  <meta property="article:section" content="ml">
+
 
 
 	<meta itemprop="name" content="11.9 聚类K值选取与分析">
@@ -53,7 +70,7 @@ https://github.com/alex-shpak/hugo-book
 <link rel="icon" href="/favicon.png" >
 <link rel="manifest" href="/manifest.json">
 <link rel="canonical" href="https://mlwithme.github.io/ml/chapter11/f95259c359b146ba/">
-<link rel="stylesheet" href="/book.min.e05a209bbdff79665f7fe0efc0036069c4851a205de335e26fce75ad3570d2cd.css" integrity="sha256-4Fogm73/eWZff&#43;DvwANgacSFGiBd4zXib851rTVw0s0=" crossorigin="anonymous">
+<link rel="stylesheet" href="/book.min.a3b3c189ec36eda25846e6a5241268b0c27b5b76ed9c0b34b9b3e6d3cae2a18c.css" integrity="sha256-o7PBiew27aJYRualJBJosMJ7W3btnAs0ubPm08rioYw=" crossorigin="anonymous">
 
 
   <script defer type="module" src="/en.search.min.d6b14dbcd48978b2c41611d06e5387dc896ddf705e423dd9152973bfd6c6096a.js" integrity="sha256-1rFNvNSJeLLEFhHQblOH3Ilt33BeQj3ZFSlzv9bGCWo=" crossorigin="anonymous"></script>
@@ -3602,14 +3619,6 @@ https://github.com/alex-shpak/hugo-book
         referrerpolicy="no-referrer"
       >
     </a>
-    <button
-      class="book-page-share-btn"
-      type="button"
-      data-share-url="https://mlwithme.github.io/ml/chapter11/f95259c359b146ba/"
-      data-share-title="11.9 聚类K值选取与分析"
-    >
-      <span>转发分享</span>
-    </button>
   </section>
 
 
@@ -3740,34 +3749,6 @@ https://github.com/alex-shpak/hugo-book
             Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
           );
         }
-
-        document.querySelectorAll(".book-page-share-btn").forEach(function (btn) {
-          btn.addEventListener("click", async function () {
-            var url = btn.dataset.shareUrl;
-            var title = btn.dataset.shareTitle || document.title;
-            var originalText = btn.textContent;
-
-            try {
-              if (navigator.share) {
-                await navigator.share({ title: title, url: url });
-                return;
-              }
-
-              if (navigator.clipboard && url) {
-                await navigator.clipboard.writeText(url);
-                btn.textContent = "链接已复制";
-                window.setTimeout(function () {
-                  btn.textContent = originalText;
-                }, 1500);
-              }
-            } catch (err) {
-              btn.textContent = "分享失败";
-              window.setTimeout(function () {
-                btn.textContent = originalText;
-              }, 1500);
-            }
-          });
-        });
       });
     </script>
   
@@ -3821,14 +3802,6 @@ https://github.com/alex-shpak/hugo-book
         referrerpolicy="no-referrer"
       >
     </a>
-    <button
-      class="book-page-share-btn"
-      type="button"
-      data-share-url="https://mlwithme.github.io/ml/chapter11/f95259c359b146ba/"
-      data-share-title="11.9 聚类K值选取与分析"
-    >
-      <span>转发分享</span>
-    </button>
   </section>
 
 
