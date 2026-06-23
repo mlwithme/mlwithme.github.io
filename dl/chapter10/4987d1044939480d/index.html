@@ -4,98 +4,70 @@
   <!--
 Made with Book Theme
 https://github.com/alex-shpak/hugo-book
--->
-
-<meta charset="UTF-8">
+--><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="description" content="10.2 Transformer网络# 在前面几章内容中，我们陆续介绍了多个传统的经典模型，包括CNN、RNN和LSTM等来处理自然语言领域中的相关任务。但是从整体上来看，在2017年之前相关任务模型的发展仍旧主要集中在各个模块的拼接组合上，而这些基础模型并没有出现本质上的改变。正是在这个时间点，一项突破性的技术——Transformer架构——出现了。Transformer架构的出现是自然语言处理领域的一个重大转折点，它所提出的多头注意力机制为后续的研究和发展开辟了全新的方向。尽管Transformer最初是应用于在文本数据上的序列到序列学习，但现在已经推广到各种现代的深度学习中，例如语言、视觉、语音和强化学习等领域[1]。
-10.2.1 Transformer动机# 根据第7章内容可知，由于传统的Encoder-Decoder架构在建模过程中，下一个时刻的计算过程会依赖于上一个时刻的输出，即整个过程需要按序进行，而这种固有的属性就限制了模型就不能以并行的方式进行计算[2]。尽管相关研究工作已经能够使得传统的循环神经网络在计算效率上有了很大的提升，但是本质的问题依旧没有得到解决。
-基于这样的动机，阿希什（Vaswani）等人[2]于2017年提出了一种全新的Transformer架构来解决这一问题。Transformer架构的优点在于它完全摈弃了传统的循环结构，取而代之的是只通过注意力机制来计算模型输入与输出的隐含向量表示， 而这种注意力的名字就是大名鼎鼎的自注意力机制（Self-attention）。所谓自注意力机制是指通过某种运算来直接并行计算得到序列每个位置上的注意力权重，然后再以加权和的形式计算得到每个位置上隐含向量表示。最终，Transformer架构就是基于这种自注意力机制所构建形成。
-10.2.2 自注意力机制# 自注意力机制在论文中也被称之为缩放点积注意力（Scaled Dot-Product Attention），它可以描述为将Query和一系列的Key-Value对映射到某个输出的过程，而这个输出的向量就是根据Query和Key计算得到的权重作用于Value上的加权和。此处Query、Key和Value含义同9.10节内容中介绍的一致。下面开始分别介绍自注意力机制和多头注意力机制的原理。
-1. 自注意力机制
-如图10-5所示便是自注意力机制的结构示意图，其核心过程就是通过Q（Query）和K（Value）计算得到注意力权重；然后再作用于V（Value）得到整个权重和输出，即序列中每个位置的向量表示。整个过程依旧如同9.10.3节内容中介绍的一致，查询Q先在键K中依次与其中的每一个键进行匹配计算便得到了一个权重向量，然后再将该向量作用于V便得到了最后的输出。不同点在于此处还引入了权重缩放和注意力掩码。
-图 10-5 自注意力机制结构图 具体地，自注意力机制的计算过程为 $$ \text{Attention}(Q,K,V)=\text{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V\in\mathbb{R}^{n\times d_v} \tag{10-7} $$ 其中$Q\in\mathbb{R}^{n\times d_{q}}$，$K\in\mathbb{R}^{n\times d_{k}}$，$V\in\mathbb{R}^{n\times d_{v}}$，三者的每一行均可以看做是一个字符的向量表示。
-根据式(10-7)可知$d_q=d_k$，而除以$\sqrt{d_k}$的过程就是图10-5中所指的缩放（Scale）过程。之所以要进行缩放一方面是因为，如果两个向量的维度为$d$，且每个维度均是独立的随机变量并都满足均值为0方差为1，那么这两个向量点积的均值则为0方差则为$d$，而除以$\sqrt{d_k}$则可以保证方差仍旧为1；另一方面，$d$越大则$QK^T$的值可能越大，而这便会导致$\text{Softmax}$函数的梯度变得非常小不利于网络训练，因此可以通过缩放来消除这部分影响。
-同时，对于图10-5中的Mask操作是用于在多个样本并行计算时忽略掉填充位置上的注意力权重，这与9.10.4节内容中介绍的一致。
-2. 自注意力计算过程
-在清楚自注意力机制的原理后我们再通过一个实际的计算图示来从直观上理解自注意机制到底是怎么回事。现在，假设输入序列为“我 是 谁”，且已经通过某种方式得到了1个形状为$3\times4$的矩阵来进行表示，即图中的$X$。在通过图10-6所示的过程便能够计算得到$Q$、$K$和$V$这3个矩阵。
-图10-6 $Q$、$K$和$V$计算示意图 从图10-6的计算过程可以看出，$Q$、$K$和$V$ 其实就是输入$X$分别进行3次线性变换而得到，不过这一计算过程仅仅只局限于Encoder和Decoder在各自输入部分利用自注意力机制进行编码时的过程， Encoder和Decoder交互部分的$Q$、$K$和$V$另有指代。此时，对于计算得到的$Q$、$K$和$V$可以理解为这是对于同一个输入不同的3种状态。在计算得到$Q$、$K$和$V$之后便可以根据式(10-7)计算得到注意力权重矩阵，如图10-7所示。
-图 10-7 注意力权重矩阵计算过程图（已经$\text{Softmax}$处理） 如图10-7所示，在经过上述计算过程后我们便得到了注意力权重矩阵。此时，对于权重矩阵的第1行来说，表示在编码“我”这个位置上的信息时应该将0.7的注意力放在“我”上，0.2的注意力放在“是”上，0.1的注意力放在“谁”上。同理，对于权重矩阵第 3 行来说，表示在编码“谁”这个位置上的信息时应该将 0.2 的注意力放在“我”上，将 0.1 的注意力放在“是”上，将 0.7的注意力放在“谁”上。从这一过程可以看出，通过这个权重矩阵模型在编码对应位置上的信息时，就能够知道应该以何种方式将注意力分配到不同的位置上。
-在通过图10-7所示的过程计算得到权重矩阵后，便可以将其作用于$V$ ，进而得到自注意力机制的最终编码输出结果，计算过程如图10-8所示。
-图 10-8 自注意力输出结果 从图10-8可以看出，对于最终输出“是”的编码向量来说，它其实就是原始 “我 是 谁”3 个向量的加权和，而这也就体现了在对“是”进行编码时注意力 权重分配的全过程。可以看出通过这种自注意力机制的方式的确解决了作者所提出 的“传统序列模型在编码过程中都需顺序进行的弊端”的问题。
-10.2.3 多头注意力机制# 从上述计算过程可以发现，自注意力机制在对当前位置的信息进行编码时会将注意力过度集中于自身所在的位置，因为在计算注意力权重时自己与自己所在位置的相似性是最高的，而这可能导致模型忽略了其它位置上的信息。
-">
+<meta name="description" content="在本节内容中，我们首先介绍了Transformer模型所提出的动机，即为了解决传统RNN不能并行计算的缺陷；然后详细介绍了自注意力机制和多头注意力机制的原理及计算过程；最后通过对比介绍了为什么自注意力机制中需要引入位置编码以及位置编码的原理。">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
 <meta name="color-scheme" content="light dark">
+<meta name="robots" content="index,follow,max-image-preview:large">
 
 
 
 
-
-
-
-  
-
-
-
-  
 
 <meta property="og:url" content="https://mlwithme.github.io/dl/chapter10/4987d1044939480d/">
 <meta property="og:site_name" content="《从零学AI指南手册》">
 <meta property="og:title" content="10.2 Transformer网络">
-<meta property="og:description" content="10.2 Transformer网络# 在前面几章内容中，我们陆续介绍了多个传统的经典模型，包括CNN、RNN和LSTM等来处理自然语言领域中的相关任务。但是从整体上来看，在2017年之前相关任务模型的发展仍旧主要集中在各个模块的拼接组合上，而这些基础模型并没有出现本质上的改变。 …">
+<meta property="og:description" content="在本节内容中，我们首先介绍了Transformer模型所提出的动机，即为了解决传统RNN不能并行计算的缺陷；然后详细介绍了自注意力机制和多头注意力机制的原理及计算过程；最后通过对比介绍了为什么自注意力机制中需要引入位置编码以及位置编码的原理。">
 <meta property="og:locale" content="zh_CN">
 <meta property="og:type" content="article">
-<meta property="og:image" content="https://mlwithme.github.io/images/dl/logo.jpg">
-<meta property="og:image:url" content="https://mlwithme.github.io/images/dl/logo.jpg">
-<meta property="og:image:secure_url" content="https://mlwithme.github.io/images/dl/logo.jpg">
-<meta property="og:image:width" content="1272">
-<meta property="og:image:height" content="1272">
-<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image" content="https://mlwithme.github.io/favicon.png">
+<meta property="og:image:url" content="https://mlwithme.github.io/favicon.png">
+<meta property="og:image:secure_url" content="https://mlwithme.github.io/favicon.png">
+<meta property="og:image:width" content="759">
+<meta property="og:image:height" content="759">
+<meta property="og:image:type" content="image/png">
 <meta property="og:image:alt" content="《从零学AI指南手册》 - 10.2 Transformer网络">
 
   <meta property="article:section" content="dl">
+  
+    <meta property="article:published_time" content="2026-06-22T17:10:22&#43;08:00">
+  
+  
+    <meta property="article:modified_time" content="2026-06-22T21:25:25&#43;08:00">
+  
+  
 
 
-
-	<meta itemprop="name" content="10.2 Transformer网络">
-	<meta itemprop="description" content="10.2 Transformer网络# 在前面几章内容中，我们陆续介绍了多个传统的经典模型，包括CNN、RNN和LSTM等来处理自然语言领域中的相关任务。但是从整体上来看，在2017年之前相关任务模型的发展仍旧主要集中在各个模块的拼接组合上，而这些基础模型并没有出现本质上的改变。正是在这个时间点，一项突破性的技术——Transformer架构——出现了。Transformer架构的出现是自然语言处理领域的一个重大转折点，它所提出的多头注意力机制为后续的研究和发展开辟了全新的方向。尽管Transformer最初是应用于在文本数据上的序列到序列学习，但现在已经推广到各种现代的深度学习中，例如语言、视觉、语音和强化学习等领域[1]。
-10.2.1 Transformer动机# 根据第7章内容可知，由于传统的Encoder-Decoder架构在建模过程中，下一个时刻的计算过程会依赖于上一个时刻的输出，即整个过程需要按序进行，而这种固有的属性就限制了模型就不能以并行的方式进行计算[2]。尽管相关研究工作已经能够使得传统的循环神经网络在计算效率上有了很大的提升，但是本质的问题依旧没有得到解决。
-基于这样的动机，阿希什（Vaswani）等人[2]于2017年提出了一种全新的Transformer架构来解决这一问题。Transformer架构的优点在于它完全摈弃了传统的循环结构，取而代之的是只通过注意力机制来计算模型输入与输出的隐含向量表示， 而这种注意力的名字就是大名鼎鼎的自注意力机制（Self-attention）。所谓自注意力机制是指通过某种运算来直接并行计算得到序列每个位置上的注意力权重，然后再以加权和的形式计算得到每个位置上隐含向量表示。最终，Transformer架构就是基于这种自注意力机制所构建形成。
-10.2.2 自注意力机制# 自注意力机制在论文中也被称之为缩放点积注意力（Scaled Dot-Product Attention），它可以描述为将Query和一系列的Key-Value对映射到某个输出的过程，而这个输出的向量就是根据Query和Key计算得到的权重作用于Value上的加权和。此处Query、Key和Value含义同9.10节内容中介绍的一致。下面开始分别介绍自注意力机制和多头注意力机制的原理。
-1. 自注意力机制
-如图10-5所示便是自注意力机制的结构示意图，其核心过程就是通过Q（Query）和K（Value）计算得到注意力权重；然后再作用于V（Value）得到整个权重和输出，即序列中每个位置的向量表示。整个过程依旧如同9.10.3节内容中介绍的一致，查询Q先在键K中依次与其中的每一个键进行匹配计算便得到了一个权重向量，然后再将该向量作用于V便得到了最后的输出。不同点在于此处还引入了权重缩放和注意力掩码。
-图 10-5 自注意力机制结构图 具体地，自注意力机制的计算过程为 $$ \text{Attention}(Q,K,V)=\text{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V\in\mathbb{R}^{n\times d_v} \tag{10-7} $$ 其中$Q\in\mathbb{R}^{n\times d_{q}}$，$K\in\mathbb{R}^{n\times d_{k}}$，$V\in\mathbb{R}^{n\times d_{v}}$，三者的每一行均可以看做是一个字符的向量表示。
-根据式(10-7)可知$d_q=d_k$，而除以$\sqrt{d_k}$的过程就是图10-5中所指的缩放（Scale）过程。之所以要进行缩放一方面是因为，如果两个向量的维度为$d$，且每个维度均是独立的随机变量并都满足均值为0方差为1，那么这两个向量点积的均值则为0方差则为$d$，而除以$\sqrt{d_k}$则可以保证方差仍旧为1；另一方面，$d$越大则$QK^T$的值可能越大，而这便会导致$\text{Softmax}$函数的梯度变得非常小不利于网络训练，因此可以通过缩放来消除这部分影响。
-同时，对于图10-5中的Mask操作是用于在多个样本并行计算时忽略掉填充位置上的注意力权重，这与9.10.4节内容中介绍的一致。
-2. 自注意力计算过程
-在清楚自注意力机制的原理后我们再通过一个实际的计算图示来从直观上理解自注意机制到底是怎么回事。现在，假设输入序列为“我 是 谁”，且已经通过某种方式得到了1个形状为$3\times4$的矩阵来进行表示，即图中的$X$。在通过图10-6所示的过程便能够计算得到$Q$、$K$和$V$这3个矩阵。
-图10-6 $Q$、$K$和$V$计算示意图 从图10-6的计算过程可以看出，$Q$、$K$和$V$ 其实就是输入$X$分别进行3次线性变换而得到，不过这一计算过程仅仅只局限于Encoder和Decoder在各自输入部分利用自注意力机制进行编码时的过程， Encoder和Decoder交互部分的$Q$、$K$和$V$另有指代。此时，对于计算得到的$Q$、$K$和$V$可以理解为这是对于同一个输入不同的3种状态。在计算得到$Q$、$K$和$V$之后便可以根据式(10-7)计算得到注意力权重矩阵，如图10-7所示。
-图 10-7 注意力权重矩阵计算过程图（已经$\text{Softmax}$处理） 如图10-7所示，在经过上述计算过程后我们便得到了注意力权重矩阵。此时，对于权重矩阵的第1行来说，表示在编码“我”这个位置上的信息时应该将0.7的注意力放在“我”上，0.2的注意力放在“是”上，0.1的注意力放在“谁”上。同理，对于权重矩阵第 3 行来说，表示在编码“谁”这个位置上的信息时应该将 0.2 的注意力放在“我”上，将 0.1 的注意力放在“是”上，将 0.7的注意力放在“谁”上。从这一过程可以看出，通过这个权重矩阵模型在编码对应位置上的信息时，就能够知道应该以何种方式将注意力分配到不同的位置上。
-在通过图10-7所示的过程计算得到权重矩阵后，便可以将其作用于$V$ ，进而得到自注意力机制的最终编码输出结果，计算过程如图10-8所示。
-图 10-8 自注意力输出结果 从图10-8可以看出，对于最终输出“是”的编码向量来说，它其实就是原始 “我 是 谁”3 个向量的加权和，而这也就体现了在对“是”进行编码时注意力 权重分配的全过程。可以看出通过这种自注意力机制的方式的确解决了作者所提出 的“传统序列模型在编码过程中都需顺序进行的弊端”的问题。
-10.2.3 多头注意力机制# 从上述计算过程可以发现，自注意力机制在对当前位置的信息进行编码时会将注意力过度集中于自身所在的位置，因为在计算注意力权重时自己与自己所在位置的相似性是最高的，而这可能导致模型忽略了其它位置上的信息。">
-	<meta itemprop="wordCount" content="199">
+<script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"WebSite","description":"面向机器学习、深度学习与 AI Agent 的中文系统化学习手册，包含原理讲解、代码示例与实战案例。","inLanguage":"zh_CN","name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
+  </script>
+  <script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.github.io/favicon.png"},"name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
+  </script><script type="application/ld+json">
+      {"@context":"https://schema.org","@type":"Article","articleSection":"dl","author":{"@type":"Person","name":"WangCheng","url":"https://mlwithme.github.io/author/"},"dateModified":"2026-06-22T21:25:25+08:00","datePublished":"2026-06-22T17:10:22+08:00","description":"在本节内容中，我们首先介绍了Transformer模型所提出的动机，即为了解决传统RNN不能并行计算的缺陷；然后详细介绍了自注意力机制和多头注意力机制的原理及计算过程；最后通过对比介绍了为什么自注意力机制中需要引入位置编码以及位置编码的原理。","headline":"10.2 Transformer网络","image":["https://mlwithme.github.io/favicon.png"],"inLanguage":"zh_CN","mainEntityOfPage":"https://mlwithme.github.io/dl/chapter10/4987d1044939480d/","publisher":{"@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.github.io/favicon.png"},"name":"《从零学AI指南手册》"},"url":"https://mlwithme.github.io/dl/chapter10/4987d1044939480d/"}
+    </script><script type="application/ld+json">
+      {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","item":"https://mlwithme.github.io/","name":"《从零学AI指南手册》","position":1},{"@type":"ListItem","item":"https://mlwithme.github.io/dl/","name":"深度学习","position":2},{"@type":"ListItem","item":"https://mlwithme.github.io/dl/chapter10/","name":"第10章 现代神经网络","position":3},{"@type":"ListItem","item":"https://mlwithme.github.io/dl/chapter10/4987d1044939480d/","name":"10.2 Transformer网络","position":4}]}
+    </script>
 
 <title>10.2 Transformer网络 • 《从零学AI指南手册》</title>
 <link rel="icon" href="/favicon.png" >
 <link rel="manifest" href="/manifest.json">
 <link rel="canonical" href="https://mlwithme.github.io/dl/chapter10/4987d1044939480d/">
-<link rel="stylesheet" href="/book.min.a3b3c189ec36eda25846e6a5241268b0c27b5b76ed9c0b34b9b3e6d3cae2a18c.css" integrity="sha256-o7PBiew27aJYRualJBJosMJ7W3btnAs0ubPm08rioYw=" crossorigin="anonymous">
-
-
-  <script defer type="module" src="/en.search.min.d6b14dbcd48978b2c41611d06e5387dc896ddf705e423dd9152973bfd6c6096a.js" integrity="sha256-1rFNvNSJeLLEFhHQblOH3Ilt33BeQj3ZFSlzv9bGCWo=" crossorigin="anonymous"></script>
+<link rel="stylesheet" href="/book.min.63f4337331e9703a72f247b55f39b42ed5a3770674e2bf6810d5a1e51b89666a.css" integrity="sha256-Y/QzczHpcDpy8ke1Xzm0LtWjdwZ04r9oENWh5RuJZmo=" crossorigin="anonymous">
+  <script defer type="module" src="/en.search.min.d7ce42533465ddddc9ab3ccfca8c2773fb6595a39dc2b81fb2fea04e304dec79.js" integrity="sha256-185CUzRl3d3JqzzPyownc/tllaOdwrgfsv6gTjBN7Hk=" crossorigin="anonymous"></script>
 
   
 
-<meta property="og:image" content="https://mlwithme.github.io/images/dl/logo.jpg">
-<meta property="og:image:secure_url" content="https://mlwithme.github.io/images/dl/logo.jpg">
-<meta property="og:image:width" content="1272">
-<meta property="og:image:height" content="1272">
-<meta property="og:image:type" content="image/jpeg">
+
+
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:image" content="https://mlwithme.github.io/images/dl/logo.jpg">
+<meta name="twitter:title" content="10.2 Transformer网络">
+<meta name="twitter:description" content="在本节内容中，我们首先介绍了Transformer模型所提出的动机，即为了解决传统RNN不能并行计算的缺陷；然后详细介绍了自注意力机制和多头注意力机制的原理及计算过程；最后通过对比介绍了为什么自注意力机制中需要引入位置编码以及位置编码的原理。">
+<meta name="twitter:url" content="https://mlwithme.github.io/dl/chapter10/4987d1044939480d/">
+<meta name="twitter:image" content="https://mlwithme.github.io/favicon.png">
+<meta name="twitter:image:alt" content="《从零学AI指南手册》 - 10.2 Transformer网络">
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-23SZ6E8VY7"></script>
 <script>
   window.dataLayer = window.dataLayer || [];
@@ -150,7 +122,7 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <a>
+    <a href="/agent/" class="">
       大模型Agent开发</a>
   
 
@@ -166,7 +138,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-279cf10e5100caa4f65ba3f7dd8888a4" class="toggle"  />
     <label for="section-279cf10e5100caa4f65ba3f7dd8888a4" class="flex">
-      <a role="button" class="">
+      <a href="/agent/chapter01/" class="">
         第 1 章 RAG 基础概念</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -217,7 +189,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-83c662c2764f1c19f8005eab77fee110" class="toggle"  />
     <label for="section-83c662c2764f1c19f8005eab77fee110" class="flex">
-      <a role="button" class="">
+      <a href="/agent/chapter02/" class="">
         第 2 章 大模型接入与使用</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -296,7 +268,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-1e583d7a26333453241d87c5c16592bd" class="toggle"  />
     <label for="section-1e583d7a26333453241d87c5c16592bd" class="flex">
-      <a role="button" class="">
+      <a href="/agent/chapter03/" class="">
         第 3 章 文档标准化与语义检索</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -403,7 +375,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="toggle"  />
     <label for="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="flex">
-      <a role="button" class="">
+      <a href="/agent/chapter04/" class="">
         第 4 章 RAG 与 Agent</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -569,7 +541,7 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <a>
+    <a href="/dl/" class="">
       深度学习</a>
   
 
@@ -599,7 +571,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-cf7621e8efb1f3153eaca44a113dcdb9" class="toggle"  />
     <label for="section-cf7621e8efb1f3153eaca44a113dcdb9" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter01/" class="">
         第 1 章 深度学习简介</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -664,7 +636,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-f9bf1a68c19405769f9c4a1495708a55" class="toggle"  />
     <label for="section-f9bf1a68c19405769f9c4a1495708a55" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter02/" class="">
         第 2 章 环境配置</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -729,7 +701,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="toggle"  />
     <label for="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter03/" class="">
         第 3 章 深度学习基础</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -934,7 +906,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-7a12cee83820a928df00362d70804a97" class="toggle"  />
     <label for="section-7a12cee83820a928df00362d70804a97" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter04/" class="">
         第 4 章 卷积神经网络</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1097,7 +1069,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-be9addfd3a15c372d609d09cabb94159" class="toggle"  />
     <label for="section-be9addfd3a15c372d609d09cabb94159" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter05/" class="">
         第 5 章 模型训练与复用</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1218,7 +1190,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="toggle"  />
     <label for="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter06/" class="">
         第 6 章 模型优化方法</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1381,7 +1353,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-517b751d7c44a7ac77d25d295ed44271" class="toggle"  />
     <label for="section-517b751d7c44a7ac77d25d295ed44271" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter07/" class="">
         第 7 章 循环神经网络</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1488,7 +1460,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-b9b861f64ba32bc68dfb977497de37d9" class="toggle"  />
     <label for="section-b9b861f64ba32bc68dfb977497de37d9" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter08/" class="">
         第 8 章 时序与模型融合</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1595,7 +1567,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-e54a1e28b1438b8266637bcb8dac1a44" class="toggle"  />
     <label for="section-e54a1e28b1438b8266637bcb8dac1a44" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter09/" class="">
         第 9 章 自然语言处理</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1786,7 +1758,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-f6636b2f9dc1df93b9fa64dd201716d9" class="toggle" checked />
     <label for="section-f6636b2f9dc1df93b9fa64dd201716d9" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter10/" class="">
         第10章 现代神经网络</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2092,7 +2064,7 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <a>
+    <a href="/ml/" class="">
       机器学习</a>
   
 
@@ -2122,7 +2094,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-48f56957e94e3cf66f3022103a7dd0ff" class="toggle"  />
     <label for="section-48f56957e94e3cf66f3022103a7dd0ff" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter01/" class="">
         第 1 章 环境配置</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2173,7 +2145,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-56a896338a1c41249d22a3efa0e0063c" class="toggle"  />
     <label for="section-56a896338a1c41249d22a3efa0e0063c" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter02/" class="">
         第 2 章 线性回归</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2294,7 +2266,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-ccd0dc9386ea80613d4cedf91b30058d" class="toggle"  />
     <label for="section-ccd0dc9386ea80613d4cedf91b30058d" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter03/" class="">
         第 3 章 逻辑回归</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2387,7 +2359,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="toggle"  />
     <label for="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter04/" class="">
         第 4 章 模型的改善与泛化</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2508,7 +2480,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-40f463d9d502d24b86ea6120b7030123" class="toggle"  />
     <label for="section-40f463d9d502d24b86ea6120b7030123" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter05/" class="">
         第 5 章 K近邻</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2615,7 +2587,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-5a460dc18f1e79253296cf2cd0498446" class="toggle"  />
     <label for="section-5a460dc18f1e79253296cf2cd0498446" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter06/" class="">
         第 6 章 文本特征与模型复用</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2708,7 +2680,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-96f45a8b8c8b75adc70c78026d93dbf6" class="toggle"  />
     <label for="section-96f45a8b8c8b75adc70c78026d93dbf6" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter07/" class="">
         第 7 章 朴素贝叶斯</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2815,7 +2787,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-22476e49d5058c3e5e7e7366b7ab676f" class="toggle"  />
     <label for="section-22476e49d5058c3e5e7e7366b7ab676f" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter08/" class="">
         第 8 章 决策树</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2964,7 +2936,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-2feb6a51cabb61dba860f45c1881386b" class="toggle"  />
     <label for="section-2feb6a51cabb61dba860f45c1881386b" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter09/" class="">
         第 9 章 集成学习与提升算法</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -3085,7 +3057,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-938ae119c3849b03ccb6f91cef4243dd" class="toggle"  />
     <label for="section-938ae119c3849b03ccb6f91cef4243dd" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter10/" class="">
         第 10 章 支持向量机</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -3262,7 +3234,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-9f4d9786d4ab755fde42c64d09b0d026" class="toggle"  />
     <label for="section-9f4d9786d4ab755fde42c64d09b0d026" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter11/" class="">
         第 11 章 聚类分析</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -3439,7 +3411,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-d5e78c45312818bb3abd5c19c858f7e5" class="toggle"  />
     <label for="section-d5e78c45312818bb3abd5c19c858f7e5" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter12/" class="">
         第 12 章 降维算法</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -3490,7 +3462,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-a82b41bb7eb95af72bc11e8a3d668acd" class="toggle"  />
     <label for="section-a82b41bb7eb95af72bc11e8a3d668acd" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter13/" class="">
         第 13 章 自训练与标签传播</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -3611,24 +3583,41 @@ https://github.com/alex-shpak/hugo-book
 </nav>
 
   
-  <section class="book-page-qr" aria-label="页面二维码">
-    <p class="book-page-qr-title">手机扫码查看</p>
-    <a
-      class="book-page-qr-image-link"
-      href="https://mlwithme.github.io/dl/chapter10/4987d1044939480d/"
-      target="_blank"
-      rel="noopener noreferrer"
-      aria-label="打开当前页面链接"
-    >
-      <img
-        class="book-page-qr-image"
-        src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fdl%2Fchapter10%2F4987d1044939480d%2F"
-        alt="当前页面链接二维码"
-        loading="lazy"
-        decoding="async"
-        referrerpolicy="no-referrer"
+  <section class="book-page-qr-panel" aria-label="页面二维码与公众号二维码">
+    <section class="book-page-qr-block" aria-label="页面二维码">
+      <p class="book-page-qr-title">微信扫码查看</p>
+      <a
+        class="book-page-qr-image-link"
+        href="https://mlwithme.github.io/dl/chapter10/4987d1044939480d/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="打开当前页面链接"
       >
-    </a>
+        <img
+          class="book-page-qr-image"
+          src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fdl%2Fchapter10%2F4987d1044939480d%2F"
+          alt="当前页面链接二维码"
+          loading="lazy"
+          decoding="async"
+          referrerpolicy="no-referrer"
+        >
+      </a>
+    </section>
+
+    <div class="book-page-qr-divider" aria-hidden="true"></div>
+
+    <section class="book-page-qr-block" aria-label="公众号二维码">
+      <p class="book-page-qr-title">关注公众号</p>
+      <div class="book-page-qr-image-link book-page-qr-image-frame">
+        <img
+          class="book-page-qr-image"
+          src="/images/gzh.png"
+          alt="公众号二维码"
+          loading="lazy"
+          decoding="async"
+        >
+      </div>
+    </section>
   </section>
 
 
@@ -3819,24 +3808,41 @@ $$<p>
 </nav>
 
   
-  <section class="book-page-qr" aria-label="页面二维码">
-    <p class="book-page-qr-title">手机扫码查看</p>
-    <a
-      class="book-page-qr-image-link"
-      href="https://mlwithme.github.io/dl/chapter10/4987d1044939480d/"
-      target="_blank"
-      rel="noopener noreferrer"
-      aria-label="打开当前页面链接"
-    >
-      <img
-        class="book-page-qr-image"
-        src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fdl%2Fchapter10%2F4987d1044939480d%2F"
-        alt="当前页面链接二维码"
-        loading="lazy"
-        decoding="async"
-        referrerpolicy="no-referrer"
+  <section class="book-page-qr-panel" aria-label="页面二维码与公众号二维码">
+    <section class="book-page-qr-block" aria-label="页面二维码">
+      <p class="book-page-qr-title">微信扫码查看</p>
+      <a
+        class="book-page-qr-image-link"
+        href="https://mlwithme.github.io/dl/chapter10/4987d1044939480d/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="打开当前页面链接"
       >
-    </a>
+        <img
+          class="book-page-qr-image"
+          src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fdl%2Fchapter10%2F4987d1044939480d%2F"
+          alt="当前页面链接二维码"
+          loading="lazy"
+          decoding="async"
+          referrerpolicy="no-referrer"
+        >
+      </a>
+    </section>
+
+    <div class="book-page-qr-divider" aria-hidden="true"></div>
+
+    <section class="book-page-qr-block" aria-label="公众号二维码">
+      <p class="book-page-qr-title">关注公众号</p>
+      <div class="book-page-qr-image-link book-page-qr-image-frame">
+        <img
+          class="book-page-qr-image"
+          src="/images/gzh.png"
+          alt="公众号二维码"
+          loading="lazy"
+          decoding="async"
+        >
+      </div>
+    </section>
   </section>
 
 

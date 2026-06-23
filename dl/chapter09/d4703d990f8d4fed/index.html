@@ -4,94 +4,70 @@
   <!--
 Made with Book Theme
 https://github.com/alex-shpak/hugo-book
--->
-
-<meta charset="UTF-8">
+--><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="description" content="9.2 Word2Vec词向量# 在9.1节内容中，我们详细梳理了自然语言处理发展时所经历的3个核心阶段，并且同时提到目前主流的是基于深度学习的语言模型。在本节内容中我们将会介绍第1种基于神经网络的将单词表示为连续向量的自然语言处理技术——Word2Vec。
-9.2.1 Word2Vec动机# 在基于深度学习的语言模型中一个关键的问题就是如何有效地表示文本信息。在早期的建模方法中通常都是使用基于手工设计的特征表示来表示文本，例如词袋模型中的词频或TF-IDF权重、独热编码等方法。但这些特征通常都是离散且稀疏的，难以捕捉到词与词之间的语义关系。例如独热编码就没有任何相似性或者其它关系上的概念，如果我们将点积作为相似性的衡量方法那么此时任意两个向量之间的相似度都将是0。因此，研究人员开始寻求一种更有效的文本表示方法，并且希望能够利用神经网络的能力来自动学习词的向量化表示。
-基于这样的动机，谷歌公司托马斯[1]等人于2013年提出了一种基于神经网络技术的Word2Vec模型来生成词向量（Word Embedding）或（Word Vector）。Word2Vec通过使用浅层神经网络模型来学习词的分布式表示（Distributed Representations），其核心思想是基于大量文本语料库的统计信息，将每个词分别映射到一个低维连续的向量空间中，使得具有相似语义的词在向量空间中的距离更近。这种分布式表示可以更好地捕捉词之间的语义关系，使得近义词之间的相似性和词之间的语义类比能够通过计算得到。例如计算&#34;king&#34; - “man” &#43; “woman”，可以得到一个向量表示&#34;queen&#34;，即实现了词之间的类比关系[2]。
-9.2.2 Word2Vec模型# 整体来看Word2Vec模型的网络结构主要有两种：连续词袋模型（Continuous Bag of Words，CBOW）和跳元（Skip-gram）模型。CBOW模型的目标是在固定滑动窗口内根据第$t$个词的上下文词来预测第$t$个词对应的概率分布，即第$t$个词；Skip-gram模型则刚好与CBOW模型相反，它的目标是根据第$t$个词来预测其上下文各个词的概率分布。从这里我们可以看出，不管是CBOW模型还是Skip-gram模型都不需要人工额外标注数据，因此它们都属于自监督模型，下面开始分别进行介绍。
-9.2.3 连续词袋模型# 1. 连续词袋模型原理
-如图9-4所示便是CBOW的原理示意图，此时滑动窗口的长度为$m=2$，CBOW的原理是文本序列$S$在所有滑动窗口下，通过已知的上下文词来最大化中心词出现的条件概率。
-图9-4 CBOW原理示意图 在文本序列$S$中，对于每个位置$t=1,2,...,T$来说，在滑动窗口长度为$m$的情况下，CBOW模型的目标便是最大化所有给定上下文词$w_{t-m},..,w_{t-1},w_{t&#43;1},...,w_{t&#43;m}$时，中心词$w_t$对应的条件概率，如式(9-6)所示便是CBOW模型需要最大化的似然函数 $$ \mathcal{L}(\theta)=\prod_{t=1}^TP(w_{t}|w_{t-m},...,w_{t-1},w_{t&#43;1},...,w_{t&#43;m};\theta)\tag{9-6} $$ 其中$\theta$便是需要求解的模型参数。
-进一步，同时对式(9-6)两边取自然对数，且令$\hat{w}=\{w_{t-m},...,w_{t-1},w_{t&#43;1},...,w_{t&#43;m}\}$有 $$ \begin{aligned} J(\theta)=-\frac{1}{T}\log \mathcal{L}(\theta) &amp;=-\frac{1}{T}\sum_{t=1}^T\log P(w_t|w_{t-m},...,w_{t-1},w_{t&#43;1},...,w_{t&#43;m};\theta)\\[3ex] &amp;=-\frac{1}{T}\sum_{t=1}^T\log P(w_t|\hat{w};\theta) \end{aligned} \tag{9-7} $$ 此时$J(\theta)$便是我们需要最小化的目标函数，而接下来的问题便是如何计算条件概率$P(w_{t}|\hat{w};\theta)$。
-现在假设$p_w$和$q_w$分别为词$w$作为中心词和上下文词时各自对应的词向量，则在给定上下文词$o$的情况下中心词$c$的条件概率为 $$ P(c|o)=\frac{\exp(q_o^Tp_c)}{\sum\limits_{w\in \mathcal{V}}\exp(q^T_op_w)}\in \mathbb{R}\tag{9-8} $$ 其中$\mathcal{V}$表示词表中所有的词。
-之所以可以通过式(9-8)来建模此时的条件概率是因为离得越近的两个词总体上语义应该越相似，而点积的大小在一定程度上则可以反映两个向量的相似性，点积越大则表示两个向量越相似[2]。因此，在建模上述条件概率时本质上可以看做是对于已知上下文词时，模型需要在词表中找到与之尽可能相似的词。
-此时，由式(9-7)和式(9-8)可得 $$ \begin{aligned} J(\theta)&amp;=-\frac{1}{T}\sum_{t=1}^T\log \frac{\exp(q_{\hat{w}}^Tp_{w_t})}{\sum\limits_{w\in\mathcal{V}}\exp(q^T_{\hat{w}}p_w)}=-\frac{1}{T}\sum_{t=1}^T\left(q_{\hat{w}}^Tp_{w_t}-\log\sum\limits_{w\in\mathcal{V}}\exp(q^T_{\hat{w}}p_w)\right) \end{aligned} \tag{9-9} $$ 因为在CBOW模型中，待预测的中心词有多个上下文词，因此在实际处理时式(9-9)中的$q_{\hat{w}}$一般取滑动窗口中所有上下文词词向量的均值。最终，式(9-9)便是模型需要最小化的目标函数，虽然看起来略显复杂但是本质上它就是$\text{Softmax}$和交叉熵的组合。
-2. 连续词袋模型建模
-在实际模型构建过程中，CBOW模型将首先取上下文中每个词$w_i$对应词向量$v_i\in \mathbb{R}^n$的均值；然后再与隐藏层权重参数$U\in \mathbb{R}^{n\times|\mathcal{V}|}$作用并取$\text{Softmax}$后得到对应的条件概率分布；最后使用交叉熵损失函数来完成模型的训练过程，整体结构如图9-5所示。
-图 9-5 CBOW模型结构图 在图9-5中，左侧输入层为上下文词的独热编码表示形式，其中$|\mathcal{V}|$表示词表的长度；中间为隐藏层，每一行表示根据对应上下文词独热编码索引得到的输入词向量表示，这也被形象的称为词嵌入（Word Embedding）；输入层和隐藏层之间的权重矩阵$V\in \mathbb{R}^{|\mathcal{V}|\times n}$为输入词向量矩阵，其中第$i$行$v_i$表示词表中第$i$个词$w_i$对应的输入词向量，而这也模型训练完毕后每个词真正的词向量表示；隐藏层与输出层之间的权重矩阵$U\in \mathbb{R}^{n\times |\mathcal{V}|}$为输出词向量矩阵，其中第$i$列$u_i$表示词表中第$i$个词$w_i$对应的输出词向量，用于同$v_i$计算得到对应的条件概率分布。
-">
+<meta name="description" content="本节围绕Word2Vec词向量展开，重点介绍Word2Vec动机、Word2Vec模型和连续词袋模型等内容。">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
 <meta name="color-scheme" content="light dark">
+<meta name="robots" content="index,follow,max-image-preview:large">
 
 
 
 
-
-
-
-  
-
-
-
-  
 
 <meta property="og:url" content="https://mlwithme.github.io/dl/chapter09/d4703d990f8d4fed/">
 <meta property="og:site_name" content="《从零学AI指南手册》">
 <meta property="og:title" content="9.2 Word2Vec词向量">
-<meta property="og:description" content="9.2 Word2Vec词向量# 在9.1节内容中，我们详细梳理了自然语言处理发展时所经历的3个核心阶段，并且同时提到目前主流的是基于深度学习的语言模型。在本节内容中我们将会介绍第1种基于神经网络的将单词表示为连续向量的自然语言处理技术——Word2Vec。 9.2.1 …">
+<meta property="og:description" content="本节围绕Word2Vec词向量展开，重点介绍Word2Vec动机、Word2Vec模型和连续词袋模型等内容。">
 <meta property="og:locale" content="zh_CN">
 <meta property="og:type" content="article">
-<meta property="og:image" content="https://mlwithme.github.io/images/dl/logo.jpg">
-<meta property="og:image:url" content="https://mlwithme.github.io/images/dl/logo.jpg">
-<meta property="og:image:secure_url" content="https://mlwithme.github.io/images/dl/logo.jpg">
-<meta property="og:image:width" content="1272">
-<meta property="og:image:height" content="1272">
-<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image" content="https://mlwithme.github.io/favicon.png">
+<meta property="og:image:url" content="https://mlwithme.github.io/favicon.png">
+<meta property="og:image:secure_url" content="https://mlwithme.github.io/favicon.png">
+<meta property="og:image:width" content="759">
+<meta property="og:image:height" content="759">
+<meta property="og:image:type" content="image/png">
 <meta property="og:image:alt" content="《从零学AI指南手册》 - 9.2 Word2Vec词向量">
 
   <meta property="article:section" content="dl">
+  
+    <meta property="article:published_time" content="2026-06-22T17:10:22&#43;08:00">
+  
+  
+    <meta property="article:modified_time" content="2026-06-22T21:25:25&#43;08:00">
+  
+  
 
 
-
-	<meta itemprop="name" content="9.2 Word2Vec词向量">
-	<meta itemprop="description" content="9.2 Word2Vec词向量# 在9.1节内容中，我们详细梳理了自然语言处理发展时所经历的3个核心阶段，并且同时提到目前主流的是基于深度学习的语言模型。在本节内容中我们将会介绍第1种基于神经网络的将单词表示为连续向量的自然语言处理技术——Word2Vec。
-9.2.1 Word2Vec动机# 在基于深度学习的语言模型中一个关键的问题就是如何有效地表示文本信息。在早期的建模方法中通常都是使用基于手工设计的特征表示来表示文本，例如词袋模型中的词频或TF-IDF权重、独热编码等方法。但这些特征通常都是离散且稀疏的，难以捕捉到词与词之间的语义关系。例如独热编码就没有任何相似性或者其它关系上的概念，如果我们将点积作为相似性的衡量方法那么此时任意两个向量之间的相似度都将是0。因此，研究人员开始寻求一种更有效的文本表示方法，并且希望能够利用神经网络的能力来自动学习词的向量化表示。
-基于这样的动机，谷歌公司托马斯[1]等人于2013年提出了一种基于神经网络技术的Word2Vec模型来生成词向量（Word Embedding）或（Word Vector）。Word2Vec通过使用浅层神经网络模型来学习词的分布式表示（Distributed Representations），其核心思想是基于大量文本语料库的统计信息，将每个词分别映射到一个低维连续的向量空间中，使得具有相似语义的词在向量空间中的距离更近。这种分布式表示可以更好地捕捉词之间的语义关系，使得近义词之间的相似性和词之间的语义类比能够通过计算得到。例如计算&#34;king&#34; - “man” &#43; “woman”，可以得到一个向量表示&#34;queen&#34;，即实现了词之间的类比关系[2]。
-9.2.2 Word2Vec模型# 整体来看Word2Vec模型的网络结构主要有两种：连续词袋模型（Continuous Bag of Words，CBOW）和跳元（Skip-gram）模型。CBOW模型的目标是在固定滑动窗口内根据第$t$个词的上下文词来预测第$t$个词对应的概率分布，即第$t$个词；Skip-gram模型则刚好与CBOW模型相反，它的目标是根据第$t$个词来预测其上下文各个词的概率分布。从这里我们可以看出，不管是CBOW模型还是Skip-gram模型都不需要人工额外标注数据，因此它们都属于自监督模型，下面开始分别进行介绍。
-9.2.3 连续词袋模型# 1. 连续词袋模型原理
-如图9-4所示便是CBOW的原理示意图，此时滑动窗口的长度为$m=2$，CBOW的原理是文本序列$S$在所有滑动窗口下，通过已知的上下文词来最大化中心词出现的条件概率。
-图9-4 CBOW原理示意图 在文本序列$S$中，对于每个位置$t=1,2,...,T$来说，在滑动窗口长度为$m$的情况下，CBOW模型的目标便是最大化所有给定上下文词$w_{t-m},..,w_{t-1},w_{t&#43;1},...,w_{t&#43;m}$时，中心词$w_t$对应的条件概率，如式(9-6)所示便是CBOW模型需要最大化的似然函数 $$ \mathcal{L}(\theta)=\prod_{t=1}^TP(w_{t}|w_{t-m},...,w_{t-1},w_{t&#43;1},...,w_{t&#43;m};\theta)\tag{9-6} $$ 其中$\theta$便是需要求解的模型参数。
-进一步，同时对式(9-6)两边取自然对数，且令$\hat{w}=\{w_{t-m},...,w_{t-1},w_{t&#43;1},...,w_{t&#43;m}\}$有 $$ \begin{aligned} J(\theta)=-\frac{1}{T}\log \mathcal{L}(\theta) &amp;=-\frac{1}{T}\sum_{t=1}^T\log P(w_t|w_{t-m},...,w_{t-1},w_{t&#43;1},...,w_{t&#43;m};\theta)\\[3ex] &amp;=-\frac{1}{T}\sum_{t=1}^T\log P(w_t|\hat{w};\theta) \end{aligned} \tag{9-7} $$ 此时$J(\theta)$便是我们需要最小化的目标函数，而接下来的问题便是如何计算条件概率$P(w_{t}|\hat{w};\theta)$。
-现在假设$p_w$和$q_w$分别为词$w$作为中心词和上下文词时各自对应的词向量，则在给定上下文词$o$的情况下中心词$c$的条件概率为 $$ P(c|o)=\frac{\exp(q_o^Tp_c)}{\sum\limits_{w\in \mathcal{V}}\exp(q^T_op_w)}\in \mathbb{R}\tag{9-8} $$ 其中$\mathcal{V}$表示词表中所有的词。
-之所以可以通过式(9-8)来建模此时的条件概率是因为离得越近的两个词总体上语义应该越相似，而点积的大小在一定程度上则可以反映两个向量的相似性，点积越大则表示两个向量越相似[2]。因此，在建模上述条件概率时本质上可以看做是对于已知上下文词时，模型需要在词表中找到与之尽可能相似的词。
-此时，由式(9-7)和式(9-8)可得 $$ \begin{aligned} J(\theta)&amp;=-\frac{1}{T}\sum_{t=1}^T\log \frac{\exp(q_{\hat{w}}^Tp_{w_t})}{\sum\limits_{w\in\mathcal{V}}\exp(q^T_{\hat{w}}p_w)}=-\frac{1}{T}\sum_{t=1}^T\left(q_{\hat{w}}^Tp_{w_t}-\log\sum\limits_{w\in\mathcal{V}}\exp(q^T_{\hat{w}}p_w)\right) \end{aligned} \tag{9-9} $$ 因为在CBOW模型中，待预测的中心词有多个上下文词，因此在实际处理时式(9-9)中的$q_{\hat{w}}$一般取滑动窗口中所有上下文词词向量的均值。最终，式(9-9)便是模型需要最小化的目标函数，虽然看起来略显复杂但是本质上它就是$\text{Softmax}$和交叉熵的组合。
-2. 连续词袋模型建模
-在实际模型构建过程中，CBOW模型将首先取上下文中每个词$w_i$对应词向量$v_i\in \mathbb{R}^n$的均值；然后再与隐藏层权重参数$U\in \mathbb{R}^{n\times|\mathcal{V}|}$作用并取$\text{Softmax}$后得到对应的条件概率分布；最后使用交叉熵损失函数来完成模型的训练过程，整体结构如图9-5所示。
-图 9-5 CBOW模型结构图 在图9-5中，左侧输入层为上下文词的独热编码表示形式，其中$|\mathcal{V}|$表示词表的长度；中间为隐藏层，每一行表示根据对应上下文词独热编码索引得到的输入词向量表示，这也被形象的称为词嵌入（Word Embedding）；输入层和隐藏层之间的权重矩阵$V\in \mathbb{R}^{|\mathcal{V}|\times n}$为输入词向量矩阵，其中第$i$行$v_i$表示词表中第$i$个词$w_i$对应的输入词向量，而这也模型训练完毕后每个词真正的词向量表示；隐藏层与输出层之间的权重矩阵$U\in \mathbb{R}^{n\times |\mathcal{V}|}$为输出词向量矩阵，其中第$i$列$u_i$表示词表中第$i$个词$w_i$对应的输出词向量，用于同$v_i$计算得到对应的条件概率分布。">
-	<meta itemprop="wordCount" content="95">
+<script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"WebSite","description":"面向机器学习、深度学习与 AI Agent 的中文系统化学习手册，包含原理讲解、代码示例与实战案例。","inLanguage":"zh_CN","name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
+  </script>
+  <script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.github.io/favicon.png"},"name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
+  </script><script type="application/ld+json">
+      {"@context":"https://schema.org","@type":"Article","articleSection":"dl","author":{"@type":"Person","name":"WangCheng","url":"https://mlwithme.github.io/author/"},"dateModified":"2026-06-22T21:25:25+08:00","datePublished":"2026-06-22T17:10:22+08:00","description":"本节围绕Word2Vec词向量展开，重点介绍Word2Vec动机、Word2Vec模型和连续词袋模型等内容。","headline":"9.2 Word2Vec词向量","image":["https://mlwithme.github.io/favicon.png"],"inLanguage":"zh_CN","mainEntityOfPage":"https://mlwithme.github.io/dl/chapter09/d4703d990f8d4fed/","publisher":{"@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.github.io/favicon.png"},"name":"《从零学AI指南手册》"},"url":"https://mlwithme.github.io/dl/chapter09/d4703d990f8d4fed/"}
+    </script><script type="application/ld+json">
+      {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","item":"https://mlwithme.github.io/","name":"《从零学AI指南手册》","position":1},{"@type":"ListItem","item":"https://mlwithme.github.io/dl/","name":"深度学习","position":2},{"@type":"ListItem","item":"https://mlwithme.github.io/dl/chapter09/","name":"第 9 章 自然语言处理","position":3},{"@type":"ListItem","item":"https://mlwithme.github.io/dl/chapter09/d4703d990f8d4fed/","name":"9.2 Word2Vec词向量","position":4}]}
+    </script>
 
 <title>9.2 Word2Vec词向量 • 《从零学AI指南手册》</title>
 <link rel="icon" href="/favicon.png" >
 <link rel="manifest" href="/manifest.json">
 <link rel="canonical" href="https://mlwithme.github.io/dl/chapter09/d4703d990f8d4fed/">
-<link rel="stylesheet" href="/book.min.a3b3c189ec36eda25846e6a5241268b0c27b5b76ed9c0b34b9b3e6d3cae2a18c.css" integrity="sha256-o7PBiew27aJYRualJBJosMJ7W3btnAs0ubPm08rioYw=" crossorigin="anonymous">
-
-
-  <script defer type="module" src="/en.search.min.d6b14dbcd48978b2c41611d06e5387dc896ddf705e423dd9152973bfd6c6096a.js" integrity="sha256-1rFNvNSJeLLEFhHQblOH3Ilt33BeQj3ZFSlzv9bGCWo=" crossorigin="anonymous"></script>
+<link rel="stylesheet" href="/book.min.63f4337331e9703a72f247b55f39b42ed5a3770674e2bf6810d5a1e51b89666a.css" integrity="sha256-Y/QzczHpcDpy8ke1Xzm0LtWjdwZ04r9oENWh5RuJZmo=" crossorigin="anonymous">
+  <script defer type="module" src="/en.search.min.d7ce42533465ddddc9ab3ccfca8c2773fb6595a39dc2b81fb2fea04e304dec79.js" integrity="sha256-185CUzRl3d3JqzzPyownc/tllaOdwrgfsv6gTjBN7Hk=" crossorigin="anonymous"></script>
 
   
 
-<meta property="og:image" content="https://mlwithme.github.io/images/dl/logo.jpg">
-<meta property="og:image:secure_url" content="https://mlwithme.github.io/images/dl/logo.jpg">
-<meta property="og:image:width" content="1272">
-<meta property="og:image:height" content="1272">
-<meta property="og:image:type" content="image/jpeg">
+
+
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:image" content="https://mlwithme.github.io/images/dl/logo.jpg">
+<meta name="twitter:title" content="9.2 Word2Vec词向量">
+<meta name="twitter:description" content="本节围绕Word2Vec词向量展开，重点介绍Word2Vec动机、Word2Vec模型和连续词袋模型等内容。">
+<meta name="twitter:url" content="https://mlwithme.github.io/dl/chapter09/d4703d990f8d4fed/">
+<meta name="twitter:image" content="https://mlwithme.github.io/favicon.png">
+<meta name="twitter:image:alt" content="《从零学AI指南手册》 - 9.2 Word2Vec词向量">
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-23SZ6E8VY7"></script>
 <script>
   window.dataLayer = window.dataLayer || [];
@@ -146,7 +122,7 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <a>
+    <a href="/agent/" class="">
       大模型Agent开发</a>
   
 
@@ -162,7 +138,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-279cf10e5100caa4f65ba3f7dd8888a4" class="toggle"  />
     <label for="section-279cf10e5100caa4f65ba3f7dd8888a4" class="flex">
-      <a role="button" class="">
+      <a href="/agent/chapter01/" class="">
         第 1 章 RAG 基础概念</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -213,7 +189,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-83c662c2764f1c19f8005eab77fee110" class="toggle"  />
     <label for="section-83c662c2764f1c19f8005eab77fee110" class="flex">
-      <a role="button" class="">
+      <a href="/agent/chapter02/" class="">
         第 2 章 大模型接入与使用</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -292,7 +268,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-1e583d7a26333453241d87c5c16592bd" class="toggle"  />
     <label for="section-1e583d7a26333453241d87c5c16592bd" class="flex">
-      <a role="button" class="">
+      <a href="/agent/chapter03/" class="">
         第 3 章 文档标准化与语义检索</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -399,7 +375,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="toggle"  />
     <label for="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="flex">
-      <a role="button" class="">
+      <a href="/agent/chapter04/" class="">
         第 4 章 RAG 与 Agent</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -565,7 +541,7 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <a>
+    <a href="/dl/" class="">
       深度学习</a>
   
 
@@ -595,7 +571,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-cf7621e8efb1f3153eaca44a113dcdb9" class="toggle"  />
     <label for="section-cf7621e8efb1f3153eaca44a113dcdb9" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter01/" class="">
         第 1 章 深度学习简介</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -660,7 +636,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-f9bf1a68c19405769f9c4a1495708a55" class="toggle"  />
     <label for="section-f9bf1a68c19405769f9c4a1495708a55" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter02/" class="">
         第 2 章 环境配置</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -725,7 +701,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="toggle"  />
     <label for="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter03/" class="">
         第 3 章 深度学习基础</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -930,7 +906,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-7a12cee83820a928df00362d70804a97" class="toggle"  />
     <label for="section-7a12cee83820a928df00362d70804a97" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter04/" class="">
         第 4 章 卷积神经网络</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1093,7 +1069,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-be9addfd3a15c372d609d09cabb94159" class="toggle"  />
     <label for="section-be9addfd3a15c372d609d09cabb94159" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter05/" class="">
         第 5 章 模型训练与复用</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1214,7 +1190,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="toggle"  />
     <label for="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter06/" class="">
         第 6 章 模型优化方法</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1377,7 +1353,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-517b751d7c44a7ac77d25d295ed44271" class="toggle"  />
     <label for="section-517b751d7c44a7ac77d25d295ed44271" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter07/" class="">
         第 7 章 循环神经网络</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1484,7 +1460,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-b9b861f64ba32bc68dfb977497de37d9" class="toggle"  />
     <label for="section-b9b861f64ba32bc68dfb977497de37d9" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter08/" class="">
         第 8 章 时序与模型融合</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1591,7 +1567,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-e54a1e28b1438b8266637bcb8dac1a44" class="toggle" checked />
     <label for="section-e54a1e28b1438b8266637bcb8dac1a44" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter09/" class="">
         第 9 章 自然语言处理</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1782,7 +1758,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-f6636b2f9dc1df93b9fa64dd201716d9" class="toggle"  />
     <label for="section-f6636b2f9dc1df93b9fa64dd201716d9" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter10/" class="">
         第10章 现代神经网络</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2088,7 +2064,7 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <a>
+    <a href="/ml/" class="">
       机器学习</a>
   
 
@@ -2118,7 +2094,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-48f56957e94e3cf66f3022103a7dd0ff" class="toggle"  />
     <label for="section-48f56957e94e3cf66f3022103a7dd0ff" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter01/" class="">
         第 1 章 环境配置</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2169,7 +2145,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-56a896338a1c41249d22a3efa0e0063c" class="toggle"  />
     <label for="section-56a896338a1c41249d22a3efa0e0063c" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter02/" class="">
         第 2 章 线性回归</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2290,7 +2266,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-ccd0dc9386ea80613d4cedf91b30058d" class="toggle"  />
     <label for="section-ccd0dc9386ea80613d4cedf91b30058d" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter03/" class="">
         第 3 章 逻辑回归</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2383,7 +2359,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="toggle"  />
     <label for="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter04/" class="">
         第 4 章 模型的改善与泛化</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2504,7 +2480,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-40f463d9d502d24b86ea6120b7030123" class="toggle"  />
     <label for="section-40f463d9d502d24b86ea6120b7030123" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter05/" class="">
         第 5 章 K近邻</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2611,7 +2587,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-5a460dc18f1e79253296cf2cd0498446" class="toggle"  />
     <label for="section-5a460dc18f1e79253296cf2cd0498446" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter06/" class="">
         第 6 章 文本特征与模型复用</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2704,7 +2680,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-96f45a8b8c8b75adc70c78026d93dbf6" class="toggle"  />
     <label for="section-96f45a8b8c8b75adc70c78026d93dbf6" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter07/" class="">
         第 7 章 朴素贝叶斯</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2811,7 +2787,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-22476e49d5058c3e5e7e7366b7ab676f" class="toggle"  />
     <label for="section-22476e49d5058c3e5e7e7366b7ab676f" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter08/" class="">
         第 8 章 决策树</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2960,7 +2936,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-2feb6a51cabb61dba860f45c1881386b" class="toggle"  />
     <label for="section-2feb6a51cabb61dba860f45c1881386b" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter09/" class="">
         第 9 章 集成学习与提升算法</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -3081,7 +3057,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-938ae119c3849b03ccb6f91cef4243dd" class="toggle"  />
     <label for="section-938ae119c3849b03ccb6f91cef4243dd" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter10/" class="">
         第 10 章 支持向量机</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -3258,7 +3234,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-9f4d9786d4ab755fde42c64d09b0d026" class="toggle"  />
     <label for="section-9f4d9786d4ab755fde42c64d09b0d026" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter11/" class="">
         第 11 章 聚类分析</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -3435,7 +3411,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-d5e78c45312818bb3abd5c19c858f7e5" class="toggle"  />
     <label for="section-d5e78c45312818bb3abd5c19c858f7e5" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter12/" class="">
         第 12 章 降维算法</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -3486,7 +3462,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-a82b41bb7eb95af72bc11e8a3d668acd" class="toggle"  />
     <label for="section-a82b41bb7eb95af72bc11e8a3d668acd" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter13/" class="">
         第 13 章 自训练与标签传播</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -3606,24 +3582,41 @@ https://github.com/alex-shpak/hugo-book
 </nav>
 
   
-  <section class="book-page-qr" aria-label="页面二维码">
-    <p class="book-page-qr-title">手机扫码查看</p>
-    <a
-      class="book-page-qr-image-link"
-      href="https://mlwithme.github.io/dl/chapter09/d4703d990f8d4fed/"
-      target="_blank"
-      rel="noopener noreferrer"
-      aria-label="打开当前页面链接"
-    >
-      <img
-        class="book-page-qr-image"
-        src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fdl%2Fchapter09%2Fd4703d990f8d4fed%2F"
-        alt="当前页面链接二维码"
-        loading="lazy"
-        decoding="async"
-        referrerpolicy="no-referrer"
+  <section class="book-page-qr-panel" aria-label="页面二维码与公众号二维码">
+    <section class="book-page-qr-block" aria-label="页面二维码">
+      <p class="book-page-qr-title">微信扫码查看</p>
+      <a
+        class="book-page-qr-image-link"
+        href="https://mlwithme.github.io/dl/chapter09/d4703d990f8d4fed/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="打开当前页面链接"
       >
-    </a>
+        <img
+          class="book-page-qr-image"
+          src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fdl%2Fchapter09%2Fd4703d990f8d4fed%2F"
+          alt="当前页面链接二维码"
+          loading="lazy"
+          decoding="async"
+          referrerpolicy="no-referrer"
+        >
+      </a>
+    </section>
+
+    <div class="book-page-qr-divider" aria-hidden="true"></div>
+
+    <section class="book-page-qr-block" aria-label="公众号二维码">
+      <p class="book-page-qr-title">关注公众号</p>
+      <div class="book-page-qr-image-link book-page-qr-image-frame">
+        <img
+          class="book-page-qr-image"
+          src="/images/gzh.png"
+          alt="公众号二维码"
+          loading="lazy"
+          decoding="async"
+        >
+      </div>
+    </section>
   </section>
 
 
@@ -3791,24 +3784,41 @@ $$<p>
 </nav>
 
   
-  <section class="book-page-qr" aria-label="页面二维码">
-    <p class="book-page-qr-title">手机扫码查看</p>
-    <a
-      class="book-page-qr-image-link"
-      href="https://mlwithme.github.io/dl/chapter09/d4703d990f8d4fed/"
-      target="_blank"
-      rel="noopener noreferrer"
-      aria-label="打开当前页面链接"
-    >
-      <img
-        class="book-page-qr-image"
-        src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fdl%2Fchapter09%2Fd4703d990f8d4fed%2F"
-        alt="当前页面链接二维码"
-        loading="lazy"
-        decoding="async"
-        referrerpolicy="no-referrer"
+  <section class="book-page-qr-panel" aria-label="页面二维码与公众号二维码">
+    <section class="book-page-qr-block" aria-label="页面二维码">
+      <p class="book-page-qr-title">微信扫码查看</p>
+      <a
+        class="book-page-qr-image-link"
+        href="https://mlwithme.github.io/dl/chapter09/d4703d990f8d4fed/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="打开当前页面链接"
       >
-    </a>
+        <img
+          class="book-page-qr-image"
+          src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fdl%2Fchapter09%2Fd4703d990f8d4fed%2F"
+          alt="当前页面链接二维码"
+          loading="lazy"
+          decoding="async"
+          referrerpolicy="no-referrer"
+        >
+      </a>
+    </section>
+
+    <div class="book-page-qr-divider" aria-hidden="true"></div>
+
+    <section class="book-page-qr-block" aria-label="公众号二维码">
+      <p class="book-page-qr-title">关注公众号</p>
+      <div class="book-page-qr-image-link book-page-qr-image-frame">
+        <img
+          class="book-page-qr-image"
+          src="/images/gzh.png"
+          alt="公众号二维码"
+          loading="lazy"
+          decoding="async"
+        >
+      </div>
+    </section>
   </section>
 
 

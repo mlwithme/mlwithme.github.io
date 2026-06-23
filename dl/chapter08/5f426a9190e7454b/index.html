@@ -4,108 +4,70 @@
   <!--
 Made with Book Theme
 https://github.com/alex-shpak/hugo-book
--->
-
-<meta charset="UTF-8">
+--><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="description" content="8.6 STResNet网络# 在前面几节内容中， 我们陆续介绍了多种通过结合CNN和RNN的模型来对时序数据进行建模，并且从第8.4节内容开始还首次引入了基于时空数据相关任务。不管是8.4节中介绍的ConvLSTM模型还是8.5节中引入的3DCNN模型，为了能同时提取时空数据在时间和空间两个维度的特征信息均从模型本身进行了改进。在本节内容中，我们将会介绍一种通过改进任务建模方式而仅依靠2DCNN来进行时空数据特征提取的模型，并同时介绍如何对多个子模块的输出结果进行融合。
-8.6.1 STResNet动机# 尽管已有的时序模型例如3DCNN或者是ConvLSTM也能够用于提取时空数据在时间和空间两个维度上的特征信息，但是在流量预测这个场景中却不能有效得捕捉到在时间维度上的周期或者是趋势信息。例如在交通流量这一场景中，传统的时序模型只能提取到时空数据在紧邻若干时间内容的时序信息，但显然在这个场景中交通流量还具有周期规律或者趋势性。
-通常来说，交通流量数据在相邻时刻间、连续多天的同一时间段以及在长期趋势上都具有一定的规律性。同时，在这一场景中当天是否为节假日也会对交通流量的预测结果产生极大的影响。
-图 8-13 交通流量数据趋势图 如图8-13所示，左图展示了以周为单位节假日和非节假日的流量变化图；右图展示了以周为单位不同时间段的流量变化趋势。从图8-13中的结果可以看出，不管在哪种情况下流量数据都具有一定的周期或者规律性。
-基于这样的动机，郑宇[1]等人在2017年提出了一种能够同时提取时空数据在邻近性（Closeness )、周期性（Period）和趋势性（Trend）上的时序特征，并同时考虑到节假日及天气状况等额外信息的时空模型（Spatio Temporal ResNet, STResNet）。该模型以残差模块为基础，通过构建不同的子模块来对不同的采样数据进行特征提取，然后再将各个模块的结果进行融合以实现上述目的。
-8.6.2 任务背景# 1. 任务介绍
-交通流量（Traffic Flow）预测任务是指使用历史数据和其他相关信息来预测特定区域或道路上未来的交通流量情况。它的目标是估计未来某一时间段内的车辆数量、速度和拥堵状况等交通指标，并且通常可以通过交通传感器、视频监控、GPS设备、移动应用程序等方式获取交通流量原始数据。在论文[1]中，作者使用了GPS原始数据来构建对应的数据集并用于模型训练。
-图 8-14 网格划分及流量图 如图8-14（左）所示，将整个城市以经纬度划分为大小为$32\times32$的方格，然后再根据GPS轨迹以半小时为间隔统计得到每个格子中的流入流出量并看做是两个通道，这样便得到了整个城市各个区域在每个时刻的流量分布情况。进一步，图8-14（右）便是某一时刻的流入交通流量分布情况。经过这样的处理，我们便得到了一系列具有时序关系的图片数据，而任务的目的便是将前$T$个时间片（时刻）的流量作为输入，然后预测第$T&#43;1$时刻的流入流出流量。
-2. 样本采样
-为了使得STResNet模型具备提取时空数据在时间维度上的近邻性、周期性和趋势性，作者以不同的时间间隔对原始数据进行了采样，然后再将这3部分采样得到的数据输入到3个由残差网络构建的子模型中进行空间上的特征提取，并将三部分的输出融合作为整体的特征表示。具体采样方式如图8-15所示。
-图 8-15 数据采样图 如图8-15所示便是原始构建完成的流量数据，每个时间片的流量情况用一个形状为[2,32,32]的矩阵来进行表示。例如以预测时刻片$t_i$的流量为例，可以取$t_i$的前3个时间片$t_{i-1},t_{i-2},t_{i-3}$来模拟邻近性、取$t_{i}$前一天同时刻的时间片$t_j$来模拟周期性、取$t_i$前一周同时刻的时间片$t_k$来模拟趋势性，并将这3部分作为一个样本同时输入到3个子模块中。最后，再将窗口向右滑动一个时间片来构建下一个样，即$t_i,t_{i-1},t_{i-2}$作为近邻性的输入、$t_{j&#43;1}$作为周期性的输入、$t_{k&#43;1}$作为趋势性的输入，然后预测第$t_{i&#43;1}$时刻的交通流量。当然，这3部分的采样方法以及连续时间片的长度都可以作为超参数进行调整，详见第8.6.4节代码实现。
-同时，为了考虑到其它额外因素对最终预测结果的影响，因此作者：①使用了一个8维向量来表示当天是否为工作日，其中前7个维度为独热编码表示当天是星期几，第8个维度表示当天是否为工作日；②使用了一个维度来表示当天是否为节假日；③使用了一个19维向量来表示天气状况，其中前17个维度同样也为独热编码用于表示其中一种天气情况，最后两个维度则表示风速和温度。最终，用这个28维向量来表示除了流量数据之外的额外因素。
-8.6.3 STResNet结构# 1. 整体结构
-在介绍完任务背景之后接下来开始介绍STResNet模型的原理。STResNet模型整体上可以分为4个部分，其中前3个部分以不同间隔采样的流量数据作为输入通过3个深度残差网络子模块来提取时空数据在时间维度和空间维度上的特征信息，第4个部分则是一个浅层的全连接网络用于考虑节假日和天气等因素对预测结果的影响。整体结构如图8-16所示。
-图 8-16 STResNet网络结构图 如图8-16所示，右侧部分3个相同的结构便是用于提取时刻数据特征的深度残差网络模块，从右至左依次用于对邻近性、周期性和趋势性采样数据在空间上特征提取，然后再将这3部分的结果融合得到流量数据在时间上的特征信息，从而得到$X_{\text{Res}}$来表征整体流量数据的时空特征信息。左侧部分则是用于处理天气等额外信息对预测结果的影响。最终，将两部分的结果相加经过$\tanh$非线性变换后便得到了整个模型的预测输出。
-2. 残差模块
-深度残差模块主要由多个残差单元所构成，并且首尾各插入了一个单独的卷积层来调整特征图的通道数。对于每一个残差单元来说，其由两个卷积层所构成并且还加入了批归一化层，如图8-17所示。
-图 8-17 残差单元结构图 如图8-17所示便是STResNet模型中的残差单元。在整个残差模块中，卷积核的大小均是$3\times3$，且除了Conv2之外所有卷积层的卷积核个数均为64，Conv2的卷积核个数则为2，因为预测输出包含两个通道。
-3. 模型融合
-对于每个残差模块来说，其输出的结果均为一个形状为[2,32,32]的特征图，因此作者采用了式(8-4)所示的方式进行融合 $$ X_{\text{Res}}=W_c\odot X_c&#43;W_p\odot X_p&#43;W_q\odot X_q\tag{8-5} $$ 其中$X_c$、$X_p$和$X_q$分别为3个残差模块的输出结果，$W_c$、$W_p$和$W_q$为3个可学习的权重矩阵形状均为[2,32,32]，$\odot$表示按位乘。
-在对外部因素进行处理时使用了两个全连接层，由于这部分原始输入整体上是由独热编码构成，所以第1个全连接层还可以近似看成一个嵌入层。为了匹配最后的输出形状，在第2个全连接层中权重参数的维度则必须为$2\times32\times32$，然后再将输出$X_{\text{Ext}}$变形为[2,32,32]并直接与$X_{\text{Res}}$按位相加得到融合后的结果。最后，为了使得模型能够快速收敛作者还使用了$\tanh$非线性变换，这也就意味着输入模型的交通流量数据需要先做$[-1,1]$的标准化，然后在实际推理过程中再将预测结果还原，计算过程如式(8-6)所示。 $$ \begin{aligned} y=2\cdot\frac{x-\min}{\max-\min}-1 \end{aligned}\tag{8-6} $$ 对于不同模块间输出结果的融合一般常见的有：①在某个维度进行拼接；②直接以按位加的方式进行处理；③先以按位乘的方式作用一个可学习的权重参数再进行按位加处理；④先以矩阵乘法的方式将不同模块的输出变换到同一个维度再按位加处理。通常来说，先作用一个可学习参数再进行按位加是一个比较好的选择。
-">
+<meta name="description" content="本节围绕STResNet网络展开，重点介绍STResNet动机、任务背景和STResNet结构等内容。">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
 <meta name="color-scheme" content="light dark">
+<meta name="robots" content="index,follow,max-image-preview:large">
 
 
 
 
-
-
-
-  
-
-
-
-  
 
 <meta property="og:url" content="https://mlwithme.github.io/dl/chapter08/5f426a9190e7454b/">
 <meta property="og:site_name" content="《从零学AI指南手册》">
 <meta property="og:title" content="8.6 STResNet网络">
-<meta property="og:description" content="8.6 STResNet网络# 在前面几节内容中， 我们陆续介绍了多种通过结合CNN和RNN的模型来对时序数据进行建模，并且从第8.4节内容开始还首次引入了基于时空数据相关任务。不管是8.4节中介绍的ConvLSTM模型还是8.5节中引入的3DCNN模型，为了能同时提取时空数据在 …">
+<meta property="og:description" content="本节围绕STResNet网络展开，重点介绍STResNet动机、任务背景和STResNet结构等内容。">
 <meta property="og:locale" content="zh_CN">
 <meta property="og:type" content="article">
-<meta property="og:image" content="https://mlwithme.github.io/images/dl/logo.jpg">
-<meta property="og:image:url" content="https://mlwithme.github.io/images/dl/logo.jpg">
-<meta property="og:image:secure_url" content="https://mlwithme.github.io/images/dl/logo.jpg">
-<meta property="og:image:width" content="1272">
-<meta property="og:image:height" content="1272">
-<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image" content="https://mlwithme.github.io/favicon.png">
+<meta property="og:image:url" content="https://mlwithme.github.io/favicon.png">
+<meta property="og:image:secure_url" content="https://mlwithme.github.io/favicon.png">
+<meta property="og:image:width" content="759">
+<meta property="og:image:height" content="759">
+<meta property="og:image:type" content="image/png">
 <meta property="og:image:alt" content="《从零学AI指南手册》 - 8.6 STResNet网络">
 
   <meta property="article:section" content="dl">
+  
+    <meta property="article:published_time" content="2026-06-22T17:10:22&#43;08:00">
+  
+  
+    <meta property="article:modified_time" content="2026-06-22T21:25:25&#43;08:00">
+  
+  
 
 
-
-	<meta itemprop="name" content="8.6 STResNet网络">
-	<meta itemprop="description" content="8.6 STResNet网络# 在前面几节内容中， 我们陆续介绍了多种通过结合CNN和RNN的模型来对时序数据进行建模，并且从第8.4节内容开始还首次引入了基于时空数据相关任务。不管是8.4节中介绍的ConvLSTM模型还是8.5节中引入的3DCNN模型，为了能同时提取时空数据在时间和空间两个维度的特征信息均从模型本身进行了改进。在本节内容中，我们将会介绍一种通过改进任务建模方式而仅依靠2DCNN来进行时空数据特征提取的模型，并同时介绍如何对多个子模块的输出结果进行融合。
-8.6.1 STResNet动机# 尽管已有的时序模型例如3DCNN或者是ConvLSTM也能够用于提取时空数据在时间和空间两个维度上的特征信息，但是在流量预测这个场景中却不能有效得捕捉到在时间维度上的周期或者是趋势信息。例如在交通流量这一场景中，传统的时序模型只能提取到时空数据在紧邻若干时间内容的时序信息，但显然在这个场景中交通流量还具有周期规律或者趋势性。
-通常来说，交通流量数据在相邻时刻间、连续多天的同一时间段以及在长期趋势上都具有一定的规律性。同时，在这一场景中当天是否为节假日也会对交通流量的预测结果产生极大的影响。
-图 8-13 交通流量数据趋势图 如图8-13所示，左图展示了以周为单位节假日和非节假日的流量变化图；右图展示了以周为单位不同时间段的流量变化趋势。从图8-13中的结果可以看出，不管在哪种情况下流量数据都具有一定的周期或者规律性。
-基于这样的动机，郑宇[1]等人在2017年提出了一种能够同时提取时空数据在邻近性（Closeness )、周期性（Period）和趋势性（Trend）上的时序特征，并同时考虑到节假日及天气状况等额外信息的时空模型（Spatio Temporal ResNet, STResNet）。该模型以残差模块为基础，通过构建不同的子模块来对不同的采样数据进行特征提取，然后再将各个模块的结果进行融合以实现上述目的。
-8.6.2 任务背景# 1. 任务介绍
-交通流量（Traffic Flow）预测任务是指使用历史数据和其他相关信息来预测特定区域或道路上未来的交通流量情况。它的目标是估计未来某一时间段内的车辆数量、速度和拥堵状况等交通指标，并且通常可以通过交通传感器、视频监控、GPS设备、移动应用程序等方式获取交通流量原始数据。在论文[1]中，作者使用了GPS原始数据来构建对应的数据集并用于模型训练。
-图 8-14 网格划分及流量图 如图8-14（左）所示，将整个城市以经纬度划分为大小为$32\times32$的方格，然后再根据GPS轨迹以半小时为间隔统计得到每个格子中的流入流出量并看做是两个通道，这样便得到了整个城市各个区域在每个时刻的流量分布情况。进一步，图8-14（右）便是某一时刻的流入交通流量分布情况。经过这样的处理，我们便得到了一系列具有时序关系的图片数据，而任务的目的便是将前$T$个时间片（时刻）的流量作为输入，然后预测第$T&#43;1$时刻的流入流出流量。
-2. 样本采样
-为了使得STResNet模型具备提取时空数据在时间维度上的近邻性、周期性和趋势性，作者以不同的时间间隔对原始数据进行了采样，然后再将这3部分采样得到的数据输入到3个由残差网络构建的子模型中进行空间上的特征提取，并将三部分的输出融合作为整体的特征表示。具体采样方式如图8-15所示。
-图 8-15 数据采样图 如图8-15所示便是原始构建完成的流量数据，每个时间片的流量情况用一个形状为[2,32,32]的矩阵来进行表示。例如以预测时刻片$t_i$的流量为例，可以取$t_i$的前3个时间片$t_{i-1},t_{i-2},t_{i-3}$来模拟邻近性、取$t_{i}$前一天同时刻的时间片$t_j$来模拟周期性、取$t_i$前一周同时刻的时间片$t_k$来模拟趋势性，并将这3部分作为一个样本同时输入到3个子模块中。最后，再将窗口向右滑动一个时间片来构建下一个样，即$t_i,t_{i-1},t_{i-2}$作为近邻性的输入、$t_{j&#43;1}$作为周期性的输入、$t_{k&#43;1}$作为趋势性的输入，然后预测第$t_{i&#43;1}$时刻的交通流量。当然，这3部分的采样方法以及连续时间片的长度都可以作为超参数进行调整，详见第8.6.4节代码实现。
-同时，为了考虑到其它额外因素对最终预测结果的影响，因此作者：①使用了一个8维向量来表示当天是否为工作日，其中前7个维度为独热编码表示当天是星期几，第8个维度表示当天是否为工作日；②使用了一个维度来表示当天是否为节假日；③使用了一个19维向量来表示天气状况，其中前17个维度同样也为独热编码用于表示其中一种天气情况，最后两个维度则表示风速和温度。最终，用这个28维向量来表示除了流量数据之外的额外因素。
-8.6.3 STResNet结构# 1. 整体结构
-在介绍完任务背景之后接下来开始介绍STResNet模型的原理。STResNet模型整体上可以分为4个部分，其中前3个部分以不同间隔采样的流量数据作为输入通过3个深度残差网络子模块来提取时空数据在时间维度和空间维度上的特征信息，第4个部分则是一个浅层的全连接网络用于考虑节假日和天气等因素对预测结果的影响。整体结构如图8-16所示。
-图 8-16 STResNet网络结构图 如图8-16所示，右侧部分3个相同的结构便是用于提取时刻数据特征的深度残差网络模块，从右至左依次用于对邻近性、周期性和趋势性采样数据在空间上特征提取，然后再将这3部分的结果融合得到流量数据在时间上的特征信息，从而得到$X_{\text{Res}}$来表征整体流量数据的时空特征信息。左侧部分则是用于处理天气等额外信息对预测结果的影响。最终，将两部分的结果相加经过$\tanh$非线性变换后便得到了整个模型的预测输出。
-2. 残差模块
-深度残差模块主要由多个残差单元所构成，并且首尾各插入了一个单独的卷积层来调整特征图的通道数。对于每一个残差单元来说，其由两个卷积层所构成并且还加入了批归一化层，如图8-17所示。
-图 8-17 残差单元结构图 如图8-17所示便是STResNet模型中的残差单元。在整个残差模块中，卷积核的大小均是$3\times3$，且除了Conv2之外所有卷积层的卷积核个数均为64，Conv2的卷积核个数则为2，因为预测输出包含两个通道。
-3. 模型融合
-对于每个残差模块来说，其输出的结果均为一个形状为[2,32,32]的特征图，因此作者采用了式(8-4)所示的方式进行融合 $$ X_{\text{Res}}=W_c\odot X_c&#43;W_p\odot X_p&#43;W_q\odot X_q\tag{8-5} $$ 其中$X_c$、$X_p$和$X_q$分别为3个残差模块的输出结果，$W_c$、$W_p$和$W_q$为3个可学习的权重矩阵形状均为[2,32,32]，$\odot$表示按位乘。
-在对外部因素进行处理时使用了两个全连接层，由于这部分原始输入整体上是由独热编码构成，所以第1个全连接层还可以近似看成一个嵌入层。为了匹配最后的输出形状，在第2个全连接层中权重参数的维度则必须为$2\times32\times32$，然后再将输出$X_{\text{Ext}}$变形为[2,32,32]并直接与$X_{\text{Res}}$按位相加得到融合后的结果。最后，为了使得模型能够快速收敛作者还使用了$\tanh$非线性变换，这也就意味着输入模型的交通流量数据需要先做$[-1,1]$的标准化，然后在实际推理过程中再将预测结果还原，计算过程如式(8-6)所示。 $$ \begin{aligned} y=2\cdot\frac{x-\min}{\max-\min}-1 \end{aligned}\tag{8-6} $$ 对于不同模块间输出结果的融合一般常见的有：①在某个维度进行拼接；②直接以按位加的方式进行处理；③先以按位乘的方式作用一个可学习的权重参数再进行按位加处理；④先以矩阵乘法的方式将不同模块的输出变换到同一个维度再按位加处理。通常来说，先作用一个可学习参数再进行按位加是一个比较好的选择。">
-	<meta itemprop="wordCount" content="227">
+<script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"WebSite","description":"面向机器学习、深度学习与 AI Agent 的中文系统化学习手册，包含原理讲解、代码示例与实战案例。","inLanguage":"zh_CN","name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
+  </script>
+  <script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.github.io/favicon.png"},"name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
+  </script><script type="application/ld+json">
+      {"@context":"https://schema.org","@type":"Article","articleSection":"dl","author":{"@type":"Person","name":"WangCheng","url":"https://mlwithme.github.io/author/"},"dateModified":"2026-06-22T21:25:25+08:00","datePublished":"2026-06-22T17:10:22+08:00","description":"本节围绕STResNet网络展开，重点介绍STResNet动机、任务背景和STResNet结构等内容。","headline":"8.6 STResNet网络","image":["https://mlwithme.github.io/favicon.png"],"inLanguage":"zh_CN","mainEntityOfPage":"https://mlwithme.github.io/dl/chapter08/5f426a9190e7454b/","publisher":{"@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.github.io/favicon.png"},"name":"《从零学AI指南手册》"},"url":"https://mlwithme.github.io/dl/chapter08/5f426a9190e7454b/"}
+    </script><script type="application/ld+json">
+      {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","item":"https://mlwithme.github.io/","name":"《从零学AI指南手册》","position":1},{"@type":"ListItem","item":"https://mlwithme.github.io/dl/","name":"深度学习","position":2},{"@type":"ListItem","item":"https://mlwithme.github.io/dl/chapter08/","name":"第 8 章 时序与模型融合","position":3},{"@type":"ListItem","item":"https://mlwithme.github.io/dl/chapter08/5f426a9190e7454b/","name":"8.6 STResNet网络","position":4}]}
+    </script>
 
 <title>8.6 STResNet网络 • 《从零学AI指南手册》</title>
 <link rel="icon" href="/favicon.png" >
 <link rel="manifest" href="/manifest.json">
 <link rel="canonical" href="https://mlwithme.github.io/dl/chapter08/5f426a9190e7454b/">
-<link rel="stylesheet" href="/book.min.a3b3c189ec36eda25846e6a5241268b0c27b5b76ed9c0b34b9b3e6d3cae2a18c.css" integrity="sha256-o7PBiew27aJYRualJBJosMJ7W3btnAs0ubPm08rioYw=" crossorigin="anonymous">
-
-
-  <script defer type="module" src="/en.search.min.d6b14dbcd48978b2c41611d06e5387dc896ddf705e423dd9152973bfd6c6096a.js" integrity="sha256-1rFNvNSJeLLEFhHQblOH3Ilt33BeQj3ZFSlzv9bGCWo=" crossorigin="anonymous"></script>
+<link rel="stylesheet" href="/book.min.63f4337331e9703a72f247b55f39b42ed5a3770674e2bf6810d5a1e51b89666a.css" integrity="sha256-Y/QzczHpcDpy8ke1Xzm0LtWjdwZ04r9oENWh5RuJZmo=" crossorigin="anonymous">
+  <script defer type="module" src="/en.search.min.d7ce42533465ddddc9ab3ccfca8c2773fb6595a39dc2b81fb2fea04e304dec79.js" integrity="sha256-185CUzRl3d3JqzzPyownc/tllaOdwrgfsv6gTjBN7Hk=" crossorigin="anonymous"></script>
 
   
 
-<meta property="og:image" content="https://mlwithme.github.io/images/dl/logo.jpg">
-<meta property="og:image:secure_url" content="https://mlwithme.github.io/images/dl/logo.jpg">
-<meta property="og:image:width" content="1272">
-<meta property="og:image:height" content="1272">
-<meta property="og:image:type" content="image/jpeg">
+
+
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:image" content="https://mlwithme.github.io/images/dl/logo.jpg">
+<meta name="twitter:title" content="8.6 STResNet网络">
+<meta name="twitter:description" content="本节围绕STResNet网络展开，重点介绍STResNet动机、任务背景和STResNet结构等内容。">
+<meta name="twitter:url" content="https://mlwithme.github.io/dl/chapter08/5f426a9190e7454b/">
+<meta name="twitter:image" content="https://mlwithme.github.io/favicon.png">
+<meta name="twitter:image:alt" content="《从零学AI指南手册》 - 8.6 STResNet网络">
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-23SZ6E8VY7"></script>
 <script>
   window.dataLayer = window.dataLayer || [];
@@ -160,7 +122,7 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <a>
+    <a href="/agent/" class="">
       大模型Agent开发</a>
   
 
@@ -176,7 +138,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-279cf10e5100caa4f65ba3f7dd8888a4" class="toggle"  />
     <label for="section-279cf10e5100caa4f65ba3f7dd8888a4" class="flex">
-      <a role="button" class="">
+      <a href="/agent/chapter01/" class="">
         第 1 章 RAG 基础概念</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -227,7 +189,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-83c662c2764f1c19f8005eab77fee110" class="toggle"  />
     <label for="section-83c662c2764f1c19f8005eab77fee110" class="flex">
-      <a role="button" class="">
+      <a href="/agent/chapter02/" class="">
         第 2 章 大模型接入与使用</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -306,7 +268,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-1e583d7a26333453241d87c5c16592bd" class="toggle"  />
     <label for="section-1e583d7a26333453241d87c5c16592bd" class="flex">
-      <a role="button" class="">
+      <a href="/agent/chapter03/" class="">
         第 3 章 文档标准化与语义检索</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -413,7 +375,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="toggle"  />
     <label for="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="flex">
-      <a role="button" class="">
+      <a href="/agent/chapter04/" class="">
         第 4 章 RAG 与 Agent</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -579,7 +541,7 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <a>
+    <a href="/dl/" class="">
       深度学习</a>
   
 
@@ -609,7 +571,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-cf7621e8efb1f3153eaca44a113dcdb9" class="toggle"  />
     <label for="section-cf7621e8efb1f3153eaca44a113dcdb9" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter01/" class="">
         第 1 章 深度学习简介</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -674,7 +636,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-f9bf1a68c19405769f9c4a1495708a55" class="toggle"  />
     <label for="section-f9bf1a68c19405769f9c4a1495708a55" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter02/" class="">
         第 2 章 环境配置</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -739,7 +701,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="toggle"  />
     <label for="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter03/" class="">
         第 3 章 深度学习基础</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -944,7 +906,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-7a12cee83820a928df00362d70804a97" class="toggle"  />
     <label for="section-7a12cee83820a928df00362d70804a97" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter04/" class="">
         第 4 章 卷积神经网络</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1107,7 +1069,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-be9addfd3a15c372d609d09cabb94159" class="toggle"  />
     <label for="section-be9addfd3a15c372d609d09cabb94159" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter05/" class="">
         第 5 章 模型训练与复用</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1228,7 +1190,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="toggle"  />
     <label for="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter06/" class="">
         第 6 章 模型优化方法</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1391,7 +1353,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-517b751d7c44a7ac77d25d295ed44271" class="toggle"  />
     <label for="section-517b751d7c44a7ac77d25d295ed44271" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter07/" class="">
         第 7 章 循环神经网络</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1498,7 +1460,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-b9b861f64ba32bc68dfb977497de37d9" class="toggle" checked />
     <label for="section-b9b861f64ba32bc68dfb977497de37d9" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter08/" class="">
         第 8 章 时序与模型融合</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1605,7 +1567,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-e54a1e28b1438b8266637bcb8dac1a44" class="toggle"  />
     <label for="section-e54a1e28b1438b8266637bcb8dac1a44" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter09/" class="">
         第 9 章 自然语言处理</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1796,7 +1758,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-f6636b2f9dc1df93b9fa64dd201716d9" class="toggle"  />
     <label for="section-f6636b2f9dc1df93b9fa64dd201716d9" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter10/" class="">
         第10章 现代神经网络</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2102,7 +2064,7 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <a>
+    <a href="/ml/" class="">
       机器学习</a>
   
 
@@ -2132,7 +2094,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-48f56957e94e3cf66f3022103a7dd0ff" class="toggle"  />
     <label for="section-48f56957e94e3cf66f3022103a7dd0ff" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter01/" class="">
         第 1 章 环境配置</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2183,7 +2145,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-56a896338a1c41249d22a3efa0e0063c" class="toggle"  />
     <label for="section-56a896338a1c41249d22a3efa0e0063c" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter02/" class="">
         第 2 章 线性回归</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2304,7 +2266,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-ccd0dc9386ea80613d4cedf91b30058d" class="toggle"  />
     <label for="section-ccd0dc9386ea80613d4cedf91b30058d" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter03/" class="">
         第 3 章 逻辑回归</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2397,7 +2359,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="toggle"  />
     <label for="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter04/" class="">
         第 4 章 模型的改善与泛化</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2518,7 +2480,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-40f463d9d502d24b86ea6120b7030123" class="toggle"  />
     <label for="section-40f463d9d502d24b86ea6120b7030123" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter05/" class="">
         第 5 章 K近邻</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2625,7 +2587,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-5a460dc18f1e79253296cf2cd0498446" class="toggle"  />
     <label for="section-5a460dc18f1e79253296cf2cd0498446" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter06/" class="">
         第 6 章 文本特征与模型复用</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2718,7 +2680,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-96f45a8b8c8b75adc70c78026d93dbf6" class="toggle"  />
     <label for="section-96f45a8b8c8b75adc70c78026d93dbf6" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter07/" class="">
         第 7 章 朴素贝叶斯</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2825,7 +2787,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-22476e49d5058c3e5e7e7366b7ab676f" class="toggle"  />
     <label for="section-22476e49d5058c3e5e7e7366b7ab676f" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter08/" class="">
         第 8 章 决策树</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2974,7 +2936,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-2feb6a51cabb61dba860f45c1881386b" class="toggle"  />
     <label for="section-2feb6a51cabb61dba860f45c1881386b" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter09/" class="">
         第 9 章 集成学习与提升算法</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -3095,7 +3057,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-938ae119c3849b03ccb6f91cef4243dd" class="toggle"  />
     <label for="section-938ae119c3849b03ccb6f91cef4243dd" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter10/" class="">
         第 10 章 支持向量机</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -3272,7 +3234,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-9f4d9786d4ab755fde42c64d09b0d026" class="toggle"  />
     <label for="section-9f4d9786d4ab755fde42c64d09b0d026" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter11/" class="">
         第 11 章 聚类分析</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -3449,7 +3411,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-d5e78c45312818bb3abd5c19c858f7e5" class="toggle"  />
     <label for="section-d5e78c45312818bb3abd5c19c858f7e5" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter12/" class="">
         第 12 章 降维算法</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -3500,7 +3462,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-a82b41bb7eb95af72bc11e8a3d668acd" class="toggle"  />
     <label for="section-a82b41bb7eb95af72bc11e8a3d668acd" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter13/" class="">
         第 13 章 自训练与标签传播</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -3620,24 +3582,41 @@ https://github.com/alex-shpak/hugo-book
 </nav>
 
   
-  <section class="book-page-qr" aria-label="页面二维码">
-    <p class="book-page-qr-title">手机扫码查看</p>
-    <a
-      class="book-page-qr-image-link"
-      href="https://mlwithme.github.io/dl/chapter08/5f426a9190e7454b/"
-      target="_blank"
-      rel="noopener noreferrer"
-      aria-label="打开当前页面链接"
-    >
-      <img
-        class="book-page-qr-image"
-        src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fdl%2Fchapter08%2F5f426a9190e7454b%2F"
-        alt="当前页面链接二维码"
-        loading="lazy"
-        decoding="async"
-        referrerpolicy="no-referrer"
+  <section class="book-page-qr-panel" aria-label="页面二维码与公众号二维码">
+    <section class="book-page-qr-block" aria-label="页面二维码">
+      <p class="book-page-qr-title">微信扫码查看</p>
+      <a
+        class="book-page-qr-image-link"
+        href="https://mlwithme.github.io/dl/chapter08/5f426a9190e7454b/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="打开当前页面链接"
       >
-    </a>
+        <img
+          class="book-page-qr-image"
+          src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fdl%2Fchapter08%2F5f426a9190e7454b%2F"
+          alt="当前页面链接二维码"
+          loading="lazy"
+          decoding="async"
+          referrerpolicy="no-referrer"
+        >
+      </a>
+    </section>
+
+    <div class="book-page-qr-divider" aria-hidden="true"></div>
+
+    <section class="book-page-qr-block" aria-label="公众号二维码">
+      <p class="book-page-qr-title">关注公众号</p>
+      <div class="book-page-qr-image-link book-page-qr-image-frame">
+        <img
+          class="book-page-qr-image"
+          src="/images/gzh.png"
+          alt="公众号二维码"
+          loading="lazy"
+          decoding="async"
+        >
+      </div>
+    </section>
   </section>
 
 
@@ -3771,8 +3750,8 @@ $$<p>
     </span>
     <span>
     
-      <a href="/dl/chapter09/e0cb9a7aae814045/" class="flex align-center">
-        <span>9.1 自然语言处理介绍</span>
+      <a href="/dl/chapter09/" class="flex align-center">
+        <span>第 9 章 自然语言处理</span>
         <img src="/icons/forward.svg" class="book-icon" alt="Forward" />
       </a>
     
@@ -3834,24 +3813,41 @@ $$<p>
 </nav>
 
   
-  <section class="book-page-qr" aria-label="页面二维码">
-    <p class="book-page-qr-title">手机扫码查看</p>
-    <a
-      class="book-page-qr-image-link"
-      href="https://mlwithme.github.io/dl/chapter08/5f426a9190e7454b/"
-      target="_blank"
-      rel="noopener noreferrer"
-      aria-label="打开当前页面链接"
-    >
-      <img
-        class="book-page-qr-image"
-        src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fdl%2Fchapter08%2F5f426a9190e7454b%2F"
-        alt="当前页面链接二维码"
-        loading="lazy"
-        decoding="async"
-        referrerpolicy="no-referrer"
+  <section class="book-page-qr-panel" aria-label="页面二维码与公众号二维码">
+    <section class="book-page-qr-block" aria-label="页面二维码">
+      <p class="book-page-qr-title">微信扫码查看</p>
+      <a
+        class="book-page-qr-image-link"
+        href="https://mlwithme.github.io/dl/chapter08/5f426a9190e7454b/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="打开当前页面链接"
       >
-    </a>
+        <img
+          class="book-page-qr-image"
+          src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fdl%2Fchapter08%2F5f426a9190e7454b%2F"
+          alt="当前页面链接二维码"
+          loading="lazy"
+          decoding="async"
+          referrerpolicy="no-referrer"
+        >
+      </a>
+    </section>
+
+    <div class="book-page-qr-divider" aria-hidden="true"></div>
+
+    <section class="book-page-qr-block" aria-label="公众号二维码">
+      <p class="book-page-qr-title">关注公众号</p>
+      <div class="book-page-qr-image-link book-page-qr-image-frame">
+        <img
+          class="book-page-qr-image"
+          src="/images/gzh.png"
+          alt="公众号二维码"
+          loading="lazy"
+          decoding="async"
+        >
+      </div>
+    </section>
   </section>
 
 

@@ -4,98 +4,70 @@
   <!--
 Made with Book Theme
 https://github.com/alex-shpak/hugo-book
--->
-
-<meta charset="UTF-8">
+--><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="description" content="4.10 DenseNet网络# 在4.9节内容中，我们详细介绍了ResNet模型的原理和实现方法，它的成功不仅解决了深度神经网络的退化问题而且在ImageNet等大型数据集上有着很好的表现，成为了深度学习领域的重要成果之一。因此，ResNet也为后续的网络设计提供了一种新的思考方向，启发了后续许多网络结构的设计，例如在本节内容中将要介绍的DenseNet模型。
-4.10.1 DenseNet动机# 在传统的卷积神经网络中每一层的输入只来自于上一层的输出，这导致了每一层的特征图只能连接到相邻的下一层而无法跨层连接，这使得随着网络深度增加不仅出现了梯度消失或爆炸的现象，而且还出现了网络退化的问题。虽然残差网络的出现使得这两个问题在很大程度上得到了缓解，但是随着网络模型加深依旧存在着梯度消失的问题；其次，在传统的卷积神经网络中需要通过增加网络深度的方式来提高特征的表达能力从而导致模型参数急剧增加；最后，由于每一层的特征只能连接到近邻的后一层，使得浅层的特征可能无法充分传递到深层网络中导致特征传递不充分[1]。
-受到ResNet残差结构连接方式的启发，作者提出了一种基于密集连接的网络结构DenseNet[1]。DenseNet通过将上一层和前面所有层的输出拼接起来并作为当前层的输入，从而实现：①允许梯度更加直接地传递到浅层网络有助于缓解梯度消失的问题；②通过特征共享的方式来增加特征的表达能力从而降低了模型的参数量；③使得特征能在网络层中更加自由地传递有助于特征的充分利用。
-4.10.2 DenseNet结构# 整体来说，DenseNet模型主要由密集连接层和迁移层所构成，而两者的核心也都是由卷积层所构成，后续整个DenseNet网络也将基于这两个部分来进行构建。下面开始分别就这两部分进行介绍。
-1. 理解密集连接层
-对于密集连接层来说，它是由一个个密集块所构成，而密集块则是由两个基础的卷积层所构成，整个密集块的结构如图4-48所示。
-图 4-48. 密集块结构图 在图4-48中，首先是一个卷积核大小为$1\times1$的卷积层，其卷积核的个数为$4K$，$K$为论文中所指的增长率（Growth Rate）用于控制密集块输出的特征通道数，4可以理解为控制系数用于调节两个卷积层之间的特征通道数，紧接着最后便是一个$3\times3$的卷积层。同时从这里可以看出，对于每个卷积层来说其先进行了归一化，然后是非线性变换操作，最后才是线性变换，即“BN&#43;ReLU&#43;Conv”的顺序；而在ResNet中这一顺序为“Conv&#43;BN&#43;ReLU”。
-进一步，由多个密集块便可以构造得到一个密集连接层，如图4-49所示。
-图 4-49. 密集连接层（含3个密集块）图 如图4-49所示，对于传统的网络结构来说$L$层网络便有$L$条连接，而在密集连接层中则有$\frac{L}{2}(L&#43;1)$条连接，而这一连接方式也DenseNet名字的由来。在图4-49中，对于第1个密集块来说，假定其输入形状的长、宽和通道数分别为$m$、$n$和$c$则其输出形状便是$m\times n\times K$；对于第2个密集块来说其输入便是第1个密集块的输入和第1个密集块输出的组合，即形状为$m\times n\times (K&#43;c)$，且其输出同样为$m\times n\times K$；以此类推，第3个密集块的输入形状便是$m\times n\times (2\cdot K&#43;c)$，其输出形状依然为$m\times n\times K$。
-由此可以得出，对于第$l$个密集块来说，其输入通道数为$(l-1)\cdot K&#43;c$，其中$l=1,2...,L$，这个递推公式在模型实现时还会用到。
-2. 理解迁移层
-根据图4-49可知，对于每个密集连接层来说其输出特征图的通道数和长宽均没有发生改变，因此作者提出了迁移层（Transition Layer）的概念来逐一对密集连接层的输出特征进行压缩，其结构如图4-50所示。
-图 4-50. 迁移层图 在图4-50中，首先同样是一个卷积核大小为$1\times1$的卷积层，其卷积核的个数为$\theta m$，其中$m$表示输入通道数，$\theta$表示通道压缩率（ Compression Factor），默认为0.5即通道数减半；最后是一个窗口大小为$2\times 2$的平均池化层。
-3. 整体网络结构
-在清楚密集连接层和迁移层的构造原理后，我们便可以构造得到最终的DenseNet网络模型。同ResNet一样，我们可以通过配置不同的密集连接数量返回得到不同的DenseNet结构，如论文中给出的DenseNet121、DenseNet169、DenseNet201和DenseNet264。为了方便后续介绍以及与ResNet18大致保持一致，下面我们将以DenseNet21为例进行介绍，其网络结构信息如表4-4所示。
-表 4-4 DenseNet18网络结构信息表 网络层 输出形状 18-layer Convolution $112\times112$ $\begin{bmatrix}7\times7,&amp;64\end{bmatrix}\times1$ Pooling $56\times56$ Max Pooling DenseLayer1 $56\times56$ $\begin{bmatrix}1\times1\\ 3\times3\end{bmatrix}\times2$ Transition1 $28\times28$ $1\times1$ Conv, $2\times2$ Average Pooling DenseLayer2 $28\times28$ $\begin{bmatrix}1\times1\\ 3\times3\end{bmatrix}\times2$ Transition2 $14\times14$ $1\times1$ Conv, $2\times2$ Average Pooling DenseLayer3 $14\times14$ $\begin{bmatrix}1\times1\\ 3\times3\end{bmatrix}\times2$ Transition3 $7\times7$ $1\times1$ Conv, $2\times2$ Average Pooling DenseLayer4 $7\times7$ $\begin{bmatrix}1\times1\\ 3\times3\end{bmatrix}\times2$ ClassificatinLayer $1\times1$ $7\times7$ Global Average Pooling, softmax 如表4-4所示，从上到下ResNet21一共有10个部分，其中第2列表示每个部分特征图输出的形状；第3列表示各层对应的参数信息，以DenseLayer1这一行为例，其表示一共使用了2个密集块结构且每个密集层由两个卷积层构成。由此，根据表4-4中的结构信息便可以得到如图4-51所示的网络结构图。
-">
+<meta name="description" content="本节围绕DenseNet网络展开，重点介绍DenseNet动机、DenseNet结构和DenseNet实现等内容。">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
 <meta name="color-scheme" content="light dark">
+<meta name="robots" content="index,follow,max-image-preview:large">
 
 
 
 
-
-
-
-  
-
-
-
-  
 
 <meta property="og:url" content="https://mlwithme.github.io/dl/chapter04/1c24468824274650/">
 <meta property="og:site_name" content="《从零学AI指南手册》">
 <meta property="og:title" content="4.10 DenseNet网络">
-<meta property="og:description" content="4.10 DenseNet网络# 在4.9节内容中，我们详细介绍了ResNet模型的原理和实现方法，它的成功不仅解决了深度神经网络的退化问题而且在ImageNet等大型数据集上有着很好的表现，成为了深度学习领域的重要成果之一。因此，ResNet也为后续的网络设计提供了一种新的思考 …">
+<meta property="og:description" content="本节围绕DenseNet网络展开，重点介绍DenseNet动机、DenseNet结构和DenseNet实现等内容。">
 <meta property="og:locale" content="zh_CN">
 <meta property="og:type" content="article">
-<meta property="og:image" content="https://mlwithme.github.io/images/dl/logo.jpg">
-<meta property="og:image:url" content="https://mlwithme.github.io/images/dl/logo.jpg">
-<meta property="og:image:secure_url" content="https://mlwithme.github.io/images/dl/logo.jpg">
-<meta property="og:image:width" content="1272">
-<meta property="og:image:height" content="1272">
-<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image" content="https://mlwithme.github.io/favicon.png">
+<meta property="og:image:url" content="https://mlwithme.github.io/favicon.png">
+<meta property="og:image:secure_url" content="https://mlwithme.github.io/favicon.png">
+<meta property="og:image:width" content="759">
+<meta property="og:image:height" content="759">
+<meta property="og:image:type" content="image/png">
 <meta property="og:image:alt" content="《从零学AI指南手册》 - 4.10 DenseNet网络">
 
   <meta property="article:section" content="dl">
+  
+    <meta property="article:published_time" content="2026-06-22T17:10:22&#43;08:00">
+  
+  
+    <meta property="article:modified_time" content="2026-06-22T21:25:25&#43;08:00">
+  
+  
 
 
-
-	<meta itemprop="name" content="4.10 DenseNet网络">
-	<meta itemprop="description" content="4.10 DenseNet网络# 在4.9节内容中，我们详细介绍了ResNet模型的原理和实现方法，它的成功不仅解决了深度神经网络的退化问题而且在ImageNet等大型数据集上有着很好的表现，成为了深度学习领域的重要成果之一。因此，ResNet也为后续的网络设计提供了一种新的思考方向，启发了后续许多网络结构的设计，例如在本节内容中将要介绍的DenseNet模型。
-4.10.1 DenseNet动机# 在传统的卷积神经网络中每一层的输入只来自于上一层的输出，这导致了每一层的特征图只能连接到相邻的下一层而无法跨层连接，这使得随着网络深度增加不仅出现了梯度消失或爆炸的现象，而且还出现了网络退化的问题。虽然残差网络的出现使得这两个问题在很大程度上得到了缓解，但是随着网络模型加深依旧存在着梯度消失的问题；其次，在传统的卷积神经网络中需要通过增加网络深度的方式来提高特征的表达能力从而导致模型参数急剧增加；最后，由于每一层的特征只能连接到近邻的后一层，使得浅层的特征可能无法充分传递到深层网络中导致特征传递不充分[1]。
-受到ResNet残差结构连接方式的启发，作者提出了一种基于密集连接的网络结构DenseNet[1]。DenseNet通过将上一层和前面所有层的输出拼接起来并作为当前层的输入，从而实现：①允许梯度更加直接地传递到浅层网络有助于缓解梯度消失的问题；②通过特征共享的方式来增加特征的表达能力从而降低了模型的参数量；③使得特征能在网络层中更加自由地传递有助于特征的充分利用。
-4.10.2 DenseNet结构# 整体来说，DenseNet模型主要由密集连接层和迁移层所构成，而两者的核心也都是由卷积层所构成，后续整个DenseNet网络也将基于这两个部分来进行构建。下面开始分别就这两部分进行介绍。
-1. 理解密集连接层
-对于密集连接层来说，它是由一个个密集块所构成，而密集块则是由两个基础的卷积层所构成，整个密集块的结构如图4-48所示。
-图 4-48. 密集块结构图 在图4-48中，首先是一个卷积核大小为$1\times1$的卷积层，其卷积核的个数为$4K$，$K$为论文中所指的增长率（Growth Rate）用于控制密集块输出的特征通道数，4可以理解为控制系数用于调节两个卷积层之间的特征通道数，紧接着最后便是一个$3\times3$的卷积层。同时从这里可以看出，对于每个卷积层来说其先进行了归一化，然后是非线性变换操作，最后才是线性变换，即“BN&#43;ReLU&#43;Conv”的顺序；而在ResNet中这一顺序为“Conv&#43;BN&#43;ReLU”。
-进一步，由多个密集块便可以构造得到一个密集连接层，如图4-49所示。
-图 4-49. 密集连接层（含3个密集块）图 如图4-49所示，对于传统的网络结构来说$L$层网络便有$L$条连接，而在密集连接层中则有$\frac{L}{2}(L&#43;1)$条连接，而这一连接方式也DenseNet名字的由来。在图4-49中，对于第1个密集块来说，假定其输入形状的长、宽和通道数分别为$m$、$n$和$c$则其输出形状便是$m\times n\times K$；对于第2个密集块来说其输入便是第1个密集块的输入和第1个密集块输出的组合，即形状为$m\times n\times (K&#43;c)$，且其输出同样为$m\times n\times K$；以此类推，第3个密集块的输入形状便是$m\times n\times (2\cdot K&#43;c)$，其输出形状依然为$m\times n\times K$。
-由此可以得出，对于第$l$个密集块来说，其输入通道数为$(l-1)\cdot K&#43;c$，其中$l=1,2...,L$，这个递推公式在模型实现时还会用到。
-2. 理解迁移层
-根据图4-49可知，对于每个密集连接层来说其输出特征图的通道数和长宽均没有发生改变，因此作者提出了迁移层（Transition Layer）的概念来逐一对密集连接层的输出特征进行压缩，其结构如图4-50所示。
-图 4-50. 迁移层图 在图4-50中，首先同样是一个卷积核大小为$1\times1$的卷积层，其卷积核的个数为$\theta m$，其中$m$表示输入通道数，$\theta$表示通道压缩率（ Compression Factor），默认为0.5即通道数减半；最后是一个窗口大小为$2\times 2$的平均池化层。
-3. 整体网络结构
-在清楚密集连接层和迁移层的构造原理后，我们便可以构造得到最终的DenseNet网络模型。同ResNet一样，我们可以通过配置不同的密集连接数量返回得到不同的DenseNet结构，如论文中给出的DenseNet121、DenseNet169、DenseNet201和DenseNet264。为了方便后续介绍以及与ResNet18大致保持一致，下面我们将以DenseNet21为例进行介绍，其网络结构信息如表4-4所示。
-表 4-4 DenseNet18网络结构信息表 网络层 输出形状 18-layer Convolution $112\times112$ $\begin{bmatrix}7\times7,&amp;64\end{bmatrix}\times1$ Pooling $56\times56$ Max Pooling DenseLayer1 $56\times56$ $\begin{bmatrix}1\times1\\ 3\times3\end{bmatrix}\times2$ Transition1 $28\times28$ $1\times1$ Conv, $2\times2$ Average Pooling DenseLayer2 $28\times28$ $\begin{bmatrix}1\times1\\ 3\times3\end{bmatrix}\times2$ Transition2 $14\times14$ $1\times1$ Conv, $2\times2$ Average Pooling DenseLayer3 $14\times14$ $\begin{bmatrix}1\times1\\ 3\times3\end{bmatrix}\times2$ Transition3 $7\times7$ $1\times1$ Conv, $2\times2$ Average Pooling DenseLayer4 $7\times7$ $\begin{bmatrix}1\times1\\ 3\times3\end{bmatrix}\times2$ ClassificatinLayer $1\times1$ $7\times7$ Global Average Pooling, softmax 如表4-4所示，从上到下ResNet21一共有10个部分，其中第2列表示每个部分特征图输出的形状；第3列表示各层对应的参数信息，以DenseLayer1这一行为例，其表示一共使用了2个密集块结构且每个密集层由两个卷积层构成。由此，根据表4-4中的结构信息便可以得到如图4-51所示的网络结构图。">
-	<meta itemprop="wordCount" content="290">
+<script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"WebSite","description":"面向机器学习、深度学习与 AI Agent 的中文系统化学习手册，包含原理讲解、代码示例与实战案例。","inLanguage":"zh_CN","name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
+  </script>
+  <script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.github.io/favicon.png"},"name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
+  </script><script type="application/ld+json">
+      {"@context":"https://schema.org","@type":"Article","articleSection":"dl","author":{"@type":"Person","name":"WangCheng","url":"https://mlwithme.github.io/author/"},"dateModified":"2026-06-22T21:25:25+08:00","datePublished":"2026-06-22T17:10:22+08:00","description":"本节围绕DenseNet网络展开，重点介绍DenseNet动机、DenseNet结构和DenseNet实现等内容。","headline":"4.10 DenseNet网络","image":["https://mlwithme.github.io/favicon.png"],"inLanguage":"zh_CN","mainEntityOfPage":"https://mlwithme.github.io/dl/chapter04/1c24468824274650/","publisher":{"@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.github.io/favicon.png"},"name":"《从零学AI指南手册》"},"url":"https://mlwithme.github.io/dl/chapter04/1c24468824274650/"}
+    </script><script type="application/ld+json">
+      {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","item":"https://mlwithme.github.io/","name":"《从零学AI指南手册》","position":1},{"@type":"ListItem","item":"https://mlwithme.github.io/dl/","name":"深度学习","position":2},{"@type":"ListItem","item":"https://mlwithme.github.io/dl/chapter04/","name":"第 4 章 卷积神经网络","position":3},{"@type":"ListItem","item":"https://mlwithme.github.io/dl/chapter04/1c24468824274650/","name":"4.10 DenseNet网络","position":4}]}
+    </script>
 
 <title>4.10 DenseNet网络 • 《从零学AI指南手册》</title>
 <link rel="icon" href="/favicon.png" >
 <link rel="manifest" href="/manifest.json">
 <link rel="canonical" href="https://mlwithme.github.io/dl/chapter04/1c24468824274650/">
-<link rel="stylesheet" href="/book.min.a3b3c189ec36eda25846e6a5241268b0c27b5b76ed9c0b34b9b3e6d3cae2a18c.css" integrity="sha256-o7PBiew27aJYRualJBJosMJ7W3btnAs0ubPm08rioYw=" crossorigin="anonymous">
-
-
-  <script defer type="module" src="/en.search.min.d6b14dbcd48978b2c41611d06e5387dc896ddf705e423dd9152973bfd6c6096a.js" integrity="sha256-1rFNvNSJeLLEFhHQblOH3Ilt33BeQj3ZFSlzv9bGCWo=" crossorigin="anonymous"></script>
+<link rel="stylesheet" href="/book.min.63f4337331e9703a72f247b55f39b42ed5a3770674e2bf6810d5a1e51b89666a.css" integrity="sha256-Y/QzczHpcDpy8ke1Xzm0LtWjdwZ04r9oENWh5RuJZmo=" crossorigin="anonymous">
+  <script defer type="module" src="/en.search.min.d7ce42533465ddddc9ab3ccfca8c2773fb6595a39dc2b81fb2fea04e304dec79.js" integrity="sha256-185CUzRl3d3JqzzPyownc/tllaOdwrgfsv6gTjBN7Hk=" crossorigin="anonymous"></script>
 
   
 
-<meta property="og:image" content="https://mlwithme.github.io/images/dl/logo.jpg">
-<meta property="og:image:secure_url" content="https://mlwithme.github.io/images/dl/logo.jpg">
-<meta property="og:image:width" content="1272">
-<meta property="og:image:height" content="1272">
-<meta property="og:image:type" content="image/jpeg">
+
+
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:image" content="https://mlwithme.github.io/images/dl/logo.jpg">
+<meta name="twitter:title" content="4.10 DenseNet网络">
+<meta name="twitter:description" content="本节围绕DenseNet网络展开，重点介绍DenseNet动机、DenseNet结构和DenseNet实现等内容。">
+<meta name="twitter:url" content="https://mlwithme.github.io/dl/chapter04/1c24468824274650/">
+<meta name="twitter:image" content="https://mlwithme.github.io/favicon.png">
+<meta name="twitter:image:alt" content="《从零学AI指南手册》 - 4.10 DenseNet网络">
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-23SZ6E8VY7"></script>
 <script>
   window.dataLayer = window.dataLayer || [];
@@ -150,7 +122,7 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <a>
+    <a href="/agent/" class="">
       大模型Agent开发</a>
   
 
@@ -166,7 +138,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-279cf10e5100caa4f65ba3f7dd8888a4" class="toggle"  />
     <label for="section-279cf10e5100caa4f65ba3f7dd8888a4" class="flex">
-      <a role="button" class="">
+      <a href="/agent/chapter01/" class="">
         第 1 章 RAG 基础概念</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -217,7 +189,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-83c662c2764f1c19f8005eab77fee110" class="toggle"  />
     <label for="section-83c662c2764f1c19f8005eab77fee110" class="flex">
-      <a role="button" class="">
+      <a href="/agent/chapter02/" class="">
         第 2 章 大模型接入与使用</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -296,7 +268,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-1e583d7a26333453241d87c5c16592bd" class="toggle"  />
     <label for="section-1e583d7a26333453241d87c5c16592bd" class="flex">
-      <a role="button" class="">
+      <a href="/agent/chapter03/" class="">
         第 3 章 文档标准化与语义检索</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -403,7 +375,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="toggle"  />
     <label for="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="flex">
-      <a role="button" class="">
+      <a href="/agent/chapter04/" class="">
         第 4 章 RAG 与 Agent</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -569,7 +541,7 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <a>
+    <a href="/dl/" class="">
       深度学习</a>
   
 
@@ -599,7 +571,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-cf7621e8efb1f3153eaca44a113dcdb9" class="toggle"  />
     <label for="section-cf7621e8efb1f3153eaca44a113dcdb9" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter01/" class="">
         第 1 章 深度学习简介</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -664,7 +636,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-f9bf1a68c19405769f9c4a1495708a55" class="toggle"  />
     <label for="section-f9bf1a68c19405769f9c4a1495708a55" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter02/" class="">
         第 2 章 环境配置</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -729,7 +701,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="toggle"  />
     <label for="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter03/" class="">
         第 3 章 深度学习基础</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -934,7 +906,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-7a12cee83820a928df00362d70804a97" class="toggle" checked />
     <label for="section-7a12cee83820a928df00362d70804a97" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter04/" class="">
         第 4 章 卷积神经网络</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1097,7 +1069,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-be9addfd3a15c372d609d09cabb94159" class="toggle"  />
     <label for="section-be9addfd3a15c372d609d09cabb94159" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter05/" class="">
         第 5 章 模型训练与复用</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1218,7 +1190,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="toggle"  />
     <label for="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter06/" class="">
         第 6 章 模型优化方法</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1381,7 +1353,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-517b751d7c44a7ac77d25d295ed44271" class="toggle"  />
     <label for="section-517b751d7c44a7ac77d25d295ed44271" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter07/" class="">
         第 7 章 循环神经网络</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1488,7 +1460,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-b9b861f64ba32bc68dfb977497de37d9" class="toggle"  />
     <label for="section-b9b861f64ba32bc68dfb977497de37d9" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter08/" class="">
         第 8 章 时序与模型融合</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1595,7 +1567,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-e54a1e28b1438b8266637bcb8dac1a44" class="toggle"  />
     <label for="section-e54a1e28b1438b8266637bcb8dac1a44" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter09/" class="">
         第 9 章 自然语言处理</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1786,7 +1758,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-f6636b2f9dc1df93b9fa64dd201716d9" class="toggle"  />
     <label for="section-f6636b2f9dc1df93b9fa64dd201716d9" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter10/" class="">
         第10章 现代神经网络</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2092,7 +2064,7 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <a>
+    <a href="/ml/" class="">
       机器学习</a>
   
 
@@ -2122,7 +2094,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-48f56957e94e3cf66f3022103a7dd0ff" class="toggle"  />
     <label for="section-48f56957e94e3cf66f3022103a7dd0ff" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter01/" class="">
         第 1 章 环境配置</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2173,7 +2145,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-56a896338a1c41249d22a3efa0e0063c" class="toggle"  />
     <label for="section-56a896338a1c41249d22a3efa0e0063c" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter02/" class="">
         第 2 章 线性回归</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2294,7 +2266,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-ccd0dc9386ea80613d4cedf91b30058d" class="toggle"  />
     <label for="section-ccd0dc9386ea80613d4cedf91b30058d" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter03/" class="">
         第 3 章 逻辑回归</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2387,7 +2359,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="toggle"  />
     <label for="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter04/" class="">
         第 4 章 模型的改善与泛化</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2508,7 +2480,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-40f463d9d502d24b86ea6120b7030123" class="toggle"  />
     <label for="section-40f463d9d502d24b86ea6120b7030123" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter05/" class="">
         第 5 章 K近邻</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2615,7 +2587,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-5a460dc18f1e79253296cf2cd0498446" class="toggle"  />
     <label for="section-5a460dc18f1e79253296cf2cd0498446" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter06/" class="">
         第 6 章 文本特征与模型复用</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2708,7 +2680,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-96f45a8b8c8b75adc70c78026d93dbf6" class="toggle"  />
     <label for="section-96f45a8b8c8b75adc70c78026d93dbf6" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter07/" class="">
         第 7 章 朴素贝叶斯</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2815,7 +2787,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-22476e49d5058c3e5e7e7366b7ab676f" class="toggle"  />
     <label for="section-22476e49d5058c3e5e7e7366b7ab676f" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter08/" class="">
         第 8 章 决策树</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2964,7 +2936,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-2feb6a51cabb61dba860f45c1881386b" class="toggle"  />
     <label for="section-2feb6a51cabb61dba860f45c1881386b" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter09/" class="">
         第 9 章 集成学习与提升算法</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -3085,7 +3057,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-938ae119c3849b03ccb6f91cef4243dd" class="toggle"  />
     <label for="section-938ae119c3849b03ccb6f91cef4243dd" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter10/" class="">
         第 10 章 支持向量机</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -3262,7 +3234,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-9f4d9786d4ab755fde42c64d09b0d026" class="toggle"  />
     <label for="section-9f4d9786d4ab755fde42c64d09b0d026" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter11/" class="">
         第 11 章 聚类分析</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -3439,7 +3411,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-d5e78c45312818bb3abd5c19c858f7e5" class="toggle"  />
     <label for="section-d5e78c45312818bb3abd5c19c858f7e5" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter12/" class="">
         第 12 章 降维算法</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -3490,7 +3462,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-a82b41bb7eb95af72bc11e8a3d668acd" class="toggle"  />
     <label for="section-a82b41bb7eb95af72bc11e8a3d668acd" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter13/" class="">
         第 13 章 自训练与标签传播</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -3609,24 +3581,41 @@ https://github.com/alex-shpak/hugo-book
 </nav>
 
   
-  <section class="book-page-qr" aria-label="页面二维码">
-    <p class="book-page-qr-title">手机扫码查看</p>
-    <a
-      class="book-page-qr-image-link"
-      href="https://mlwithme.github.io/dl/chapter04/1c24468824274650/"
-      target="_blank"
-      rel="noopener noreferrer"
-      aria-label="打开当前页面链接"
-    >
-      <img
-        class="book-page-qr-image"
-        src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fdl%2Fchapter04%2F1c24468824274650%2F"
-        alt="当前页面链接二维码"
-        loading="lazy"
-        decoding="async"
-        referrerpolicy="no-referrer"
+  <section class="book-page-qr-panel" aria-label="页面二维码与公众号二维码">
+    <section class="book-page-qr-block" aria-label="页面二维码">
+      <p class="book-page-qr-title">微信扫码查看</p>
+      <a
+        class="book-page-qr-image-link"
+        href="https://mlwithme.github.io/dl/chapter04/1c24468824274650/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="打开当前页面链接"
       >
-    </a>
+        <img
+          class="book-page-qr-image"
+          src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fdl%2Fchapter04%2F1c24468824274650%2F"
+          alt="当前页面链接二维码"
+          loading="lazy"
+          decoding="async"
+          referrerpolicy="no-referrer"
+        >
+      </a>
+    </section>
+
+    <div class="book-page-qr-divider" aria-hidden="true"></div>
+
+    <section class="book-page-qr-block" aria-label="公众号二维码">
+      <p class="book-page-qr-title">关注公众号</p>
+      <div class="book-page-qr-image-link book-page-qr-image-frame">
+        <img
+          class="book-page-qr-image"
+          src="/images/gzh.png"
+          alt="公众号二维码"
+          loading="lazy"
+          decoding="async"
+        >
+      </div>
+    </section>
   </section>
 
 
@@ -3813,8 +3802,8 @@ https://github.com/alex-shpak/hugo-book
     </span>
     <span>
     
-      <a href="/dl/chapter05/4557a6f03dec4475/" class="flex align-center">
-        <span>5.1 参数及日志管理</span>
+      <a href="/dl/chapter05/" class="flex align-center">
+        <span>第 5 章 模型训练与复用</span>
         <img src="/icons/forward.svg" class="book-icon" alt="Forward" />
       </a>
     
@@ -3875,24 +3864,41 @@ https://github.com/alex-shpak/hugo-book
 </nav>
 
   
-  <section class="book-page-qr" aria-label="页面二维码">
-    <p class="book-page-qr-title">手机扫码查看</p>
-    <a
-      class="book-page-qr-image-link"
-      href="https://mlwithme.github.io/dl/chapter04/1c24468824274650/"
-      target="_blank"
-      rel="noopener noreferrer"
-      aria-label="打开当前页面链接"
-    >
-      <img
-        class="book-page-qr-image"
-        src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fdl%2Fchapter04%2F1c24468824274650%2F"
-        alt="当前页面链接二维码"
-        loading="lazy"
-        decoding="async"
-        referrerpolicy="no-referrer"
+  <section class="book-page-qr-panel" aria-label="页面二维码与公众号二维码">
+    <section class="book-page-qr-block" aria-label="页面二维码">
+      <p class="book-page-qr-title">微信扫码查看</p>
+      <a
+        class="book-page-qr-image-link"
+        href="https://mlwithme.github.io/dl/chapter04/1c24468824274650/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="打开当前页面链接"
       >
-    </a>
+        <img
+          class="book-page-qr-image"
+          src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fdl%2Fchapter04%2F1c24468824274650%2F"
+          alt="当前页面链接二维码"
+          loading="lazy"
+          decoding="async"
+          referrerpolicy="no-referrer"
+        >
+      </a>
+    </section>
+
+    <div class="book-page-qr-divider" aria-hidden="true"></div>
+
+    <section class="book-page-qr-block" aria-label="公众号二维码">
+      <p class="book-page-qr-title">关注公众号</p>
+      <div class="book-page-qr-image-link book-page-qr-image-frame">
+        <img
+          class="book-page-qr-image"
+          src="/images/gzh.png"
+          alt="公众号二维码"
+          loading="lazy"
+          decoding="async"
+        >
+      </div>
+    </section>
   </section>
 
 

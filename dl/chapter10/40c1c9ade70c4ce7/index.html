@@ -4,84 +4,70 @@
   <!--
 Made with Book Theme
 https://github.com/alex-shpak/hugo-book
--->
-
-<meta charset="UTF-8">
+--><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="description" content="10.19 百川大模型实现# 在10.18节内容中我们详细介绍了Baichuan2模型的推理使用方法以及如何根据我们自己的需要来对基座模型进行微调。在本节内容中我们将进一步详细介绍Baichuan2模型的内部实现细节。由于百川大模型是基于Transformers框架所实现，因此在正式介绍百川大模型的实现原理之前我们先来看一下Transformers中对于基于Transformer解码器的模型在解码时的Key-Value缓存机制。
-10.19.1 解码缓存原理# 根据10.3节内容可知，解码器在解码预测每个时刻时都涉及计算Query与Key之间的注意力权重，并通过对Value的加权求和来生成输出。为了避免在生成序列时的重复计算，特别是在处理长序列时，缓存机制允许解码器存储并复用先前计算的Key和Value。这样一来，相同的查询Query在不同时间步中便能够直接使用之前计算得到的结果，在减少了计算复杂度同时也提高了序列生成过程的速度。
-现在假定我们已经训练得到了一个基于Transformer解码器的生成式模型，且模型的原始输入为一个长度为3的序列，那么它在第4个时刻的解码输出过程便可以通过图10-64来进行表示。
-图 10-64 解码器编码图 在图10-64中，输入序列在经过两个注意力层以后预测得到了第4个时刻的输出。如果是传统的解码方式，那么在解码第5个时刻时将会把原始的输入序列同第4个时刻的输出拼接在一起作为新的输入进行解码预测，后续过程以此类推。可以发现，在这种解码方式中对第$t$个时刻进行解码输出时，前面第$t-1$个时刻的输入都是重复的，而这就导致在自注意力的计算过程中前面第$t-1$个时刻的计算是重复的。
-因此，在基于缓存机制的解码过程中，解码器在对第$t$个时刻进行解码时会直接使用前$t-1$个时刻缓存得到的key_states和value_states来计算第$t$时刻的输出。例如在图10-64所示的过程中，当解码器对第4个时刻进行解码时将会缓存此时计算得到的key_states和values_states并通过一个元组past_key_value进行表示。进一步，解码器在对第5个时刻进行解码时可以通过图10-65所示的过程表示。
-图 10-65 缓存机制解码过程图 如图10-65所示，解码器在对第5个时刻解码时其输入只有第4个时刻的输出，并且会将当前时刻输入经过线性变换计算得到的key_states和values_states同之前缓存的状态拼接起来得到新的key_states和values_states，以此同query_states计算得到第5个时刻的注意力输出。最后，对于第6个时刻的解码输出过程各位读者可以根据图示自行理解，这里就不再赘述。
-在这里，我们还可以通过如下示例代码来验证Baichuan2模型中解码器的输出结果：
-1 def test_BaichuanModel(): 2 config = BaichuanConfig.from_pretrained(&#39;./Baichuan2_7B_Chat&#39;) 3 model = BaichuanModel(config) 4 past_key_values = None 5 inp = torch.randint(0, 100, [1, 3]) 6 for i in range(4,7): 7 print(f&#34;第{i}个时刻输出: &#34;) 8 result = model(inp, past_key_values=past_key_values) 9 print(f&#34;last_hidden_state的形状: {result.last_hidden_state.shape}&#34;) 10 past_key_values = result.past_key_values 11 print(f&#34;len(past_key_values): {len(past_key_values)}&#34;) 12 print(f&#34;len(past_key_values[0]: {len(past_key_values[0])}&#34;) 13 print(f&#34;past_key_values[0][0].shape: {past_key_values[0][0].shape}&#34;) 14 inp = torch.randint(0, 100, [1, 1])在上述代码中，第2~3行是根据本地配置文件实例化一个BaichuanModel类对象。第7~14行便是模拟解码器的解码输出过程。上述代码运行结束以后便会得到如下输出内容。
-1 第4个时刻输出： 2 last_hidden_state的形状: torch.Size([1, 3, 4096]) 3 len(past_key_values): 32 4 len(past_key_values[0]: 2 5 past_key_values[0][0].shape: torch.Size([1, 32, 3, 4096]) 6 第5个时刻输出： 7 last_hidden_state的形状: torch.Size([1, 1, 4096]) 8 len(past_key_values): 32 9 len(past_key_values[0]: 2 10 past_key_values[0][0].shape: torch.Size([1, 32, 4, 4096]) 11 第6个时刻输出： 12 last_hidden_state的形状: torch.Size([1, 1, 4096]) 13 len(past_key_values): 32 14 len(past_key_values[0]: 2 15 past_key_values[0][0].shape: torch.Size([1, 32, 5, 4096])在上述输出结果中，第2行表示对原始输入编码结果的输出，形状为[batch_size, seq_len, hidden_size]，后面再通过一个分类层便可以得到第4个时刻的预测输出。第3~5行分别表示past_key_values缓存了32个注意力层中每一层的键值对，且形状为[batch_size, num_heads, seq_len, hidden_size]。第7~10行分别是第5个时刻的输出，以及past_key_values缓存结果，可以发现对于每一层中的键值序列其长度已经由3增加到了4，因为多了本层键值对的缓存。上述完整示例代码可参见Code/Chapter10/C07_BaiChuan2/main.py文件。这里需要提醒各位读者的是，当你们在学习运行上述示例代码时，可以把配置文件中的维度、层数、多头个数等设置小一点，这样就能快速验证结果。
-">
+<meta name="description" content="本节围绕百川大模型实现展开，重点介绍解码缓存原理与解码层实现等内容。">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
 <meta name="color-scheme" content="light dark">
+<meta name="robots" content="index,follow,max-image-preview:large">
 
 
 
 
-
-
-
-  
-
-
-
-  
 
 <meta property="og:url" content="https://mlwithme.github.io/dl/chapter10/40c1c9ade70c4ce7/">
 <meta property="og:site_name" content="《从零学AI指南手册》">
 <meta property="og:title" content="10.19 百川大模型实现">
-<meta property="og:description" content="10.19 百川大模型实现# 在10.18节内容中我们详细介绍了Baichuan2模型的推理使用方法以及如何根据我们自己的需要来对基座模型进行微调。在本节内容中我们将进一步详细介绍Baichuan2模型的内部实现细节。由于百川大模型是基于Transformers框架所实现，因此在 …">
+<meta property="og:description" content="本节围绕百川大模型实现展开，重点介绍解码缓存原理与解码层实现等内容。">
 <meta property="og:locale" content="zh_CN">
 <meta property="og:type" content="article">
-<meta property="og:image" content="https://mlwithme.github.io/images/dl/logo.jpg">
-<meta property="og:image:url" content="https://mlwithme.github.io/images/dl/logo.jpg">
-<meta property="og:image:secure_url" content="https://mlwithme.github.io/images/dl/logo.jpg">
-<meta property="og:image:width" content="1272">
-<meta property="og:image:height" content="1272">
-<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image" content="https://mlwithme.github.io/favicon.png">
+<meta property="og:image:url" content="https://mlwithme.github.io/favicon.png">
+<meta property="og:image:secure_url" content="https://mlwithme.github.io/favicon.png">
+<meta property="og:image:width" content="759">
+<meta property="og:image:height" content="759">
+<meta property="og:image:type" content="image/png">
 <meta property="og:image:alt" content="《从零学AI指南手册》 - 10.19 百川大模型实现">
 
   <meta property="article:section" content="dl">
+  
+    <meta property="article:published_time" content="2026-06-22T17:10:22&#43;08:00">
+  
+  
+    <meta property="article:modified_time" content="2026-06-22T21:25:25&#43;08:00">
+  
+  
 
 
-
-	<meta itemprop="name" content="10.19 百川大模型实现">
-	<meta itemprop="description" content="10.19 百川大模型实现# 在10.18节内容中我们详细介绍了Baichuan2模型的推理使用方法以及如何根据我们自己的需要来对基座模型进行微调。在本节内容中我们将进一步详细介绍Baichuan2模型的内部实现细节。由于百川大模型是基于Transformers框架所实现，因此在正式介绍百川大模型的实现原理之前我们先来看一下Transformers中对于基于Transformer解码器的模型在解码时的Key-Value缓存机制。
-10.19.1 解码缓存原理# 根据10.3节内容可知，解码器在解码预测每个时刻时都涉及计算Query与Key之间的注意力权重，并通过对Value的加权求和来生成输出。为了避免在生成序列时的重复计算，特别是在处理长序列时，缓存机制允许解码器存储并复用先前计算的Key和Value。这样一来，相同的查询Query在不同时间步中便能够直接使用之前计算得到的结果，在减少了计算复杂度同时也提高了序列生成过程的速度。
-现在假定我们已经训练得到了一个基于Transformer解码器的生成式模型，且模型的原始输入为一个长度为3的序列，那么它在第4个时刻的解码输出过程便可以通过图10-64来进行表示。
-图 10-64 解码器编码图 在图10-64中，输入序列在经过两个注意力层以后预测得到了第4个时刻的输出。如果是传统的解码方式，那么在解码第5个时刻时将会把原始的输入序列同第4个时刻的输出拼接在一起作为新的输入进行解码预测，后续过程以此类推。可以发现，在这种解码方式中对第$t$个时刻进行解码输出时，前面第$t-1$个时刻的输入都是重复的，而这就导致在自注意力的计算过程中前面第$t-1$个时刻的计算是重复的。
-因此，在基于缓存机制的解码过程中，解码器在对第$t$个时刻进行解码时会直接使用前$t-1$个时刻缓存得到的key_states和value_states来计算第$t$时刻的输出。例如在图10-64所示的过程中，当解码器对第4个时刻进行解码时将会缓存此时计算得到的key_states和values_states并通过一个元组past_key_value进行表示。进一步，解码器在对第5个时刻进行解码时可以通过图10-65所示的过程表示。
-图 10-65 缓存机制解码过程图 如图10-65所示，解码器在对第5个时刻解码时其输入只有第4个时刻的输出，并且会将当前时刻输入经过线性变换计算得到的key_states和values_states同之前缓存的状态拼接起来得到新的key_states和values_states，以此同query_states计算得到第5个时刻的注意力输出。最后，对于第6个时刻的解码输出过程各位读者可以根据图示自行理解，这里就不再赘述。
-在这里，我们还可以通过如下示例代码来验证Baichuan2模型中解码器的输出结果：
-1 def test_BaichuanModel(): 2 config = BaichuanConfig.from_pretrained(&#39;./Baichuan2_7B_Chat&#39;) 3 model = BaichuanModel(config) 4 past_key_values = None 5 inp = torch.randint(0, 100, [1, 3]) 6 for i in range(4,7): 7 print(f&#34;第{i}个时刻输出: &#34;) 8 result = model(inp, past_key_values=past_key_values) 9 print(f&#34;last_hidden_state的形状: {result.last_hidden_state.shape}&#34;) 10 past_key_values = result.past_key_values 11 print(f&#34;len(past_key_values): {len(past_key_values)}&#34;) 12 print(f&#34;len(past_key_values[0]: {len(past_key_values[0])}&#34;) 13 print(f&#34;past_key_values[0][0].shape: {past_key_values[0][0].shape}&#34;) 14 inp = torch.randint(0, 100, [1, 1])在上述代码中，第2~3行是根据本地配置文件实例化一个BaichuanModel类对象。第7~14行便是模拟解码器的解码输出过程。上述代码运行结束以后便会得到如下输出内容。
-1 第4个时刻输出： 2 last_hidden_state的形状: torch.Size([1, 3, 4096]) 3 len(past_key_values): 32 4 len(past_key_values[0]: 2 5 past_key_values[0][0].shape: torch.Size([1, 32, 3, 4096]) 6 第5个时刻输出： 7 last_hidden_state的形状: torch.Size([1, 1, 4096]) 8 len(past_key_values): 32 9 len(past_key_values[0]: 2 10 past_key_values[0][0].shape: torch.Size([1, 32, 4, 4096]) 11 第6个时刻输出： 12 last_hidden_state的形状: torch.Size([1, 1, 4096]) 13 len(past_key_values): 32 14 len(past_key_values[0]: 2 15 past_key_values[0][0].shape: torch.Size([1, 32, 5, 4096])在上述输出结果中，第2行表示对原始输入编码结果的输出，形状为[batch_size, seq_len, hidden_size]，后面再通过一个分类层便可以得到第4个时刻的预测输出。第3~5行分别表示past_key_values缓存了32个注意力层中每一层的键值对，且形状为[batch_size, num_heads, seq_len, hidden_size]。第7~10行分别是第5个时刻的输出，以及past_key_values缓存结果，可以发现对于每一层中的键值序列其长度已经由3增加到了4，因为多了本层键值对的缓存。上述完整示例代码可参见Code/Chapter10/C07_BaiChuan2/main.py文件。这里需要提醒各位读者的是，当你们在学习运行上述示例代码时，可以把配置文件中的维度、层数、多头个数等设置小一点，这样就能快速验证结果。">
-	<meta itemprop="wordCount" content="431">
+<script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"WebSite","description":"面向机器学习、深度学习与 AI Agent 的中文系统化学习手册，包含原理讲解、代码示例与实战案例。","inLanguage":"zh_CN","name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
+  </script>
+  <script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.github.io/favicon.png"},"name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
+  </script><script type="application/ld+json">
+      {"@context":"https://schema.org","@type":"Article","articleSection":"dl","author":{"@type":"Person","name":"WangCheng","url":"https://mlwithme.github.io/author/"},"dateModified":"2026-06-22T21:25:25+08:00","datePublished":"2026-06-22T17:10:22+08:00","description":"本节围绕百川大模型实现展开，重点介绍解码缓存原理与解码层实现等内容。","headline":"10.19 百川大模型实现","image":["https://mlwithme.github.io/favicon.png"],"inLanguage":"zh_CN","mainEntityOfPage":"https://mlwithme.github.io/dl/chapter10/40c1c9ade70c4ce7/","publisher":{"@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.github.io/favicon.png"},"name":"《从零学AI指南手册》"},"url":"https://mlwithme.github.io/dl/chapter10/40c1c9ade70c4ce7/"}
+    </script><script type="application/ld+json">
+      {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","item":"https://mlwithme.github.io/","name":"《从零学AI指南手册》","position":1},{"@type":"ListItem","item":"https://mlwithme.github.io/dl/","name":"深度学习","position":2},{"@type":"ListItem","item":"https://mlwithme.github.io/dl/chapter10/","name":"第10章 现代神经网络","position":3},{"@type":"ListItem","item":"https://mlwithme.github.io/dl/chapter10/40c1c9ade70c4ce7/","name":"10.19 百川大模型实现","position":4}]}
+    </script>
 
 <title>10.19 百川大模型实现 • 《从零学AI指南手册》</title>
 <link rel="icon" href="/favicon.png" >
 <link rel="manifest" href="/manifest.json">
 <link rel="canonical" href="https://mlwithme.github.io/dl/chapter10/40c1c9ade70c4ce7/">
-<link rel="stylesheet" href="/book.min.a3b3c189ec36eda25846e6a5241268b0c27b5b76ed9c0b34b9b3e6d3cae2a18c.css" integrity="sha256-o7PBiew27aJYRualJBJosMJ7W3btnAs0ubPm08rioYw=" crossorigin="anonymous">
-
-
-  <script defer type="module" src="/en.search.min.d6b14dbcd48978b2c41611d06e5387dc896ddf705e423dd9152973bfd6c6096a.js" integrity="sha256-1rFNvNSJeLLEFhHQblOH3Ilt33BeQj3ZFSlzv9bGCWo=" crossorigin="anonymous"></script>
+<link rel="stylesheet" href="/book.min.63f4337331e9703a72f247b55f39b42ed5a3770674e2bf6810d5a1e51b89666a.css" integrity="sha256-Y/QzczHpcDpy8ke1Xzm0LtWjdwZ04r9oENWh5RuJZmo=" crossorigin="anonymous">
+  <script defer type="module" src="/en.search.min.d7ce42533465ddddc9ab3ccfca8c2773fb6595a39dc2b81fb2fea04e304dec79.js" integrity="sha256-185CUzRl3d3JqzzPyownc/tllaOdwrgfsv6gTjBN7Hk=" crossorigin="anonymous"></script>
 
   
 
-<meta property="og:image" content="https://mlwithme.github.io/images/dl/logo.jpg">
-<meta property="og:image:secure_url" content="https://mlwithme.github.io/images/dl/logo.jpg">
-<meta property="og:image:width" content="1272">
-<meta property="og:image:height" content="1272">
-<meta property="og:image:type" content="image/jpeg">
+
+
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:image" content="https://mlwithme.github.io/images/dl/logo.jpg">
+<meta name="twitter:title" content="10.19 百川大模型实现">
+<meta name="twitter:description" content="本节围绕百川大模型实现展开，重点介绍解码缓存原理与解码层实现等内容。">
+<meta name="twitter:url" content="https://mlwithme.github.io/dl/chapter10/40c1c9ade70c4ce7/">
+<meta name="twitter:image" content="https://mlwithme.github.io/favicon.png">
+<meta name="twitter:image:alt" content="《从零学AI指南手册》 - 10.19 百川大模型实现">
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-23SZ6E8VY7"></script>
 <script>
   window.dataLayer = window.dataLayer || [];
@@ -136,7 +122,7 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <a>
+    <a href="/agent/" class="">
       大模型Agent开发</a>
   
 
@@ -152,7 +138,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-279cf10e5100caa4f65ba3f7dd8888a4" class="toggle"  />
     <label for="section-279cf10e5100caa4f65ba3f7dd8888a4" class="flex">
-      <a role="button" class="">
+      <a href="/agent/chapter01/" class="">
         第 1 章 RAG 基础概念</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -203,7 +189,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-83c662c2764f1c19f8005eab77fee110" class="toggle"  />
     <label for="section-83c662c2764f1c19f8005eab77fee110" class="flex">
-      <a role="button" class="">
+      <a href="/agent/chapter02/" class="">
         第 2 章 大模型接入与使用</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -282,7 +268,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-1e583d7a26333453241d87c5c16592bd" class="toggle"  />
     <label for="section-1e583d7a26333453241d87c5c16592bd" class="flex">
-      <a role="button" class="">
+      <a href="/agent/chapter03/" class="">
         第 3 章 文档标准化与语义检索</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -389,7 +375,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="toggle"  />
     <label for="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="flex">
-      <a role="button" class="">
+      <a href="/agent/chapter04/" class="">
         第 4 章 RAG 与 Agent</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -555,7 +541,7 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <a>
+    <a href="/dl/" class="">
       深度学习</a>
   
 
@@ -585,7 +571,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-cf7621e8efb1f3153eaca44a113dcdb9" class="toggle"  />
     <label for="section-cf7621e8efb1f3153eaca44a113dcdb9" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter01/" class="">
         第 1 章 深度学习简介</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -650,7 +636,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-f9bf1a68c19405769f9c4a1495708a55" class="toggle"  />
     <label for="section-f9bf1a68c19405769f9c4a1495708a55" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter02/" class="">
         第 2 章 环境配置</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -715,7 +701,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="toggle"  />
     <label for="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter03/" class="">
         第 3 章 深度学习基础</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -920,7 +906,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-7a12cee83820a928df00362d70804a97" class="toggle"  />
     <label for="section-7a12cee83820a928df00362d70804a97" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter04/" class="">
         第 4 章 卷积神经网络</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1083,7 +1069,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-be9addfd3a15c372d609d09cabb94159" class="toggle"  />
     <label for="section-be9addfd3a15c372d609d09cabb94159" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter05/" class="">
         第 5 章 模型训练与复用</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1204,7 +1190,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="toggle"  />
     <label for="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter06/" class="">
         第 6 章 模型优化方法</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1367,7 +1353,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-517b751d7c44a7ac77d25d295ed44271" class="toggle"  />
     <label for="section-517b751d7c44a7ac77d25d295ed44271" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter07/" class="">
         第 7 章 循环神经网络</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1474,7 +1460,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-b9b861f64ba32bc68dfb977497de37d9" class="toggle"  />
     <label for="section-b9b861f64ba32bc68dfb977497de37d9" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter08/" class="">
         第 8 章 时序与模型融合</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1581,7 +1567,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-e54a1e28b1438b8266637bcb8dac1a44" class="toggle"  />
     <label for="section-e54a1e28b1438b8266637bcb8dac1a44" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter09/" class="">
         第 9 章 自然语言处理</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1772,7 +1758,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-f6636b2f9dc1df93b9fa64dd201716d9" class="toggle" checked />
     <label for="section-f6636b2f9dc1df93b9fa64dd201716d9" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter10/" class="">
         第10章 现代神经网络</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2078,7 +2064,7 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <a>
+    <a href="/ml/" class="">
       机器学习</a>
   
 
@@ -2108,7 +2094,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-48f56957e94e3cf66f3022103a7dd0ff" class="toggle"  />
     <label for="section-48f56957e94e3cf66f3022103a7dd0ff" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter01/" class="">
         第 1 章 环境配置</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2159,7 +2145,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-56a896338a1c41249d22a3efa0e0063c" class="toggle"  />
     <label for="section-56a896338a1c41249d22a3efa0e0063c" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter02/" class="">
         第 2 章 线性回归</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2280,7 +2266,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-ccd0dc9386ea80613d4cedf91b30058d" class="toggle"  />
     <label for="section-ccd0dc9386ea80613d4cedf91b30058d" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter03/" class="">
         第 3 章 逻辑回归</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2373,7 +2359,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="toggle"  />
     <label for="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter04/" class="">
         第 4 章 模型的改善与泛化</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2494,7 +2480,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-40f463d9d502d24b86ea6120b7030123" class="toggle"  />
     <label for="section-40f463d9d502d24b86ea6120b7030123" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter05/" class="">
         第 5 章 K近邻</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2601,7 +2587,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-5a460dc18f1e79253296cf2cd0498446" class="toggle"  />
     <label for="section-5a460dc18f1e79253296cf2cd0498446" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter06/" class="">
         第 6 章 文本特征与模型复用</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2694,7 +2680,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-96f45a8b8c8b75adc70c78026d93dbf6" class="toggle"  />
     <label for="section-96f45a8b8c8b75adc70c78026d93dbf6" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter07/" class="">
         第 7 章 朴素贝叶斯</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2801,7 +2787,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-22476e49d5058c3e5e7e7366b7ab676f" class="toggle"  />
     <label for="section-22476e49d5058c3e5e7e7366b7ab676f" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter08/" class="">
         第 8 章 决策树</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2950,7 +2936,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-2feb6a51cabb61dba860f45c1881386b" class="toggle"  />
     <label for="section-2feb6a51cabb61dba860f45c1881386b" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter09/" class="">
         第 9 章 集成学习与提升算法</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -3071,7 +3057,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-938ae119c3849b03ccb6f91cef4243dd" class="toggle"  />
     <label for="section-938ae119c3849b03ccb6f91cef4243dd" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter10/" class="">
         第 10 章 支持向量机</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -3248,7 +3234,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-9f4d9786d4ab755fde42c64d09b0d026" class="toggle"  />
     <label for="section-9f4d9786d4ab755fde42c64d09b0d026" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter11/" class="">
         第 11 章 聚类分析</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -3425,7 +3411,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-d5e78c45312818bb3abd5c19c858f7e5" class="toggle"  />
     <label for="section-d5e78c45312818bb3abd5c19c858f7e5" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter12/" class="">
         第 12 章 降维算法</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -3476,7 +3462,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-a82b41bb7eb95af72bc11e8a3d668acd" class="toggle"  />
     <label for="section-a82b41bb7eb95af72bc11e8a3d668acd" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter13/" class="">
         第 13 章 自训练与标签传播</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -3594,24 +3580,41 @@ https://github.com/alex-shpak/hugo-book
 </nav>
 
   
-  <section class="book-page-qr" aria-label="页面二维码">
-    <p class="book-page-qr-title">手机扫码查看</p>
-    <a
-      class="book-page-qr-image-link"
-      href="https://mlwithme.github.io/dl/chapter10/40c1c9ade70c4ce7/"
-      target="_blank"
-      rel="noopener noreferrer"
-      aria-label="打开当前页面链接"
-    >
-      <img
-        class="book-page-qr-image"
-        src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fdl%2Fchapter10%2F40c1c9ade70c4ce7%2F"
-        alt="当前页面链接二维码"
-        loading="lazy"
-        decoding="async"
-        referrerpolicy="no-referrer"
+  <section class="book-page-qr-panel" aria-label="页面二维码与公众号二维码">
+    <section class="book-page-qr-block" aria-label="页面二维码">
+      <p class="book-page-qr-title">微信扫码查看</p>
+      <a
+        class="book-page-qr-image-link"
+        href="https://mlwithme.github.io/dl/chapter10/40c1c9ade70c4ce7/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="打开当前页面链接"
       >
-    </a>
+        <img
+          class="book-page-qr-image"
+          src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fdl%2Fchapter10%2F40c1c9ade70c4ce7%2F"
+          alt="当前页面链接二维码"
+          loading="lazy"
+          decoding="async"
+          referrerpolicy="no-referrer"
+        >
+      </a>
+    </section>
+
+    <div class="book-page-qr-divider" aria-hidden="true"></div>
+
+    <section class="book-page-qr-block" aria-label="公众号二维码">
+      <p class="book-page-qr-title">关注公众号</p>
+      <div class="book-page-qr-image-link book-page-qr-image-frame">
+        <img
+          class="book-page-qr-image"
+          src="/images/gzh.png"
+          alt="公众号二维码"
+          loading="lazy"
+          decoding="async"
+        >
+      </div>
+    </section>
   </section>
 
 
@@ -3820,24 +3823,41 @@ $$<p>第10~11行是分别计算得到遗忘门和返回多层感知机的输出�
 </nav>
 
   
-  <section class="book-page-qr" aria-label="页面二维码">
-    <p class="book-page-qr-title">手机扫码查看</p>
-    <a
-      class="book-page-qr-image-link"
-      href="https://mlwithme.github.io/dl/chapter10/40c1c9ade70c4ce7/"
-      target="_blank"
-      rel="noopener noreferrer"
-      aria-label="打开当前页面链接"
-    >
-      <img
-        class="book-page-qr-image"
-        src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fdl%2Fchapter10%2F40c1c9ade70c4ce7%2F"
-        alt="当前页面链接二维码"
-        loading="lazy"
-        decoding="async"
-        referrerpolicy="no-referrer"
+  <section class="book-page-qr-panel" aria-label="页面二维码与公众号二维码">
+    <section class="book-page-qr-block" aria-label="页面二维码">
+      <p class="book-page-qr-title">微信扫码查看</p>
+      <a
+        class="book-page-qr-image-link"
+        href="https://mlwithme.github.io/dl/chapter10/40c1c9ade70c4ce7/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="打开当前页面链接"
       >
-    </a>
+        <img
+          class="book-page-qr-image"
+          src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fdl%2Fchapter10%2F40c1c9ade70c4ce7%2F"
+          alt="当前页面链接二维码"
+          loading="lazy"
+          decoding="async"
+          referrerpolicy="no-referrer"
+        >
+      </a>
+    </section>
+
+    <div class="book-page-qr-divider" aria-hidden="true"></div>
+
+    <section class="book-page-qr-block" aria-label="公众号二维码">
+      <p class="book-page-qr-title">关注公众号</p>
+      <div class="book-page-qr-image-link book-page-qr-image-frame">
+        <img
+          class="book-page-qr-image"
+          src="/images/gzh.png"
+          alt="公众号二维码"
+          loading="lazy"
+          decoding="async"
+        >
+      </div>
+    </section>
   </section>
 
 

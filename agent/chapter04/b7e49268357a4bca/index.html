@@ -4,92 +4,70 @@
   <!--
 Made with Book Theme
 https://github.com/alex-shpak/hugo-book
--->
-
-<meta charset="UTF-8">
+--><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="description" content="4.5 复杂问题拆解与ReAct框架# 在上一小节的内容中，我们直接使用了 LangChain 中的 create_agent() 来创建智能体，并让它能够在一次请求中多次调用工具，所以即便是一个用户请求中包含有多个子问题，它也能够持续迭代，直到得到最终的答案。站在使用者的角度来看，这一切似乎合情合理也应该如此，但如果继续追问其内部机制就会发现，这背后对应的正是 Agent 领域中最重要的一类思想。
-4.5.1 ReAct 出现的动机# 在不借助工具的情况下，大模型处理问题的方式通常可以概括为“一次输入，一次输出”。用户给出问题后，模型基于参数中已经学到的知识直接生成答案，其流程如图4-6所示。
-图 4-6 大模型处理问题流程 根据图4-6可知，虽然这种方式在简单问答中已经足够有效，但它有两个明显的局限：
-第一，模型无法主动接触外部世界。如果问题依赖最新信息、私有知识库或运行时环境，模型即使具备较强的语言能力，也只能依赖训练阶段形成的内部记忆进行猜测。当然，这一点我们已经可以通过外部工具来解决。
-第二，模型虽然可以在一次回答中表现出一定的推理能力，但这种推理是“封闭的”。一旦中间某一步判断错误，后续答案往往会沿着错误方向继续展开，从而产生事实性幻觉或不可靠的结论。
-例如，在上一节内容的示例中，当用户提出“本书主角是谁？找到主角后，再继续说明他的出生背景”这类问题时，模型实际上需要完成多个连续动作：先判断是否需要检索，再提炼一个更适合搜索的查询词，然后读取检索结果，最后根据新得到的信息决定下一步还要不要继续查找。显然，这已经不是一次性生成答案能够稳定完成的任务，而是一个需要多轮中间决策的过程。
-为了解决这一问题，研究员姚顺雨[1] 在2022年10月提出了推理与行动（Reasoning and Acting, ReAct）决策框架，它的核心出发点是不要强迫模型一次性给出最终答案，而是允许模型在推理过程中主动采取行动，并根据行动得到的观察结果继续推进后续推理，直到得到最终答案。
-4.5.2 ReAct 决策原理# 在推理与行动中，“推理”表示模型围绕当前任务形成的中间思考，“行动”则表示模型基于当前判断采取的动作，例如搜索、查询数据库、调用函数或访问工具。如果只看定义，ReAct 很容易被误解为让模型先想一想再调工具，但它真正重要的地方不在于“先想后做”这4个字，而在于它把复杂任务拆成了一个可以反复循环的过程，如图4-7所示。
-图 4-7 ReAct 决策原理 在图4-7中，思考（Thought）表示模型的中间推理，它的作用是分解目标、规划下一步或解释为什么要调用某个工具；行动（Action）表示模型决定执行的动作，通常对应一次工具调用；观察（Observation）表示工具执行后的结果，它会重新进入上下文，成为下一轮推理的依据。
-进一步，根据图4-7可知，在整个循环中模型并不会立即产生最终答案，而是首先会根据当前任务形成一个中间判断，决定是否需要调用某个工具，即思考过程；然后调用工具并返回结果，即行动过程；其次根据工具返回的结果修正后续判断，即观察过程；最后在条件满足时再输出最终答案。也正因为如此，我们在第4.4节看到的 RAG Agent 才能够先拆问题、再检索、再继续检索，最后组合出完整答案。
-从这个角度看，ReAct 并不是一个单独的工具调用技巧，而是一种围绕推理驱动行动、行动反哺推理而组织起来的任务求解范式。
-4.5.3 ReAct 的基本执行流程# 为了更直观地理解这一点，我们来看一个简单的例子。假设用户的问题是：“《哈利波特》的作者出生在哪个国家？” 此时模型如果直接回答，完全可能因为模型能力或记忆偏差或知识不完整而出错，但是在 ReAct 框架下，更合理的过程应当是：
-Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要先确认《哈利波特》的作者是谁。 Action: Search(&#34;哈利波特 作者&#34;) Observation: J.K. Rowling Thought: 现在我已经知道作者，需要继续查询她的出生国家。 Action: Search(&#34;J.K. Rowling 出生国家&#34;) Observation: United Kingdom Final Answer: 《哈利波特》的作者是 J.K. Rowling，出生于英国。从上述过程可以看出，ReAct 并不要求模型一开始就具备完整答案，而是允许它在中途通过行动补充信息。这样模型的推理不再完全依赖内部记忆，而是可以在关键节点引入外部证据；其次，整个求解过程具有更强的可解释性，我们不仅看到最终答案，也能看到模型为何进行了某一步操作，以及这一步操作返回了什么信息。
-">
+<meta name="description" content="本节中，我们从前面已经使用过的 create_agent() 出发，回过头解释了它背后的方法论基础。可以看到，ReAct 的核心并不只是一个论文中的术语，而是一种非常具体的任务求解方式——让模型在推理过程中主动采取行动，再根据行动结果继续推理，直到得到最终答案。">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
 <meta name="color-scheme" content="light dark">
+<meta name="robots" content="index,follow,max-image-preview:large">
 
 
 
 
-
-
-
-  
-
-
-
-  
 
 <meta property="og:url" content="https://mlwithme.github.io/agent/chapter04/b7e49268357a4bca/">
 <meta property="og:site_name" content="《从零学AI指南手册》">
 <meta property="og:title" content="4.5 复杂问题拆解与ReAct框架">
-<meta property="og:description" content="4.5 复杂问题拆解与ReAct框架# 在上一小节的内容中，我们直接使用了 LangChain 中的 create_agent() 来创建智能体，并让它能够在一次请求中多次调用工具，所以即便是一个用户请求中包含有多个子问题，它也能够持续迭代，直到得到最终的答案。站在使用者的角度来 …">
+<meta property="og:description" content="本节中，我们从前面已经使用过的 create_agent() 出发，回过头解释了它背后的方法论基础。可以看到，ReAct 的核心并不只是一个论文中的术语，而是一种非常具体的任务求解方式——让模型在推理过程中主动采取行动，再根据行动结果继续推理，直到得到最终答案。">
 <meta property="og:locale" content="zh_CN">
 <meta property="og:type" content="article">
-<meta property="og:image" content="https://mlwithme.github.io/images/dl/logo.jpg">
-<meta property="og:image:url" content="https://mlwithme.github.io/images/dl/logo.jpg">
-<meta property="og:image:secure_url" content="https://mlwithme.github.io/images/dl/logo.jpg">
-<meta property="og:image:width" content="1272">
-<meta property="og:image:height" content="1272">
-<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image" content="https://mlwithme.github.io/favicon.png">
+<meta property="og:image:url" content="https://mlwithme.github.io/favicon.png">
+<meta property="og:image:secure_url" content="https://mlwithme.github.io/favicon.png">
+<meta property="og:image:width" content="759">
+<meta property="og:image:height" content="759">
+<meta property="og:image:type" content="image/png">
 <meta property="og:image:alt" content="《从零学AI指南手册》 - 4.5 复杂问题拆解与ReAct框架">
 
   <meta property="article:section" content="agent">
+  
+    <meta property="article:published_time" content="2026-06-22T17:10:22&#43;08:00">
+  
+  
+    <meta property="article:modified_time" content="2026-06-22T17:10:22&#43;08:00">
+  
+  
 
 
-
-	<meta itemprop="name" content="4.5 复杂问题拆解与ReAct框架">
-	<meta itemprop="description" content="4.5 复杂问题拆解与ReAct框架# 在上一小节的内容中，我们直接使用了 LangChain 中的 create_agent() 来创建智能体，并让它能够在一次请求中多次调用工具，所以即便是一个用户请求中包含有多个子问题，它也能够持续迭代，直到得到最终的答案。站在使用者的角度来看，这一切似乎合情合理也应该如此，但如果继续追问其内部机制就会发现，这背后对应的正是 Agent 领域中最重要的一类思想。
-4.5.1 ReAct 出现的动机# 在不借助工具的情况下，大模型处理问题的方式通常可以概括为“一次输入，一次输出”。用户给出问题后，模型基于参数中已经学到的知识直接生成答案，其流程如图4-6所示。
-图 4-6 大模型处理问题流程 根据图4-6可知，虽然这种方式在简单问答中已经足够有效，但它有两个明显的局限：
-第一，模型无法主动接触外部世界。如果问题依赖最新信息、私有知识库或运行时环境，模型即使具备较强的语言能力，也只能依赖训练阶段形成的内部记忆进行猜测。当然，这一点我们已经可以通过外部工具来解决。
-第二，模型虽然可以在一次回答中表现出一定的推理能力，但这种推理是“封闭的”。一旦中间某一步判断错误，后续答案往往会沿着错误方向继续展开，从而产生事实性幻觉或不可靠的结论。
-例如，在上一节内容的示例中，当用户提出“本书主角是谁？找到主角后，再继续说明他的出生背景”这类问题时，模型实际上需要完成多个连续动作：先判断是否需要检索，再提炼一个更适合搜索的查询词，然后读取检索结果，最后根据新得到的信息决定下一步还要不要继续查找。显然，这已经不是一次性生成答案能够稳定完成的任务，而是一个需要多轮中间决策的过程。
-为了解决这一问题，研究员姚顺雨[1] 在2022年10月提出了推理与行动（Reasoning and Acting, ReAct）决策框架，它的核心出发点是不要强迫模型一次性给出最终答案，而是允许模型在推理过程中主动采取行动，并根据行动得到的观察结果继续推进后续推理，直到得到最终答案。
-4.5.2 ReAct 决策原理# 在推理与行动中，“推理”表示模型围绕当前任务形成的中间思考，“行动”则表示模型基于当前判断采取的动作，例如搜索、查询数据库、调用函数或访问工具。如果只看定义，ReAct 很容易被误解为让模型先想一想再调工具，但它真正重要的地方不在于“先想后做”这4个字，而在于它把复杂任务拆成了一个可以反复循环的过程，如图4-7所示。
-图 4-7 ReAct 决策原理 在图4-7中，思考（Thought）表示模型的中间推理，它的作用是分解目标、规划下一步或解释为什么要调用某个工具；行动（Action）表示模型决定执行的动作，通常对应一次工具调用；观察（Observation）表示工具执行后的结果，它会重新进入上下文，成为下一轮推理的依据。
-进一步，根据图4-7可知，在整个循环中模型并不会立即产生最终答案，而是首先会根据当前任务形成一个中间判断，决定是否需要调用某个工具，即思考过程；然后调用工具并返回结果，即行动过程；其次根据工具返回的结果修正后续判断，即观察过程；最后在条件满足时再输出最终答案。也正因为如此，我们在第4.4节看到的 RAG Agent 才能够先拆问题、再检索、再继续检索，最后组合出完整答案。
-从这个角度看，ReAct 并不是一个单独的工具调用技巧，而是一种围绕推理驱动行动、行动反哺推理而组织起来的任务求解范式。
-4.5.3 ReAct 的基本执行流程# 为了更直观地理解这一点，我们来看一个简单的例子。假设用户的问题是：“《哈利波特》的作者出生在哪个国家？” 此时模型如果直接回答，完全可能因为模型能力或记忆偏差或知识不完整而出错，但是在 ReAct 框架下，更合理的过程应当是：
-Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要先确认《哈利波特》的作者是谁。 Action: Search(&#34;哈利波特 作者&#34;) Observation: J.K. Rowling Thought: 现在我已经知道作者，需要继续查询她的出生国家。 Action: Search(&#34;J.K. Rowling 出生国家&#34;) Observation: United Kingdom Final Answer: 《哈利波特》的作者是 J.K. Rowling，出生于英国。从上述过程可以看出，ReAct 并不要求模型一开始就具备完整答案，而是允许它在中途通过行动补充信息。这样模型的推理不再完全依赖内部记忆，而是可以在关键节点引入外部证据；其次，整个求解过程具有更强的可解释性，我们不仅看到最终答案，也能看到模型为何进行了某一步操作，以及这一步操作返回了什么信息。">
-	<meta itemprop="wordCount" content="245">
+<script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"WebSite","description":"面向机器学习、深度学习与 AI Agent 的中文系统化学习手册，包含原理讲解、代码示例与实战案例。","inLanguage":"zh_CN","name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
+  </script>
+  <script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.github.io/favicon.png"},"name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
+  </script><script type="application/ld+json">
+      {"@context":"https://schema.org","@type":"Article","articleSection":"agent","author":{"@type":"Person","name":"WangCheng","url":"https://mlwithme.github.io/author/"},"dateModified":"2026-06-22T17:10:22+08:00","datePublished":"2026-06-22T17:10:22+08:00","description":"本节中，我们从前面已经使用过的 create_agent() 出发，回过头解释了它背后的方法论基础。可以看到，ReAct 的核心并不只是一个论文中的术语，而是一种非常具体的任务求解方式——让模型在推理过程中主动采取行动，再根据行动结果继续推理，直到得到最终答案。","headline":"4.5 复杂问题拆解与ReAct框架","image":["https://mlwithme.github.io/favicon.png"],"inLanguage":"zh_CN","mainEntityOfPage":"https://mlwithme.github.io/agent/chapter04/b7e49268357a4bca/","publisher":{"@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.github.io/favicon.png"},"name":"《从零学AI指南手册》"},"url":"https://mlwithme.github.io/agent/chapter04/b7e49268357a4bca/"}
+    </script><script type="application/ld+json">
+      {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","item":"https://mlwithme.github.io/","name":"《从零学AI指南手册》","position":1},{"@type":"ListItem","item":"https://mlwithme.github.io/agent/","name":"大模型Agent开发","position":2},{"@type":"ListItem","item":"https://mlwithme.github.io/agent/chapter04/","name":"第 4 章 RAG 与 Agent","position":3},{"@type":"ListItem","item":"https://mlwithme.github.io/agent/chapter04/b7e49268357a4bca/","name":"4.5 复杂问题拆解与ReAct框架","position":4}]}
+    </script>
 
 <title>4.5 复杂问题拆解与ReAct框架 • 《从零学AI指南手册》</title>
 <link rel="icon" href="/favicon.png" >
 <link rel="manifest" href="/manifest.json">
 <link rel="canonical" href="https://mlwithme.github.io/agent/chapter04/b7e49268357a4bca/">
-<link rel="stylesheet" href="/book.min.a3b3c189ec36eda25846e6a5241268b0c27b5b76ed9c0b34b9b3e6d3cae2a18c.css" integrity="sha256-o7PBiew27aJYRualJBJosMJ7W3btnAs0ubPm08rioYw=" crossorigin="anonymous">
-
-
-  <script defer type="module" src="/en.search.min.d6b14dbcd48978b2c41611d06e5387dc896ddf705e423dd9152973bfd6c6096a.js" integrity="sha256-1rFNvNSJeLLEFhHQblOH3Ilt33BeQj3ZFSlzv9bGCWo=" crossorigin="anonymous"></script>
+<link rel="stylesheet" href="/book.min.63f4337331e9703a72f247b55f39b42ed5a3770674e2bf6810d5a1e51b89666a.css" integrity="sha256-Y/QzczHpcDpy8ke1Xzm0LtWjdwZ04r9oENWh5RuJZmo=" crossorigin="anonymous">
+  <script defer type="module" src="/en.search.min.d7ce42533465ddddc9ab3ccfca8c2773fb6595a39dc2b81fb2fea04e304dec79.js" integrity="sha256-185CUzRl3d3JqzzPyownc/tllaOdwrgfsv6gTjBN7Hk=" crossorigin="anonymous"></script>
 
   
 
-<meta property="og:image" content="https://mlwithme.github.io/images/dl/logo.jpg">
-<meta property="og:image:secure_url" content="https://mlwithme.github.io/images/dl/logo.jpg">
-<meta property="og:image:width" content="1272">
-<meta property="og:image:height" content="1272">
-<meta property="og:image:type" content="image/jpeg">
+
+
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:image" content="https://mlwithme.github.io/images/dl/logo.jpg">
+<meta name="twitter:title" content="4.5 复杂问题拆解与ReAct框架">
+<meta name="twitter:description" content="本节中，我们从前面已经使用过的 create_agent() 出发，回过头解释了它背后的方法论基础。可以看到，ReAct 的核心并不只是一个论文中的术语，而是一种非常具体的任务求解方式——让模型在推理过程中主动采取行动，再根据行动结果继续推理，直到得到最终答案。">
+<meta name="twitter:url" content="https://mlwithme.github.io/agent/chapter04/b7e49268357a4bca/">
+<meta name="twitter:image" content="https://mlwithme.github.io/favicon.png">
+<meta name="twitter:image:alt" content="《从零学AI指南手册》 - 4.5 复杂问题拆解与ReAct框架">
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-23SZ6E8VY7"></script>
 <script>
   window.dataLayer = window.dataLayer || [];
@@ -144,7 +122,7 @@ Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要
   
 
   
-    <a>
+    <a href="/agent/" class="">
       大模型Agent开发</a>
   
 
@@ -160,7 +138,7 @@ Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要
   
     <input type="checkbox" id="section-279cf10e5100caa4f65ba3f7dd8888a4" class="toggle"  />
     <label for="section-279cf10e5100caa4f65ba3f7dd8888a4" class="flex">
-      <a role="button" class="">
+      <a href="/agent/chapter01/" class="">
         第 1 章 RAG 基础概念</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -211,7 +189,7 @@ Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要
   
     <input type="checkbox" id="section-83c662c2764f1c19f8005eab77fee110" class="toggle"  />
     <label for="section-83c662c2764f1c19f8005eab77fee110" class="flex">
-      <a role="button" class="">
+      <a href="/agent/chapter02/" class="">
         第 2 章 大模型接入与使用</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -290,7 +268,7 @@ Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要
   
     <input type="checkbox" id="section-1e583d7a26333453241d87c5c16592bd" class="toggle"  />
     <label for="section-1e583d7a26333453241d87c5c16592bd" class="flex">
-      <a role="button" class="">
+      <a href="/agent/chapter03/" class="">
         第 3 章 文档标准化与语义检索</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -397,7 +375,7 @@ Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要
   
     <input type="checkbox" id="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="toggle" checked />
     <label for="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="flex">
-      <a role="button" class="">
+      <a href="/agent/chapter04/" class="">
         第 4 章 RAG 与 Agent</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -563,7 +541,7 @@ Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要
   
 
   
-    <a>
+    <a href="/dl/" class="">
       深度学习</a>
   
 
@@ -593,7 +571,7 @@ Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要
   
     <input type="checkbox" id="section-cf7621e8efb1f3153eaca44a113dcdb9" class="toggle"  />
     <label for="section-cf7621e8efb1f3153eaca44a113dcdb9" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter01/" class="">
         第 1 章 深度学习简介</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -658,7 +636,7 @@ Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要
   
     <input type="checkbox" id="section-f9bf1a68c19405769f9c4a1495708a55" class="toggle"  />
     <label for="section-f9bf1a68c19405769f9c4a1495708a55" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter02/" class="">
         第 2 章 环境配置</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -723,7 +701,7 @@ Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要
   
     <input type="checkbox" id="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="toggle"  />
     <label for="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter03/" class="">
         第 3 章 深度学习基础</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -928,7 +906,7 @@ Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要
   
     <input type="checkbox" id="section-7a12cee83820a928df00362d70804a97" class="toggle"  />
     <label for="section-7a12cee83820a928df00362d70804a97" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter04/" class="">
         第 4 章 卷积神经网络</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1091,7 +1069,7 @@ Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要
   
     <input type="checkbox" id="section-be9addfd3a15c372d609d09cabb94159" class="toggle"  />
     <label for="section-be9addfd3a15c372d609d09cabb94159" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter05/" class="">
         第 5 章 模型训练与复用</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1212,7 +1190,7 @@ Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要
   
     <input type="checkbox" id="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="toggle"  />
     <label for="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter06/" class="">
         第 6 章 模型优化方法</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1375,7 +1353,7 @@ Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要
   
     <input type="checkbox" id="section-517b751d7c44a7ac77d25d295ed44271" class="toggle"  />
     <label for="section-517b751d7c44a7ac77d25d295ed44271" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter07/" class="">
         第 7 章 循环神经网络</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1482,7 +1460,7 @@ Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要
   
     <input type="checkbox" id="section-b9b861f64ba32bc68dfb977497de37d9" class="toggle"  />
     <label for="section-b9b861f64ba32bc68dfb977497de37d9" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter08/" class="">
         第 8 章 时序与模型融合</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1589,7 +1567,7 @@ Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要
   
     <input type="checkbox" id="section-e54a1e28b1438b8266637bcb8dac1a44" class="toggle"  />
     <label for="section-e54a1e28b1438b8266637bcb8dac1a44" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter09/" class="">
         第 9 章 自然语言处理</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1780,7 +1758,7 @@ Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要
   
     <input type="checkbox" id="section-f6636b2f9dc1df93b9fa64dd201716d9" class="toggle"  />
     <label for="section-f6636b2f9dc1df93b9fa64dd201716d9" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter10/" class="">
         第10章 现代神经网络</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2086,7 +2064,7 @@ Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要
   
 
   
-    <a>
+    <a href="/ml/" class="">
       机器学习</a>
   
 
@@ -2116,7 +2094,7 @@ Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要
   
     <input type="checkbox" id="section-48f56957e94e3cf66f3022103a7dd0ff" class="toggle"  />
     <label for="section-48f56957e94e3cf66f3022103a7dd0ff" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter01/" class="">
         第 1 章 环境配置</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2167,7 +2145,7 @@ Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要
   
     <input type="checkbox" id="section-56a896338a1c41249d22a3efa0e0063c" class="toggle"  />
     <label for="section-56a896338a1c41249d22a3efa0e0063c" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter02/" class="">
         第 2 章 线性回归</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2288,7 +2266,7 @@ Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要
   
     <input type="checkbox" id="section-ccd0dc9386ea80613d4cedf91b30058d" class="toggle"  />
     <label for="section-ccd0dc9386ea80613d4cedf91b30058d" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter03/" class="">
         第 3 章 逻辑回归</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2381,7 +2359,7 @@ Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要
   
     <input type="checkbox" id="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="toggle"  />
     <label for="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter04/" class="">
         第 4 章 模型的改善与泛化</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2502,7 +2480,7 @@ Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要
   
     <input type="checkbox" id="section-40f463d9d502d24b86ea6120b7030123" class="toggle"  />
     <label for="section-40f463d9d502d24b86ea6120b7030123" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter05/" class="">
         第 5 章 K近邻</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2609,7 +2587,7 @@ Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要
   
     <input type="checkbox" id="section-5a460dc18f1e79253296cf2cd0498446" class="toggle"  />
     <label for="section-5a460dc18f1e79253296cf2cd0498446" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter06/" class="">
         第 6 章 文本特征与模型复用</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2702,7 +2680,7 @@ Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要
   
     <input type="checkbox" id="section-96f45a8b8c8b75adc70c78026d93dbf6" class="toggle"  />
     <label for="section-96f45a8b8c8b75adc70c78026d93dbf6" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter07/" class="">
         第 7 章 朴素贝叶斯</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2809,7 +2787,7 @@ Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要
   
     <input type="checkbox" id="section-22476e49d5058c3e5e7e7366b7ab676f" class="toggle"  />
     <label for="section-22476e49d5058c3e5e7e7366b7ab676f" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter08/" class="">
         第 8 章 决策树</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2958,7 +2936,7 @@ Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要
   
     <input type="checkbox" id="section-2feb6a51cabb61dba860f45c1881386b" class="toggle"  />
     <label for="section-2feb6a51cabb61dba860f45c1881386b" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter09/" class="">
         第 9 章 集成学习与提升算法</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -3079,7 +3057,7 @@ Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要
   
     <input type="checkbox" id="section-938ae119c3849b03ccb6f91cef4243dd" class="toggle"  />
     <label for="section-938ae119c3849b03ccb6f91cef4243dd" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter10/" class="">
         第 10 章 支持向量机</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -3256,7 +3234,7 @@ Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要
   
     <input type="checkbox" id="section-9f4d9786d4ab755fde42c64d09b0d026" class="toggle"  />
     <label for="section-9f4d9786d4ab755fde42c64d09b0d026" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter11/" class="">
         第 11 章 聚类分析</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -3433,7 +3411,7 @@ Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要
   
     <input type="checkbox" id="section-d5e78c45312818bb3abd5c19c858f7e5" class="toggle"  />
     <label for="section-d5e78c45312818bb3abd5c19c858f7e5" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter12/" class="">
         第 12 章 降维算法</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -3484,7 +3462,7 @@ Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要
   
     <input type="checkbox" id="section-a82b41bb7eb95af72bc11e8a3d668acd" class="toggle"  />
     <label for="section-a82b41bb7eb95af72bc11e8a3d668acd" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter13/" class="">
         第 13 章 自训练与标签传播</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -3607,24 +3585,41 @@ Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要
 </nav>
 
   
-  <section class="book-page-qr" aria-label="页面二维码">
-    <p class="book-page-qr-title">手机扫码查看</p>
-    <a
-      class="book-page-qr-image-link"
-      href="https://mlwithme.github.io/agent/chapter04/b7e49268357a4bca/"
-      target="_blank"
-      rel="noopener noreferrer"
-      aria-label="打开当前页面链接"
-    >
-      <img
-        class="book-page-qr-image"
-        src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fagent%2Fchapter04%2Fb7e49268357a4bca%2F"
-        alt="当前页面链接二维码"
-        loading="lazy"
-        decoding="async"
-        referrerpolicy="no-referrer"
+  <section class="book-page-qr-panel" aria-label="页面二维码与公众号二维码">
+    <section class="book-page-qr-block" aria-label="页面二维码">
+      <p class="book-page-qr-title">微信扫码查看</p>
+      <a
+        class="book-page-qr-image-link"
+        href="https://mlwithme.github.io/agent/chapter04/b7e49268357a4bca/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="打开当前页面链接"
       >
-    </a>
+        <img
+          class="book-page-qr-image"
+          src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fagent%2Fchapter04%2Fb7e49268357a4bca%2F"
+          alt="当前页面链接二维码"
+          loading="lazy"
+          decoding="async"
+          referrerpolicy="no-referrer"
+        >
+      </a>
+    </section>
+
+    <div class="book-page-qr-divider" aria-hidden="true"></div>
+
+    <section class="book-page-qr-block" aria-label="公众号二维码">
+      <p class="book-page-qr-title">关注公众号</p>
+      <div class="book-page-qr-image-link book-page-qr-image-frame">
+        <img
+          class="book-page-qr-image"
+          src="/images/gzh.png"
+          alt="公众号二维码"
+          loading="lazy"
+          decoding="async"
+        >
+      </div>
+    </section>
   </section>
 
 
@@ -3815,24 +3810,41 @@ Question: 《哈利波特》的作者出生在哪个国家？ Thought: 我需要
 </nav>
 
   
-  <section class="book-page-qr" aria-label="页面二维码">
-    <p class="book-page-qr-title">手机扫码查看</p>
-    <a
-      class="book-page-qr-image-link"
-      href="https://mlwithme.github.io/agent/chapter04/b7e49268357a4bca/"
-      target="_blank"
-      rel="noopener noreferrer"
-      aria-label="打开当前页面链接"
-    >
-      <img
-        class="book-page-qr-image"
-        src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fagent%2Fchapter04%2Fb7e49268357a4bca%2F"
-        alt="当前页面链接二维码"
-        loading="lazy"
-        decoding="async"
-        referrerpolicy="no-referrer"
+  <section class="book-page-qr-panel" aria-label="页面二维码与公众号二维码">
+    <section class="book-page-qr-block" aria-label="页面二维码">
+      <p class="book-page-qr-title">微信扫码查看</p>
+      <a
+        class="book-page-qr-image-link"
+        href="https://mlwithme.github.io/agent/chapter04/b7e49268357a4bca/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="打开当前页面链接"
       >
-    </a>
+        <img
+          class="book-page-qr-image"
+          src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fagent%2Fchapter04%2Fb7e49268357a4bca%2F"
+          alt="当前页面链接二维码"
+          loading="lazy"
+          decoding="async"
+          referrerpolicy="no-referrer"
+        >
+      </a>
+    </section>
+
+    <div class="book-page-qr-divider" aria-hidden="true"></div>
+
+    <section class="book-page-qr-block" aria-label="公众号二维码">
+      <p class="book-page-qr-title">关注公众号</p>
+      <div class="book-page-qr-image-link book-page-qr-image-frame">
+        <img
+          class="book-page-qr-image"
+          src="/images/gzh.png"
+          alt="公众号二维码"
+          loading="lazy"
+          decoding="async"
+        >
+      </div>
+    </section>
   </section>
 
 

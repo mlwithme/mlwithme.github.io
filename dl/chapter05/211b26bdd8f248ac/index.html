@@ -4,86 +4,70 @@
   <!--
 Made with Book Theme
 https://github.com/alex-shpak/hugo-book
--->
-
-<meta charset="UTF-8">
+--><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="description" content="5.4 模型的迁移学习# 在前面几节内容中，我们详细介绍了PyTorch中模型的保存及载入推理和复用等过程。在有了前期这些基础知识后，接下来我们再来介绍关于模型迁移学习（Transfer Learning）部分的内容。
-5.4.1 迁移学习# 在深度神经网络中由于模型通常都含有大量的可学习参数，所以在训练数据不充分的情况下模型极易出现过拟合或者泛化能力差的情况。而另一方面，数据样本的标注又是一项既耗费时间又耗费财力的工作[6]，尤其是在一些需要业务专家介入的复杂任务标注中。因此，如何利用有限的数据来训练模型便成为了热门的研究方向。受到人类学习的启发——人类在学习并解决一个新问题的时候，总是可以依赖于先前所拥有的经验并迅速迁移到当前的场景中——研究人员开始提出一种两段式的学习框架，即先在一个通用的大规模数据集上训练得到一个预训练模型（Pre-trained Model），然后针对于特定的任务场景再根据少量的标注数据对整个模型进行微调（Fine-tuning），而这也被称为迁移学习。
-在深度学习中迁移学习主要起源于图像处理领域，其背后的理念是如果一个模型是基于足够大且通用的数据集所训练得到，那么该模型将可以有效地充当视觉领域的通用模型，随后便可以直接将这些学习到的模型参数迁移到下游任务中而不必再从头开始训练整个模型[1]。
-在图像处理领域中ImageNet是一个非常著名的大型通用数据集，它是由李飞飞团队于2007年所发起构建的一个项目，包含有超过1400万张手动标注的图片，旨在为世界各地的研究人员提供用于训练大规模物体识别模型的图像数据。[2]。自2010年以来，ImageNet项目每年都举办了一次大规模视觉识别挑战赛（ILSVRC），挑战赛使用了1000个类别的图片用于正确分类和检测目标及场景[3]。如图5-20所示便是ImageNet数据集中的部分图像。
-图 5-20. ImageNet数据集示例图 根据4.2.3节内容可知，越是靠近输出层特征越抽象，越是靠近输入层的特征越具体。因此假如现在有一个开源的图片分类模型A是基于ImageNet数据集训练而来，如果在某任务场景中需要训练另外一个10分类模型B用于汽车型号的分类，那么便可以直接取模型A中的前若干层（靠近输入层）网络作为特征提取器，然后在此基础上再加入一个新的全连接分类层来构造得到模型B完成整个10分类任务，此时称模型A为预训练（Pre-trained）模型。同时，通常来说还可以根据是否让预训练模型中的参数参与整个模型的训练这两种方式来完成模型的迁移学习任务[4]。
-在接下来的内容中，我们将会通过一个实际的示例来对模型的迁移学习过程进行介绍。以下完整示例代码可参见Code/Chapter05/C05_ModelTrans/文件夹。
-5.4.2 模型定义与比较# 在4.4节内容中，我们详细介绍了LeNet5网络模型的原理及现实过程，并且同时根据5.3节的介绍我们也清楚了模型的保存与复用。现在假设有一个LeNet6网络模型，它是在LeNet5的基础上多增加了一个全连接层，此时便可以通过迁移学习将LeNet5模型中的部分参数用于LeNet6模型中。具体地，LeNet6模型结构的实现代码如下所示：
-1 class LeNet6(nn.Module): 2 def __init__(self, ): 3 super(LeNet6, self).__init__() 4 self.conv = nn.Sequential( 5 nn.Conv2d(in_channels=1, out_channels=6, 6 kernel_size=5, padding=2), 7 nn.ReLU(), nn.MaxPool2d(2, 2), nn.Conv2d(6, 16, 5), 8 nn.ReLU(),nn.MaxPool2d(2, 2)) 9 self.fc = nn.Sequential( 10 nn.Flatten(),nn.Linear(16 * 5 * 5, 120), 11 nn.ReLU(),nn.Linear(120, 84),nn.ReLU(), 12 nn.Linear(84, 64),nn.ReLU(),nn.Linear(64, 10))在上述代码中，第1~11行是LeNet5模型的前4层。第12行便是LeNet6模型中新加入的一个网络层。
-在模型定义结束后，便可以输出模型中对应的参数信息。同时，为了完成后续模型的迁移过程这里也将LeNet5保存在本地权重参数载入输出以便两者进行对比，示例代码如下所示：
-1 if __name__ == &#39;__main__&#39;: 2 print(&#34;\n=====Model paras in LeNet6:&#34;) 3 model = LeNet6() 4 for (name, param) in model.state_dict().items(): 5 print(name, param.size()) 6 7 model_save_path = os.path.join(&#39;../C04_ModelSaving&#39;, &#39;lenet5.pt&#39;) 8 print(&#34;\n=====Model paras in LeNet5:&#34;) 9 loaded_paras = torch.load(model_save_path) 10 for (name, param) in loaded_paras.items(): 11 print(name, param.size())在上述代码中，第2~5行是输出LeNet6模型中各个权重参数的名称和形状信息。第7~11行则是载入上一节中持久化保存到本地的LeNet5权重参数，并同时也输出每个参数的名称和形状。
-">
+<meta name="description" content="本节围绕模型的迁移学习展开，重点介绍迁移学习、模型定义与比较和参数微调等内容。">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
 <meta name="color-scheme" content="light dark">
+<meta name="robots" content="index,follow,max-image-preview:large">
 
 
 
 
-
-
-
-  
-
-
-
-  
 
 <meta property="og:url" content="https://mlwithme.github.io/dl/chapter05/211b26bdd8f248ac/">
 <meta property="og:site_name" content="《从零学AI指南手册》">
 <meta property="og:title" content="5.4 模型的迁移学习">
-<meta property="og:description" content="5.4 模型的迁移学习# 在前面几节内容中，我们详细介绍了PyTorch中模型的保存及载入推理和复用等过程。在有了前期这些基础知识后，接下来我们再来介绍关于模型迁移学习（Transfer Learning）部分的内容。 5.4.1 迁移学习# 在深度神经网络中由于模型通常都含有大 …">
+<meta property="og:description" content="本节围绕模型的迁移学习展开，重点介绍迁移学习、模型定义与比较和参数微调等内容。">
 <meta property="og:locale" content="zh_CN">
 <meta property="og:type" content="article">
-<meta property="og:image" content="https://mlwithme.github.io/images/dl/logo.jpg">
-<meta property="og:image:url" content="https://mlwithme.github.io/images/dl/logo.jpg">
-<meta property="og:image:secure_url" content="https://mlwithme.github.io/images/dl/logo.jpg">
-<meta property="og:image:width" content="1272">
-<meta property="og:image:height" content="1272">
-<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image" content="https://mlwithme.github.io/favicon.png">
+<meta property="og:image:url" content="https://mlwithme.github.io/favicon.png">
+<meta property="og:image:secure_url" content="https://mlwithme.github.io/favicon.png">
+<meta property="og:image:width" content="759">
+<meta property="og:image:height" content="759">
+<meta property="og:image:type" content="image/png">
 <meta property="og:image:alt" content="《从零学AI指南手册》 - 5.4 模型的迁移学习">
 
   <meta property="article:section" content="dl">
+  
+    <meta property="article:published_time" content="2026-06-22T17:10:22&#43;08:00">
+  
+  
+    <meta property="article:modified_time" content="2026-06-22T21:25:25&#43;08:00">
+  
+  
 
 
-
-	<meta itemprop="name" content="5.4 模型的迁移学习">
-	<meta itemprop="description" content="5.4 模型的迁移学习# 在前面几节内容中，我们详细介绍了PyTorch中模型的保存及载入推理和复用等过程。在有了前期这些基础知识后，接下来我们再来介绍关于模型迁移学习（Transfer Learning）部分的内容。
-5.4.1 迁移学习# 在深度神经网络中由于模型通常都含有大量的可学习参数，所以在训练数据不充分的情况下模型极易出现过拟合或者泛化能力差的情况。而另一方面，数据样本的标注又是一项既耗费时间又耗费财力的工作[6]，尤其是在一些需要业务专家介入的复杂任务标注中。因此，如何利用有限的数据来训练模型便成为了热门的研究方向。受到人类学习的启发——人类在学习并解决一个新问题的时候，总是可以依赖于先前所拥有的经验并迅速迁移到当前的场景中——研究人员开始提出一种两段式的学习框架，即先在一个通用的大规模数据集上训练得到一个预训练模型（Pre-trained Model），然后针对于特定的任务场景再根据少量的标注数据对整个模型进行微调（Fine-tuning），而这也被称为迁移学习。
-在深度学习中迁移学习主要起源于图像处理领域，其背后的理念是如果一个模型是基于足够大且通用的数据集所训练得到，那么该模型将可以有效地充当视觉领域的通用模型，随后便可以直接将这些学习到的模型参数迁移到下游任务中而不必再从头开始训练整个模型[1]。
-在图像处理领域中ImageNet是一个非常著名的大型通用数据集，它是由李飞飞团队于2007年所发起构建的一个项目，包含有超过1400万张手动标注的图片，旨在为世界各地的研究人员提供用于训练大规模物体识别模型的图像数据。[2]。自2010年以来，ImageNet项目每年都举办了一次大规模视觉识别挑战赛（ILSVRC），挑战赛使用了1000个类别的图片用于正确分类和检测目标及场景[3]。如图5-20所示便是ImageNet数据集中的部分图像。
-图 5-20. ImageNet数据集示例图 根据4.2.3节内容可知，越是靠近输出层特征越抽象，越是靠近输入层的特征越具体。因此假如现在有一个开源的图片分类模型A是基于ImageNet数据集训练而来，如果在某任务场景中需要训练另外一个10分类模型B用于汽车型号的分类，那么便可以直接取模型A中的前若干层（靠近输入层）网络作为特征提取器，然后在此基础上再加入一个新的全连接分类层来构造得到模型B完成整个10分类任务，此时称模型A为预训练（Pre-trained）模型。同时，通常来说还可以根据是否让预训练模型中的参数参与整个模型的训练这两种方式来完成模型的迁移学习任务[4]。
-在接下来的内容中，我们将会通过一个实际的示例来对模型的迁移学习过程进行介绍。以下完整示例代码可参见Code/Chapter05/C05_ModelTrans/文件夹。
-5.4.2 模型定义与比较# 在4.4节内容中，我们详细介绍了LeNet5网络模型的原理及现实过程，并且同时根据5.3节的介绍我们也清楚了模型的保存与复用。现在假设有一个LeNet6网络模型，它是在LeNet5的基础上多增加了一个全连接层，此时便可以通过迁移学习将LeNet5模型中的部分参数用于LeNet6模型中。具体地，LeNet6模型结构的实现代码如下所示：
-1 class LeNet6(nn.Module): 2 def __init__(self, ): 3 super(LeNet6, self).__init__() 4 self.conv = nn.Sequential( 5 nn.Conv2d(in_channels=1, out_channels=6, 6 kernel_size=5, padding=2), 7 nn.ReLU(), nn.MaxPool2d(2, 2), nn.Conv2d(6, 16, 5), 8 nn.ReLU(),nn.MaxPool2d(2, 2)) 9 self.fc = nn.Sequential( 10 nn.Flatten(),nn.Linear(16 * 5 * 5, 120), 11 nn.ReLU(),nn.Linear(120, 84),nn.ReLU(), 12 nn.Linear(84, 64),nn.ReLU(),nn.Linear(64, 10))在上述代码中，第1~11行是LeNet5模型的前4层。第12行便是LeNet6模型中新加入的一个网络层。
-在模型定义结束后，便可以输出模型中对应的参数信息。同时，为了完成后续模型的迁移过程这里也将LeNet5保存在本地权重参数载入输出以便两者进行对比，示例代码如下所示：
-1 if __name__ == &#39;__main__&#39;: 2 print(&#34;\n=====Model paras in LeNet6:&#34;) 3 model = LeNet6() 4 for (name, param) in model.state_dict().items(): 5 print(name, param.size()) 6 7 model_save_path = os.path.join(&#39;../C04_ModelSaving&#39;, &#39;lenet5.pt&#39;) 8 print(&#34;\n=====Model paras in LeNet5:&#34;) 9 loaded_paras = torch.load(model_save_path) 10 for (name, param) in loaded_paras.items(): 11 print(name, param.size())在上述代码中，第2~5行是输出LeNet6模型中各个权重参数的名称和形状信息。第7~11行则是载入上一节中持久化保存到本地的LeNet5权重参数，并同时也输出每个参数的名称和形状。">
-	<meta itemprop="wordCount" content="386">
+<script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"WebSite","description":"面向机器学习、深度学习与 AI Agent 的中文系统化学习手册，包含原理讲解、代码示例与实战案例。","inLanguage":"zh_CN","name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
+  </script>
+  <script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.github.io/favicon.png"},"name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
+  </script><script type="application/ld+json">
+      {"@context":"https://schema.org","@type":"Article","articleSection":"dl","author":{"@type":"Person","name":"WangCheng","url":"https://mlwithme.github.io/author/"},"dateModified":"2026-06-22T21:25:25+08:00","datePublished":"2026-06-22T17:10:22+08:00","description":"本节围绕模型的迁移学习展开，重点介绍迁移学习、模型定义与比较和参数微调等内容。","headline":"5.4 模型的迁移学习","image":["https://mlwithme.github.io/favicon.png"],"inLanguage":"zh_CN","mainEntityOfPage":"https://mlwithme.github.io/dl/chapter05/211b26bdd8f248ac/","publisher":{"@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.github.io/favicon.png"},"name":"《从零学AI指南手册》"},"url":"https://mlwithme.github.io/dl/chapter05/211b26bdd8f248ac/"}
+    </script><script type="application/ld+json">
+      {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","item":"https://mlwithme.github.io/","name":"《从零学AI指南手册》","position":1},{"@type":"ListItem","item":"https://mlwithme.github.io/dl/","name":"深度学习","position":2},{"@type":"ListItem","item":"https://mlwithme.github.io/dl/chapter05/","name":"第 5 章 模型训练与复用","position":3},{"@type":"ListItem","item":"https://mlwithme.github.io/dl/chapter05/211b26bdd8f248ac/","name":"5.4 模型的迁移学习","position":4}]}
+    </script>
 
 <title>5.4 模型的迁移学习 • 《从零学AI指南手册》</title>
 <link rel="icon" href="/favicon.png" >
 <link rel="manifest" href="/manifest.json">
 <link rel="canonical" href="https://mlwithme.github.io/dl/chapter05/211b26bdd8f248ac/">
-<link rel="stylesheet" href="/book.min.a3b3c189ec36eda25846e6a5241268b0c27b5b76ed9c0b34b9b3e6d3cae2a18c.css" integrity="sha256-o7PBiew27aJYRualJBJosMJ7W3btnAs0ubPm08rioYw=" crossorigin="anonymous">
-
-
-  <script defer type="module" src="/en.search.min.d6b14dbcd48978b2c41611d06e5387dc896ddf705e423dd9152973bfd6c6096a.js" integrity="sha256-1rFNvNSJeLLEFhHQblOH3Ilt33BeQj3ZFSlzv9bGCWo=" crossorigin="anonymous"></script>
+<link rel="stylesheet" href="/book.min.63f4337331e9703a72f247b55f39b42ed5a3770674e2bf6810d5a1e51b89666a.css" integrity="sha256-Y/QzczHpcDpy8ke1Xzm0LtWjdwZ04r9oENWh5RuJZmo=" crossorigin="anonymous">
+  <script defer type="module" src="/en.search.min.d7ce42533465ddddc9ab3ccfca8c2773fb6595a39dc2b81fb2fea04e304dec79.js" integrity="sha256-185CUzRl3d3JqzzPyownc/tllaOdwrgfsv6gTjBN7Hk=" crossorigin="anonymous"></script>
 
   
 
-<meta property="og:image" content="https://mlwithme.github.io/images/dl/logo.jpg">
-<meta property="og:image:secure_url" content="https://mlwithme.github.io/images/dl/logo.jpg">
-<meta property="og:image:width" content="1272">
-<meta property="og:image:height" content="1272">
-<meta property="og:image:type" content="image/jpeg">
+
+
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:image" content="https://mlwithme.github.io/images/dl/logo.jpg">
+<meta name="twitter:title" content="5.4 模型的迁移学习">
+<meta name="twitter:description" content="本节围绕模型的迁移学习展开，重点介绍迁移学习、模型定义与比较和参数微调等内容。">
+<meta name="twitter:url" content="https://mlwithme.github.io/dl/chapter05/211b26bdd8f248ac/">
+<meta name="twitter:image" content="https://mlwithme.github.io/favicon.png">
+<meta name="twitter:image:alt" content="《从零学AI指南手册》 - 5.4 模型的迁移学习">
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-23SZ6E8VY7"></script>
 <script>
   window.dataLayer = window.dataLayer || [];
@@ -138,7 +122,7 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <a>
+    <a href="/agent/" class="">
       大模型Agent开发</a>
   
 
@@ -154,7 +138,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-279cf10e5100caa4f65ba3f7dd8888a4" class="toggle"  />
     <label for="section-279cf10e5100caa4f65ba3f7dd8888a4" class="flex">
-      <a role="button" class="">
+      <a href="/agent/chapter01/" class="">
         第 1 章 RAG 基础概念</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -205,7 +189,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-83c662c2764f1c19f8005eab77fee110" class="toggle"  />
     <label for="section-83c662c2764f1c19f8005eab77fee110" class="flex">
-      <a role="button" class="">
+      <a href="/agent/chapter02/" class="">
         第 2 章 大模型接入与使用</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -284,7 +268,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-1e583d7a26333453241d87c5c16592bd" class="toggle"  />
     <label for="section-1e583d7a26333453241d87c5c16592bd" class="flex">
-      <a role="button" class="">
+      <a href="/agent/chapter03/" class="">
         第 3 章 文档标准化与语义检索</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -391,7 +375,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="toggle"  />
     <label for="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="flex">
-      <a role="button" class="">
+      <a href="/agent/chapter04/" class="">
         第 4 章 RAG 与 Agent</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -557,7 +541,7 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <a>
+    <a href="/dl/" class="">
       深度学习</a>
   
 
@@ -587,7 +571,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-cf7621e8efb1f3153eaca44a113dcdb9" class="toggle"  />
     <label for="section-cf7621e8efb1f3153eaca44a113dcdb9" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter01/" class="">
         第 1 章 深度学习简介</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -652,7 +636,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-f9bf1a68c19405769f9c4a1495708a55" class="toggle"  />
     <label for="section-f9bf1a68c19405769f9c4a1495708a55" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter02/" class="">
         第 2 章 环境配置</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -717,7 +701,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="toggle"  />
     <label for="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter03/" class="">
         第 3 章 深度学习基础</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -922,7 +906,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-7a12cee83820a928df00362d70804a97" class="toggle"  />
     <label for="section-7a12cee83820a928df00362d70804a97" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter04/" class="">
         第 4 章 卷积神经网络</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1085,7 +1069,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-be9addfd3a15c372d609d09cabb94159" class="toggle" checked />
     <label for="section-be9addfd3a15c372d609d09cabb94159" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter05/" class="">
         第 5 章 模型训练与复用</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1206,7 +1190,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="toggle"  />
     <label for="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter06/" class="">
         第 6 章 模型优化方法</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1369,7 +1353,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-517b751d7c44a7ac77d25d295ed44271" class="toggle"  />
     <label for="section-517b751d7c44a7ac77d25d295ed44271" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter07/" class="">
         第 7 章 循环神经网络</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1476,7 +1460,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-b9b861f64ba32bc68dfb977497de37d9" class="toggle"  />
     <label for="section-b9b861f64ba32bc68dfb977497de37d9" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter08/" class="">
         第 8 章 时序与模型融合</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1583,7 +1567,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-e54a1e28b1438b8266637bcb8dac1a44" class="toggle"  />
     <label for="section-e54a1e28b1438b8266637bcb8dac1a44" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter09/" class="">
         第 9 章 自然语言处理</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1774,7 +1758,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-f6636b2f9dc1df93b9fa64dd201716d9" class="toggle"  />
     <label for="section-f6636b2f9dc1df93b9fa64dd201716d9" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter10/" class="">
         第10章 现代神经网络</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2080,7 +2064,7 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <a>
+    <a href="/ml/" class="">
       机器学习</a>
   
 
@@ -2110,7 +2094,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-48f56957e94e3cf66f3022103a7dd0ff" class="toggle"  />
     <label for="section-48f56957e94e3cf66f3022103a7dd0ff" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter01/" class="">
         第 1 章 环境配置</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2161,7 +2145,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-56a896338a1c41249d22a3efa0e0063c" class="toggle"  />
     <label for="section-56a896338a1c41249d22a3efa0e0063c" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter02/" class="">
         第 2 章 线性回归</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2282,7 +2266,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-ccd0dc9386ea80613d4cedf91b30058d" class="toggle"  />
     <label for="section-ccd0dc9386ea80613d4cedf91b30058d" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter03/" class="">
         第 3 章 逻辑回归</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2375,7 +2359,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="toggle"  />
     <label for="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter04/" class="">
         第 4 章 模型的改善与泛化</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2496,7 +2480,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-40f463d9d502d24b86ea6120b7030123" class="toggle"  />
     <label for="section-40f463d9d502d24b86ea6120b7030123" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter05/" class="">
         第 5 章 K近邻</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2603,7 +2587,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-5a460dc18f1e79253296cf2cd0498446" class="toggle"  />
     <label for="section-5a460dc18f1e79253296cf2cd0498446" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter06/" class="">
         第 6 章 文本特征与模型复用</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2696,7 +2680,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-96f45a8b8c8b75adc70c78026d93dbf6" class="toggle"  />
     <label for="section-96f45a8b8c8b75adc70c78026d93dbf6" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter07/" class="">
         第 7 章 朴素贝叶斯</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2803,7 +2787,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-22476e49d5058c3e5e7e7366b7ab676f" class="toggle"  />
     <label for="section-22476e49d5058c3e5e7e7366b7ab676f" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter08/" class="">
         第 8 章 决策树</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2952,7 +2936,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-2feb6a51cabb61dba860f45c1881386b" class="toggle"  />
     <label for="section-2feb6a51cabb61dba860f45c1881386b" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter09/" class="">
         第 9 章 集成学习与提升算法</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -3073,7 +3057,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-938ae119c3849b03ccb6f91cef4243dd" class="toggle"  />
     <label for="section-938ae119c3849b03ccb6f91cef4243dd" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter10/" class="">
         第 10 章 支持向量机</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -3250,7 +3234,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-9f4d9786d4ab755fde42c64d09b0d026" class="toggle"  />
     <label for="section-9f4d9786d4ab755fde42c64d09b0d026" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter11/" class="">
         第 11 章 聚类分析</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -3427,7 +3411,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-d5e78c45312818bb3abd5c19c858f7e5" class="toggle"  />
     <label for="section-d5e78c45312818bb3abd5c19c858f7e5" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter12/" class="">
         第 12 章 降维算法</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -3478,7 +3462,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-a82b41bb7eb95af72bc11e8a3d668acd" class="toggle"  />
     <label for="section-a82b41bb7eb95af72bc11e8a3d668acd" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter13/" class="">
         第 13 章 自训练与标签传播</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -3597,24 +3581,41 @@ https://github.com/alex-shpak/hugo-book
 </nav>
 
   
-  <section class="book-page-qr" aria-label="页面二维码">
-    <p class="book-page-qr-title">手机扫码查看</p>
-    <a
-      class="book-page-qr-image-link"
-      href="https://mlwithme.github.io/dl/chapter05/211b26bdd8f248ac/"
-      target="_blank"
-      rel="noopener noreferrer"
-      aria-label="打开当前页面链接"
-    >
-      <img
-        class="book-page-qr-image"
-        src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fdl%2Fchapter05%2F211b26bdd8f248ac%2F"
-        alt="当前页面链接二维码"
-        loading="lazy"
-        decoding="async"
-        referrerpolicy="no-referrer"
+  <section class="book-page-qr-panel" aria-label="页面二维码与公众号二维码">
+    <section class="book-page-qr-block" aria-label="页面二维码">
+      <p class="book-page-qr-title">微信扫码查看</p>
+      <a
+        class="book-page-qr-image-link"
+        href="https://mlwithme.github.io/dl/chapter05/211b26bdd8f248ac/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="打开当前页面链接"
       >
-    </a>
+        <img
+          class="book-page-qr-image"
+          src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fdl%2Fchapter05%2F211b26bdd8f248ac%2F"
+          alt="当前页面链接二维码"
+          loading="lazy"
+          decoding="async"
+          referrerpolicy="no-referrer"
+        >
+      </a>
+    </section>
+
+    <div class="book-page-qr-divider" aria-hidden="true"></div>
+
+    <section class="book-page-qr-block" aria-label="公众号二维码">
+      <p class="book-page-qr-title">关注公众号</p>
+      <div class="book-page-qr-image-link book-page-qr-image-frame">
+        <img
+          class="book-page-qr-image"
+          src="/images/gzh.png"
+          alt="公众号二维码"
+          loading="lazy"
+          decoding="async"
+        >
+      </div>
+    </section>
   </section>
 
 
@@ -3826,24 +3827,41 @@ https://github.com/alex-shpak/hugo-book
 </nav>
 
   
-  <section class="book-page-qr" aria-label="页面二维码">
-    <p class="book-page-qr-title">手机扫码查看</p>
-    <a
-      class="book-page-qr-image-link"
-      href="https://mlwithme.github.io/dl/chapter05/211b26bdd8f248ac/"
-      target="_blank"
-      rel="noopener noreferrer"
-      aria-label="打开当前页面链接"
-    >
-      <img
-        class="book-page-qr-image"
-        src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fdl%2Fchapter05%2F211b26bdd8f248ac%2F"
-        alt="当前页面链接二维码"
-        loading="lazy"
-        decoding="async"
-        referrerpolicy="no-referrer"
+  <section class="book-page-qr-panel" aria-label="页面二维码与公众号二维码">
+    <section class="book-page-qr-block" aria-label="页面二维码">
+      <p class="book-page-qr-title">微信扫码查看</p>
+      <a
+        class="book-page-qr-image-link"
+        href="https://mlwithme.github.io/dl/chapter05/211b26bdd8f248ac/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="打开当前页面链接"
       >
-    </a>
+        <img
+          class="book-page-qr-image"
+          src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fdl%2Fchapter05%2F211b26bdd8f248ac%2F"
+          alt="当前页面链接二维码"
+          loading="lazy"
+          decoding="async"
+          referrerpolicy="no-referrer"
+        >
+      </a>
+    </section>
+
+    <div class="book-page-qr-divider" aria-hidden="true"></div>
+
+    <section class="book-page-qr-block" aria-label="公众号二维码">
+      <p class="book-page-qr-title">关注公众号</p>
+      <div class="book-page-qr-image-link book-page-qr-image-frame">
+        <img
+          class="book-page-qr-image"
+          src="/images/gzh.png"
+          alt="公众号二维码"
+          loading="lazy"
+          decoding="async"
+        >
+      </div>
+    </section>
   </section>
 
 

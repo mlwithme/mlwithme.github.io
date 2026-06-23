@@ -4,90 +4,70 @@
   <!--
 Made with Book Theme
 https://github.com/alex-shpak/hugo-book
--->
-
-<meta charset="UTF-8">
+--><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="description" content="9.9 NMT网络# 在9.7节内容中，我们大致介绍了Seq2Seq架构的思想和基本原理，它通过编码器将源输入编码成一个固定维度的中间向量，然后再依靠解码器将这一中间向量解码成任务需要的目标序列。同时，这种序列到序列的网络架构也使得我们可以采用不同的网络模型来作为编码器和解码器使用，例如除了到目前为止我们已经介绍过的DNN、CNN和RNN之外，也可以是在第10章中将要介绍的自注意力模块等。在接下来的这节内容中，我们将会探索以LSTM模型为编码器和解码器的神经机器翻译模型（Neural Machine Translation, NMT）背后的原理及其实现过程。本节内容的完整示例代码可参见Code/Chapter09/C07_NMT文件夹。
-9.9.1 谷歌翻译简介# 为了让每一个人都能访问世界上的所有信息，谷歌公司在2006年4月推出了一项基于统计机器方法的语言翻译模型（Statistical Machine Translation, SMT）。在SMT模型中，输入文本必须要先翻译成英语作为中转，然后再将其翻译成对应的目标语言，因此这也导致在不同语言中翻译结果的准确性差异很大[1]。
-随着深度学习技术的迅猛发展，谷歌公司于2014年提出了一种基于Seq2Seq架构的序列学习模型，并且尝试将其应用于NMT这一任务中[2]。但是由于该模型在翻译质量、推理速度和处理低频词等方面的效果并没有得到显著提升，因此并没有将其运用于实际的翻译服务中[3]。不过由于Seq2Seq模型在网络结构上的独特优势——编码器直接将源输入编码成一个向量，然后解码器再将其解码为对应的目标序列，从而避免了事先将源输入分割成不同粒度的短语而导致的翻译结果不流畅的问题——研究人员一直在尝试通过各种方法提高NMT模型的效果。直到2016年，谷歌公司又基于Seq2Seq的NMT模型提出了GNMT模型来解决上述问题，并将其运用在了谷歌翻译服务中[4]。
-图 9-19 谷歌翻译示例图 值得一提的是随着自注意力机制（Self-Attention）的出现以及其强大的编码能力，谷歌公司也于2020年将其翻译服务中Seq2Seq的编码器部替换成了Transform中的Encoder模块（相关内容将在第10章中进行详细介绍），而解码器部分则依旧使用的是RNN模块，其主要原因在于使用RNN作为解码器在推理时的速度要远快于Transform中的Decoder模块[5]。
-谷歌神经机器翻译作为一种先进的机器翻译技术，对于改进跨语言交流和信息传播有着重要的作用。它使得机器翻译在很多情况下能够产生更流畅、准确的翻译结果，同时也是深度学习在自然语言处理领域成功应用的一个典型案例。截至2023 年8 月，谷歌翻译已经提供了超过133种语言的翻译服务，每天服务用户超5亿人[1]。
-9.9.2 统计翻译模型弊端# 尽管传统基于短语的统计翻译模型在翻译任务中有着不错的表现，但是却一直存在着一些难以克服的弊端。由于这类模型需要将输入划分成不同粒度的短语进行翻译，所以会导致最后翻译的结果在语义上并不连贯，同时也会使得在长文本翻译过程中无法解决上下文的长依赖问题容易出现局部翻译化的现象[6]。同时，这类模型需要人工设计和提取大量的特征，例如词频、短语对齐等，这些过程比较繁琐且依赖于专业知识因此并不具有良好的可扩展性，每换一种翻译场景都需要重新开始构建统计模型。
-鉴于上述原因，基于神经网络的机器翻译模型开始引起了研究人员的注意，而谷歌公司苏茨克维尔（Sutskever）等人于2014年也提出了一种基于LSTM的神经网络机器翻译模型[2]。在9.7节内容中我们已经大致介绍了这一模型的思想和基本原理，接下来我们再以一个真实的翻译任务为例来详细介绍NMT模型的具体工作原理。
-9.9.3 NMT数据集构建# 在这里我们使用到的是一组英德翻译平行语料，一共包含有 6 个文件train.de、train.en、val.de、 val.en、test_2016_flickr.de 和test_2016_flickr.en，其分别为德语训练语料、英语训练语料、德语验证语料、英语验证语料、德语测试语料和英语测试语料。同时， 这三部分的样本量分别为 29000、1014 和 1000 条。
-如下所示便是一条平行预料数据，其中第 1 行为德语，第 2 行为英语，后续我们需要完成的是搭建一个翻译模型将德语翻译为英语。
-1 Zwei junge weiße Männer sind im, Freien in der Nähe vieler Büsche. 2 Two young, White males are outside near many bushes.1. 数据集预览
-在正式介绍如何构建数据集之前，我们先通过一张图来简单了解一下整个构建流程，以便更加清楚后续的构建流程及代码实现。
-图9-20 英德翻译语料数据集构建图 如图9-20所示，左边部分为源序列，右边部分为目标序列。从图9-20可以看出，第①步需要对原始语料进行切分（Tokenize）处理，如果是对类似英文这样的语料进行处理，最简单的就是直接按空格切分即可，但注意的一点是要把其中的标点符号也切分出来。第②步则是根据源语料和目标语料切分后的字符分别构建一个词表。第③步是将切分后的字符根据词表中的索引将其转换成对应的索引序列。第④步是对同一个小批量中的样本进行填充（Padding）处理，通常情况下以最长样本的长度进行填充，如果是对目标序列进行处理则还需要在首尾分别加上&lt;BOS&gt;和&lt;EOS&gt;特殊符。第⑤步则是分别得到编码器的源输入、解码器的目标输入和目标输出，其中目标输入和目标输出是分别取前$n-1$个字符和后$n-1$个字符（$n$表示目标序列长度）。
-">
+<meta name="description" content="本节围绕NMT网络展开，重点介绍谷歌翻译简介、统计翻译模型弊端和NMT数据集构建等内容。">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
 <meta name="color-scheme" content="light dark">
+<meta name="robots" content="index,follow,max-image-preview:large">
 
 
 
 
-
-
-
-  
-
-
-
-  
 
 <meta property="og:url" content="https://mlwithme.github.io/dl/chapter09/fefa60e0bc854a17/">
 <meta property="og:site_name" content="《从零学AI指南手册》">
 <meta property="og:title" content="9.9 NMT网络">
-<meta property="og:description" content="9.9 NMT网络# 在9.7节内容中，我们大致介绍了Seq2Seq架构的思想和基本原理，它通过编码器将源输入编码成一个固定维度的中间向量，然后再依靠解码器将这一中间向量解码成任务需要的目标序列。同时，这种序列到序列的网络架构也使得我们可以采用不同的网络模型来作为编码器和解码器使 …">
+<meta property="og:description" content="本节围绕NMT网络展开，重点介绍谷歌翻译简介、统计翻译模型弊端和NMT数据集构建等内容。">
 <meta property="og:locale" content="zh_CN">
 <meta property="og:type" content="article">
-<meta property="og:image" content="https://mlwithme.github.io/images/dl/logo.jpg">
-<meta property="og:image:url" content="https://mlwithme.github.io/images/dl/logo.jpg">
-<meta property="og:image:secure_url" content="https://mlwithme.github.io/images/dl/logo.jpg">
-<meta property="og:image:width" content="1272">
-<meta property="og:image:height" content="1272">
-<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image" content="https://mlwithme.github.io/favicon.png">
+<meta property="og:image:url" content="https://mlwithme.github.io/favicon.png">
+<meta property="og:image:secure_url" content="https://mlwithme.github.io/favicon.png">
+<meta property="og:image:width" content="759">
+<meta property="og:image:height" content="759">
+<meta property="og:image:type" content="image/png">
 <meta property="og:image:alt" content="《从零学AI指南手册》 - 9.9 NMT网络">
 
   <meta property="article:section" content="dl">
+  
+    <meta property="article:published_time" content="2026-06-22T17:10:22&#43;08:00">
+  
+  
+    <meta property="article:modified_time" content="2026-06-22T21:25:25&#43;08:00">
+  
+  
 
 
-
-	<meta itemprop="name" content="9.9 NMT网络">
-	<meta itemprop="description" content="9.9 NMT网络# 在9.7节内容中，我们大致介绍了Seq2Seq架构的思想和基本原理，它通过编码器将源输入编码成一个固定维度的中间向量，然后再依靠解码器将这一中间向量解码成任务需要的目标序列。同时，这种序列到序列的网络架构也使得我们可以采用不同的网络模型来作为编码器和解码器使用，例如除了到目前为止我们已经介绍过的DNN、CNN和RNN之外，也可以是在第10章中将要介绍的自注意力模块等。在接下来的这节内容中，我们将会探索以LSTM模型为编码器和解码器的神经机器翻译模型（Neural Machine Translation, NMT）背后的原理及其实现过程。本节内容的完整示例代码可参见Code/Chapter09/C07_NMT文件夹。
-9.9.1 谷歌翻译简介# 为了让每一个人都能访问世界上的所有信息，谷歌公司在2006年4月推出了一项基于统计机器方法的语言翻译模型（Statistical Machine Translation, SMT）。在SMT模型中，输入文本必须要先翻译成英语作为中转，然后再将其翻译成对应的目标语言，因此这也导致在不同语言中翻译结果的准确性差异很大[1]。
-随着深度学习技术的迅猛发展，谷歌公司于2014年提出了一种基于Seq2Seq架构的序列学习模型，并且尝试将其应用于NMT这一任务中[2]。但是由于该模型在翻译质量、推理速度和处理低频词等方面的效果并没有得到显著提升，因此并没有将其运用于实际的翻译服务中[3]。不过由于Seq2Seq模型在网络结构上的独特优势——编码器直接将源输入编码成一个向量，然后解码器再将其解码为对应的目标序列，从而避免了事先将源输入分割成不同粒度的短语而导致的翻译结果不流畅的问题——研究人员一直在尝试通过各种方法提高NMT模型的效果。直到2016年，谷歌公司又基于Seq2Seq的NMT模型提出了GNMT模型来解决上述问题，并将其运用在了谷歌翻译服务中[4]。
-图 9-19 谷歌翻译示例图 值得一提的是随着自注意力机制（Self-Attention）的出现以及其强大的编码能力，谷歌公司也于2020年将其翻译服务中Seq2Seq的编码器部替换成了Transform中的Encoder模块（相关内容将在第10章中进行详细介绍），而解码器部分则依旧使用的是RNN模块，其主要原因在于使用RNN作为解码器在推理时的速度要远快于Transform中的Decoder模块[5]。
-谷歌神经机器翻译作为一种先进的机器翻译技术，对于改进跨语言交流和信息传播有着重要的作用。它使得机器翻译在很多情况下能够产生更流畅、准确的翻译结果，同时也是深度学习在自然语言处理领域成功应用的一个典型案例。截至2023 年8 月，谷歌翻译已经提供了超过133种语言的翻译服务，每天服务用户超5亿人[1]。
-9.9.2 统计翻译模型弊端# 尽管传统基于短语的统计翻译模型在翻译任务中有着不错的表现，但是却一直存在着一些难以克服的弊端。由于这类模型需要将输入划分成不同粒度的短语进行翻译，所以会导致最后翻译的结果在语义上并不连贯，同时也会使得在长文本翻译过程中无法解决上下文的长依赖问题容易出现局部翻译化的现象[6]。同时，这类模型需要人工设计和提取大量的特征，例如词频、短语对齐等，这些过程比较繁琐且依赖于专业知识因此并不具有良好的可扩展性，每换一种翻译场景都需要重新开始构建统计模型。
-鉴于上述原因，基于神经网络的机器翻译模型开始引起了研究人员的注意，而谷歌公司苏茨克维尔（Sutskever）等人于2014年也提出了一种基于LSTM的神经网络机器翻译模型[2]。在9.7节内容中我们已经大致介绍了这一模型的思想和基本原理，接下来我们再以一个真实的翻译任务为例来详细介绍NMT模型的具体工作原理。
-9.9.3 NMT数据集构建# 在这里我们使用到的是一组英德翻译平行语料，一共包含有 6 个文件train.de、train.en、val.de、 val.en、test_2016_flickr.de 和test_2016_flickr.en，其分别为德语训练语料、英语训练语料、德语验证语料、英语验证语料、德语测试语料和英语测试语料。同时， 这三部分的样本量分别为 29000、1014 和 1000 条。
-如下所示便是一条平行预料数据，其中第 1 行为德语，第 2 行为英语，后续我们需要完成的是搭建一个翻译模型将德语翻译为英语。
-1 Zwei junge weiße Männer sind im, Freien in der Nähe vieler Büsche. 2 Two young, White males are outside near many bushes.1. 数据集预览
-在正式介绍如何构建数据集之前，我们先通过一张图来简单了解一下整个构建流程，以便更加清楚后续的构建流程及代码实现。
-图9-20 英德翻译语料数据集构建图 如图9-20所示，左边部分为源序列，右边部分为目标序列。从图9-20可以看出，第①步需要对原始语料进行切分（Tokenize）处理，如果是对类似英文这样的语料进行处理，最简单的就是直接按空格切分即可，但注意的一点是要把其中的标点符号也切分出来。第②步则是根据源语料和目标语料切分后的字符分别构建一个词表。第③步是将切分后的字符根据词表中的索引将其转换成对应的索引序列。第④步是对同一个小批量中的样本进行填充（Padding）处理，通常情况下以最长样本的长度进行填充，如果是对目标序列进行处理则还需要在首尾分别加上&lt;BOS&gt;和&lt;EOS&gt;特殊符。第⑤步则是分别得到编码器的源输入、解码器的目标输入和目标输出，其中目标输入和目标输出是分别取前$n-1$个字符和后$n-1$个字符（$n$表示目标序列长度）。">
-	<meta itemprop="wordCount" content="1078">
+<script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"WebSite","description":"面向机器学习、深度学习与 AI Agent 的中文系统化学习手册，包含原理讲解、代码示例与实战案例。","inLanguage":"zh_CN","name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
+  </script>
+  <script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.github.io/favicon.png"},"name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
+  </script><script type="application/ld+json">
+      {"@context":"https://schema.org","@type":"Article","articleSection":"dl","author":{"@type":"Person","name":"WangCheng","url":"https://mlwithme.github.io/author/"},"dateModified":"2026-06-22T21:25:25+08:00","datePublished":"2026-06-22T17:10:22+08:00","description":"本节围绕NMT网络展开，重点介绍谷歌翻译简介、统计翻译模型弊端和NMT数据集构建等内容。","headline":"9.9 NMT网络","image":["https://mlwithme.github.io/favicon.png"],"inLanguage":"zh_CN","mainEntityOfPage":"https://mlwithme.github.io/dl/chapter09/fefa60e0bc854a17/","publisher":{"@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.github.io/favicon.png"},"name":"《从零学AI指南手册》"},"url":"https://mlwithme.github.io/dl/chapter09/fefa60e0bc854a17/"}
+    </script><script type="application/ld+json">
+      {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","item":"https://mlwithme.github.io/","name":"《从零学AI指南手册》","position":1},{"@type":"ListItem","item":"https://mlwithme.github.io/dl/","name":"深度学习","position":2},{"@type":"ListItem","item":"https://mlwithme.github.io/dl/chapter09/","name":"第 9 章 自然语言处理","position":3},{"@type":"ListItem","item":"https://mlwithme.github.io/dl/chapter09/fefa60e0bc854a17/","name":"9.9 NMT网络","position":4}]}
+    </script>
 
 <title>9.9 NMT网络 • 《从零学AI指南手册》</title>
 <link rel="icon" href="/favicon.png" >
 <link rel="manifest" href="/manifest.json">
 <link rel="canonical" href="https://mlwithme.github.io/dl/chapter09/fefa60e0bc854a17/">
-<link rel="stylesheet" href="/book.min.a3b3c189ec36eda25846e6a5241268b0c27b5b76ed9c0b34b9b3e6d3cae2a18c.css" integrity="sha256-o7PBiew27aJYRualJBJosMJ7W3btnAs0ubPm08rioYw=" crossorigin="anonymous">
-
-
-  <script defer type="module" src="/en.search.min.d6b14dbcd48978b2c41611d06e5387dc896ddf705e423dd9152973bfd6c6096a.js" integrity="sha256-1rFNvNSJeLLEFhHQblOH3Ilt33BeQj3ZFSlzv9bGCWo=" crossorigin="anonymous"></script>
+<link rel="stylesheet" href="/book.min.63f4337331e9703a72f247b55f39b42ed5a3770674e2bf6810d5a1e51b89666a.css" integrity="sha256-Y/QzczHpcDpy8ke1Xzm0LtWjdwZ04r9oENWh5RuJZmo=" crossorigin="anonymous">
+  <script defer type="module" src="/en.search.min.d7ce42533465ddddc9ab3ccfca8c2773fb6595a39dc2b81fb2fea04e304dec79.js" integrity="sha256-185CUzRl3d3JqzzPyownc/tllaOdwrgfsv6gTjBN7Hk=" crossorigin="anonymous"></script>
 
   
 
-<meta property="og:image" content="https://mlwithme.github.io/images/dl/logo.jpg">
-<meta property="og:image:secure_url" content="https://mlwithme.github.io/images/dl/logo.jpg">
-<meta property="og:image:width" content="1272">
-<meta property="og:image:height" content="1272">
-<meta property="og:image:type" content="image/jpeg">
+
+
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:image" content="https://mlwithme.github.io/images/dl/logo.jpg">
+<meta name="twitter:title" content="9.9 NMT网络">
+<meta name="twitter:description" content="本节围绕NMT网络展开，重点介绍谷歌翻译简介、统计翻译模型弊端和NMT数据集构建等内容。">
+<meta name="twitter:url" content="https://mlwithme.github.io/dl/chapter09/fefa60e0bc854a17/">
+<meta name="twitter:image" content="https://mlwithme.github.io/favicon.png">
+<meta name="twitter:image:alt" content="《从零学AI指南手册》 - 9.9 NMT网络">
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-23SZ6E8VY7"></script>
 <script>
   window.dataLayer = window.dataLayer || [];
@@ -142,7 +122,7 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <a>
+    <a href="/agent/" class="">
       大模型Agent开发</a>
   
 
@@ -158,7 +138,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-279cf10e5100caa4f65ba3f7dd8888a4" class="toggle"  />
     <label for="section-279cf10e5100caa4f65ba3f7dd8888a4" class="flex">
-      <a role="button" class="">
+      <a href="/agent/chapter01/" class="">
         第 1 章 RAG 基础概念</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -209,7 +189,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-83c662c2764f1c19f8005eab77fee110" class="toggle"  />
     <label for="section-83c662c2764f1c19f8005eab77fee110" class="flex">
-      <a role="button" class="">
+      <a href="/agent/chapter02/" class="">
         第 2 章 大模型接入与使用</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -288,7 +268,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-1e583d7a26333453241d87c5c16592bd" class="toggle"  />
     <label for="section-1e583d7a26333453241d87c5c16592bd" class="flex">
-      <a role="button" class="">
+      <a href="/agent/chapter03/" class="">
         第 3 章 文档标准化与语义检索</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -395,7 +375,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="toggle"  />
     <label for="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="flex">
-      <a role="button" class="">
+      <a href="/agent/chapter04/" class="">
         第 4 章 RAG 与 Agent</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -561,7 +541,7 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <a>
+    <a href="/dl/" class="">
       深度学习</a>
   
 
@@ -591,7 +571,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-cf7621e8efb1f3153eaca44a113dcdb9" class="toggle"  />
     <label for="section-cf7621e8efb1f3153eaca44a113dcdb9" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter01/" class="">
         第 1 章 深度学习简介</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -656,7 +636,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-f9bf1a68c19405769f9c4a1495708a55" class="toggle"  />
     <label for="section-f9bf1a68c19405769f9c4a1495708a55" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter02/" class="">
         第 2 章 环境配置</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -721,7 +701,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="toggle"  />
     <label for="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter03/" class="">
         第 3 章 深度学习基础</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -926,7 +906,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-7a12cee83820a928df00362d70804a97" class="toggle"  />
     <label for="section-7a12cee83820a928df00362d70804a97" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter04/" class="">
         第 4 章 卷积神经网络</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1089,7 +1069,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-be9addfd3a15c372d609d09cabb94159" class="toggle"  />
     <label for="section-be9addfd3a15c372d609d09cabb94159" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter05/" class="">
         第 5 章 模型训练与复用</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1210,7 +1190,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="toggle"  />
     <label for="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter06/" class="">
         第 6 章 模型优化方法</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1373,7 +1353,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-517b751d7c44a7ac77d25d295ed44271" class="toggle"  />
     <label for="section-517b751d7c44a7ac77d25d295ed44271" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter07/" class="">
         第 7 章 循环神经网络</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1480,7 +1460,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-b9b861f64ba32bc68dfb977497de37d9" class="toggle"  />
     <label for="section-b9b861f64ba32bc68dfb977497de37d9" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter08/" class="">
         第 8 章 时序与模型融合</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1587,7 +1567,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-e54a1e28b1438b8266637bcb8dac1a44" class="toggle" checked />
     <label for="section-e54a1e28b1438b8266637bcb8dac1a44" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter09/" class="">
         第 9 章 自然语言处理</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -1778,7 +1758,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-f6636b2f9dc1df93b9fa64dd201716d9" class="toggle"  />
     <label for="section-f6636b2f9dc1df93b9fa64dd201716d9" class="flex">
-      <a role="button" class="">
+      <a href="/dl/chapter10/" class="">
         第10章 现代神经网络</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2084,7 +2064,7 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <a>
+    <a href="/ml/" class="">
       机器学习</a>
   
 
@@ -2114,7 +2094,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-48f56957e94e3cf66f3022103a7dd0ff" class="toggle"  />
     <label for="section-48f56957e94e3cf66f3022103a7dd0ff" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter01/" class="">
         第 1 章 环境配置</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2165,7 +2145,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-56a896338a1c41249d22a3efa0e0063c" class="toggle"  />
     <label for="section-56a896338a1c41249d22a3efa0e0063c" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter02/" class="">
         第 2 章 线性回归</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2286,7 +2266,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-ccd0dc9386ea80613d4cedf91b30058d" class="toggle"  />
     <label for="section-ccd0dc9386ea80613d4cedf91b30058d" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter03/" class="">
         第 3 章 逻辑回归</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2379,7 +2359,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="toggle"  />
     <label for="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter04/" class="">
         第 4 章 模型的改善与泛化</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2500,7 +2480,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-40f463d9d502d24b86ea6120b7030123" class="toggle"  />
     <label for="section-40f463d9d502d24b86ea6120b7030123" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter05/" class="">
         第 5 章 K近邻</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2607,7 +2587,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-5a460dc18f1e79253296cf2cd0498446" class="toggle"  />
     <label for="section-5a460dc18f1e79253296cf2cd0498446" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter06/" class="">
         第 6 章 文本特征与模型复用</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2700,7 +2680,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-96f45a8b8c8b75adc70c78026d93dbf6" class="toggle"  />
     <label for="section-96f45a8b8c8b75adc70c78026d93dbf6" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter07/" class="">
         第 7 章 朴素贝叶斯</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2807,7 +2787,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-22476e49d5058c3e5e7e7366b7ab676f" class="toggle"  />
     <label for="section-22476e49d5058c3e5e7e7366b7ab676f" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter08/" class="">
         第 8 章 决策树</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -2956,7 +2936,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-2feb6a51cabb61dba860f45c1881386b" class="toggle"  />
     <label for="section-2feb6a51cabb61dba860f45c1881386b" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter09/" class="">
         第 9 章 集成学习与提升算法</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -3077,7 +3057,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-938ae119c3849b03ccb6f91cef4243dd" class="toggle"  />
     <label for="section-938ae119c3849b03ccb6f91cef4243dd" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter10/" class="">
         第 10 章 支持向量机</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -3254,7 +3234,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-9f4d9786d4ab755fde42c64d09b0d026" class="toggle"  />
     <label for="section-9f4d9786d4ab755fde42c64d09b0d026" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter11/" class="">
         第 11 章 聚类分析</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -3431,7 +3411,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-d5e78c45312818bb3abd5c19c858f7e5" class="toggle"  />
     <label for="section-d5e78c45312818bb3abd5c19c858f7e5" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter12/" class="">
         第 12 章 降维算法</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -3482,7 +3462,7 @@ https://github.com/alex-shpak/hugo-book
   
     <input type="checkbox" id="section-a82b41bb7eb95af72bc11e8a3d668acd" class="toggle"  />
     <label for="section-a82b41bb7eb95af72bc11e8a3d668acd" class="flex">
-      <a role="button" class="">
+      <a href="/ml/chapter13/" class="">
         第 13 章 自训练与标签传播</a>
       <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
     </label>
@@ -3603,24 +3583,41 @@ https://github.com/alex-shpak/hugo-book
 </nav>
 
   
-  <section class="book-page-qr" aria-label="页面二维码">
-    <p class="book-page-qr-title">手机扫码查看</p>
-    <a
-      class="book-page-qr-image-link"
-      href="https://mlwithme.github.io/dl/chapter09/fefa60e0bc854a17/"
-      target="_blank"
-      rel="noopener noreferrer"
-      aria-label="打开当前页面链接"
-    >
-      <img
-        class="book-page-qr-image"
-        src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fdl%2Fchapter09%2Ffefa60e0bc854a17%2F"
-        alt="当前页面链接二维码"
-        loading="lazy"
-        decoding="async"
-        referrerpolicy="no-referrer"
+  <section class="book-page-qr-panel" aria-label="页面二维码与公众号二维码">
+    <section class="book-page-qr-block" aria-label="页面二维码">
+      <p class="book-page-qr-title">微信扫码查看</p>
+      <a
+        class="book-page-qr-image-link"
+        href="https://mlwithme.github.io/dl/chapter09/fefa60e0bc854a17/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="打开当前页面链接"
       >
-    </a>
+        <img
+          class="book-page-qr-image"
+          src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fdl%2Fchapter09%2Ffefa60e0bc854a17%2F"
+          alt="当前页面链接二维码"
+          loading="lazy"
+          decoding="async"
+          referrerpolicy="no-referrer"
+        >
+      </a>
+    </section>
+
+    <div class="book-page-qr-divider" aria-hidden="true"></div>
+
+    <section class="book-page-qr-block" aria-label="公众号二维码">
+      <p class="book-page-qr-title">关注公众号</p>
+      <div class="book-page-qr-image-link book-page-qr-image-frame">
+        <img
+          class="book-page-qr-image"
+          src="/images/gzh.png"
+          alt="公众号二维码"
+          loading="lazy"
+          decoding="async"
+        >
+      </div>
+    </section>
   </section>
 
 
@@ -3982,24 +3979,41 @@ https://github.com/alex-shpak/hugo-book
 </nav>
 
   
-  <section class="book-page-qr" aria-label="页面二维码">
-    <p class="book-page-qr-title">手机扫码查看</p>
-    <a
-      class="book-page-qr-image-link"
-      href="https://mlwithme.github.io/dl/chapter09/fefa60e0bc854a17/"
-      target="_blank"
-      rel="noopener noreferrer"
-      aria-label="打开当前页面链接"
-    >
-      <img
-        class="book-page-qr-image"
-        src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fdl%2Fchapter09%2Ffefa60e0bc854a17%2F"
-        alt="当前页面链接二维码"
-        loading="lazy"
-        decoding="async"
-        referrerpolicy="no-referrer"
+  <section class="book-page-qr-panel" aria-label="页面二维码与公众号二维码">
+    <section class="book-page-qr-block" aria-label="页面二维码">
+      <p class="book-page-qr-title">微信扫码查看</p>
+      <a
+        class="book-page-qr-image-link"
+        href="https://mlwithme.github.io/dl/chapter09/fefa60e0bc854a17/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="打开当前页面链接"
       >
-    </a>
+        <img
+          class="book-page-qr-image"
+          src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fdl%2Fchapter09%2Ffefa60e0bc854a17%2F"
+          alt="当前页面链接二维码"
+          loading="lazy"
+          decoding="async"
+          referrerpolicy="no-referrer"
+        >
+      </a>
+    </section>
+
+    <div class="book-page-qr-divider" aria-hidden="true"></div>
+
+    <section class="book-page-qr-block" aria-label="公众号二维码">
+      <p class="book-page-qr-title">关注公众号</p>
+      <div class="book-page-qr-image-link book-page-qr-image-frame">
+        <img
+          class="book-page-qr-image"
+          src="/images/gzh.png"
+          alt="公众号二维码"
+          loading="lazy"
+          decoding="async"
+        >
+      </div>
+    </section>
   </section>
 
 
