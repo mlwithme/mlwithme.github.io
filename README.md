@@ -36,7 +36,7 @@ python -m http.server 8888
 同时，我们也更加严格地按照了先前提出的“5层次3阶段”学习理念框架来对《跟我一起学机器学习》第一版的内容进行修订和补充。
 
 <div align=center>
-<img width="500" src="/images/ml/0029.png"/>
+<img width="500" src="https://moonhotel.oss-cn-shanghai.aliyuncs.com/images/0029.png"/>
 </div>
 
 
@@ -44,7 +44,7 @@ python -m http.server 8888
 
 进一步，对于一个算法的学习，我们还将它归结成了5个层次（3个阶段）：
 
-<div align=center><img width="450" src="/images/ml/p2-17.png"/></div>
+<div align=center><img width="450" src="https://moonhotel.oss-cn-shanghai.aliyuncs.com/images/p2-17.png"/></div>
 
 其中，阶段一可以看成先从大树主干爬到树顶一窥大树全貌的过程，因为对于一个算法来讲最基本的就是它所对应的思想，而这也是一个算法的灵魂所在。阶段二和阶段三可以看成遍历完整棵大树后的层次，它是对算法里细枝末节的具体探索。
 
