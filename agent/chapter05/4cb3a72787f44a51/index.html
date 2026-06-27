@@ -1,0 +1,4030 @@
+<!DOCTYPE html>
+<html lang="zh_CN" dir="ltr">
+<head>
+  <!--
+Made with Book Theme
+https://github.com/alex-shpak/hugo-book
+--><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="理解了短期记忆的底层机制之后，还有一个工程问题不得不面对，那就是对话历史会无限增长但模型的上下文窗口是有限的，这也是我们在第5.2节末尾所提及的问题，也是在实际业务场景中最容易出现的问题。">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="index,follow,max-image-preview:large">
+
+
+
+
+
+<meta property="og:url" content="https://mlwithme.github.io/agent/chapter05/4cb3a72787f44a51/">
+<meta property="og:site_name" content="《从零学AI指南手册》">
+<meta property="og:title" content="5.3 短期记忆管理">
+<meta property="og:description" content="理解了短期记忆的底层机制之后，还有一个工程问题不得不面对，那就是对话历史会无限增长但模型的上下文窗口是有限的，这也是我们在第5.2节末尾所提及的问题，也是在实际业务场景中最容易出现的问题。">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:type" content="article">
+<meta property="og:image" content="https://mlwithme.oss-cn-shanghai.aliyuncs.com/share-cover.png">
+<meta property="og:image:url" content="https://mlwithme.oss-cn-shanghai.aliyuncs.com/share-cover.png">
+<meta property="og:image:secure_url" content="https://mlwithme.oss-cn-shanghai.aliyuncs.com/share-cover.png">
+<meta property="og:image:width" content="759">
+<meta property="og:image:height" content="759">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:alt" content="《从零学AI指南手册》 - 5.3 短期记忆管理">
+
+  <meta property="article:section" content="agent">
+  
+    <meta property="article:published_time" content="2026-06-27T10:30:02&#43;08:00">
+  
+  
+    <meta property="article:modified_time" content="2026-06-27T11:04:06&#43;08:00">
+  
+  
+
+
+<script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"WebSite","description":"面向机器学习、深度学习与 AI Agent 的中文系统化学习手册，包含原理讲解、代码示例与实战案例。","inLanguage":"zh_CN","name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
+  </script>
+  <script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.oss-cn-shanghai.aliyuncs.com/share-cover.png"},"name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
+  </script><script type="application/ld+json">
+      {"@context":"https://schema.org","@type":"Article","articleSection":"agent","author":{"@type":"Person","name":"WangCheng","url":"https://mlwithme.github.io/author/"},"dateModified":"2026-06-27T11:04:06+08:00","datePublished":"2026-06-27T10:30:02+08:00","description":"理解了短期记忆的底层机制之后，还有一个工程问题不得不面对，那就是对话历史会无限增长但模型的上下文窗口是有限的，这也是我们在第5.2节末尾所提及的问题，也是在实际业务场景中最容易出现的问题。","headline":"5.3 短期记忆管理","image":["https://mlwithme.oss-cn-shanghai.aliyuncs.com/share-cover.png"],"inLanguage":"zh_CN","mainEntityOfPage":"https://mlwithme.github.io/agent/chapter05/4cb3a72787f44a51/","publisher":{"@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.oss-cn-shanghai.aliyuncs.com/share-cover.png"},"name":"《从零学AI指南手册》"},"url":"https://mlwithme.github.io/agent/chapter05/4cb3a72787f44a51/"}
+    </script><script type="application/ld+json">
+      {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","item":"https://mlwithme.github.io/","name":"《从零学AI指南手册》","position":1},{"@type":"ListItem","item":"https://mlwithme.github.io/agent/","name":"大模型Agent开发","position":2},{"@type":"ListItem","item":"https://mlwithme.github.io/agent/chapter05/","name":"第 5 章 Agent 记忆机制与管理","position":3},{"@type":"ListItem","item":"https://mlwithme.github.io/agent/chapter05/4cb3a72787f44a51/","name":"5.3 短期记忆管理","position":4}]}
+    </script>
+
+<title>5.3 短期记忆管理 • 《从零学AI指南手册》</title>
+<link rel="icon" href="https://mlwithme.oss-cn-shanghai.aliyuncs.com/favicon.png" type="image/png">
+<link rel="shortcut icon" href="https://mlwithme.oss-cn-shanghai.aliyuncs.com/favicon.png" type="image/png">
+<link rel="apple-touch-icon" href="https://mlwithme.oss-cn-shanghai.aliyuncs.com/favicon.png">
+
+<link rel="manifest" href="/manifest.json">
+<link rel="canonical" href="https://mlwithme.github.io/agent/chapter05/4cb3a72787f44a51/">
+<link rel="stylesheet" href="/book.min.460ef30065808027ef6cc2f065a38e28d61e9675d010253f5c32c4695e2ef520.css" integrity="sha256-Rg7zAGWAgCfvbMLwZaOOKNYelnXQECU/XDLEaV4u9SA=" crossorigin="anonymous">
+  <script defer type="module" src="/en.search.min.b610aea93d04b7ec53e6b53f2dff55937ed7b49f6889d3742df3954000a375bf.js" integrity="sha256-thCuqT0Et&#43;xT5rU/Lf9Vk37XtJ9oidN0LfOVQACjdb8=" crossorigin="anonymous"></script>
+
+  
+
+
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="5.3 短期记忆管理">
+<meta name="twitter:description" content="理解了短期记忆的底层机制之后，还有一个工程问题不得不面对，那就是对话历史会无限增长但模型的上下文窗口是有限的，这也是我们在第5.2节末尾所提及的问题，也是在实际业务场景中最容易出现的问题。">
+<meta name="twitter:url" content="https://mlwithme.github.io/agent/chapter05/4cb3a72787f44a51/">
+<meta name="twitter:image" content="https://mlwithme.oss-cn-shanghai.aliyuncs.com/share-cover.png">
+<meta name="twitter:image:alt" content="《从零学AI指南手册》 - 5.3 短期记忆管理">
+<script>
+  var _hmt = _hmt || [];
+  (function() {
+    var hm = document.createElement("script");
+    hm.src = "https://hm.baidu.com/hm.js?74a336dd47fbbab3ceb99d4ad8afcb76";
+    var s = document.getElementsByTagName("script")[0];
+    s.parentNode.insertBefore(hm, s);
+  })();
+</script>
+<script async src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
+
+</head>
+<body dir="ltr" class="book-kind-page book-type-agent">
+  <input type="checkbox" class="hidden toggle" id="menu-control" />
+  <input type="checkbox" class="hidden toggle" id="toc-control" />
+  <main class="container flex">
+    
+<aside class="book-menu">
+  <div class="book-menu-content">
+    
+  <nav>
+<h2 class="book-brand">
+  <a class="flex align-center" href="/"><span>《从零学AI指南手册》</span>
+  </a>
+</h2>
+
+
+<div class="book-search hidden">
+  <input id="book-search-input" type="text" 
+    placeholder="Search"
+    aria-label="Search"
+    maxlength="64" />
+  <div class="book-search-spinner hidden"></div>
+  <ul id="book-search-results"></ul>
+</div>
+<script>document.querySelector(".book-search").classList.remove("hidden")</script>
+
+
+
+
+
+
+
+
+
+
+
+  
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/" class="">
+      大模型Agent开发</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-279cf10e5100caa4f65ba3f7dd8888a4" class="toggle"  />
+    <label for="section-279cf10e5100caa4f65ba3f7dd8888a4" class="flex">
+      <a href="/agent/chapter01/" class="">
+        第 1 章 RAG 基础概念</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/454f0942222e471e/" class="">
+      1.1 RAG 提出背景</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/d7623d619f884b25/" class="">
+      1.2 RAG 流程概览</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-83c662c2764f1c19f8005eab77fee110" class="toggle"  />
+    <label for="section-83c662c2764f1c19f8005eab77fee110" class="flex">
+      <a href="/agent/chapter02/" class="">
+        第 2 章 大模型接入与使用</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/d43adfc00df54515/" class="">
+      2.1 SDK 介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/8b9059fde1d644a4/" class="">
+      2.2 现代大模型中的 SDK</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/95d3214ab80b4769/" class="">
+      2.3 DashScope 接口体系</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/b9843c089d654494/" class="">
+      2.4 千问大模型接入与使用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-1e583d7a26333453241d87c5c16592bd" class="toggle"  />
+    <label for="section-1e583d7a26333453241d87c5c16592bd" class="flex">
+      <a href="/agent/chapter03/" class="">
+        第 3 章 文档标准化与语义检索</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/7f4af6d48c5b425c/" class="">
+      3.1 文档加载与标准化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/572ba4c9cb114677/" class="">
+      3.2 常见文本切分策略</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/06e588cd33fa4454/" class="">
+      3.3 向量数据库选择</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/ff27306c0d7b4387/" class="">
+      3.4 Qwen3 Embedding 模型介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/303035851c5e42f2/" class="">
+      3.5 语义搜索引擎构建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/e1328cb23e8c412b/" class="">
+      3.6  Milvus 模块解析</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="toggle"  />
+    <label for="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="flex">
+      <a href="/agent/chapter04/" class="">
+        第 4 章 RAG 与 Agent</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/4c646aa07f3b4b74/" class="">
+      4.1 两步式 RAG 搭建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/5c35e934bab24ac3/" class="">
+      4.2 Function Calling 概念介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/88ff352fc22e4cd6/" class="">
+      4.3 LangChain 中的 Tool 修饰器</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/83fe26536a5d4b6e/" class="">
+      4.4 RAG Agent 原理与搭建</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/b7e49268357a4bca/" class="">
+      4.5 复杂问题拆解与ReAct框架</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/469b5963f2ca4799/" class="">
+      4.6 RAG 中的两阶段索引</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/10fb92a6c5484039/" class="">
+      4.7 Qwen3 Reranking 原理与使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/45d286aec1bc4d66/" class="">
+      4.8 基于两阶段索引的 RAG Agent</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/43af483460574e48/" class="">
+      4.9 LangGraph 基本概念介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/0def4564f3aa455d/" class="">
+      4.10  基于 LangGraph 构建自定义 RAG Agent</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bf5130286ff0eee8f362b632167a5e6b" class="toggle" checked />
+    <label for="section-bf5130286ff0eee8f362b632167a5e6b" class="flex">
+      <a href="/agent/chapter05/" class="">
+        第 5 章 Agent 记忆机制与管理</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/a652af9313584855/" class="">
+      5.1 Agent 记忆机制概览</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/2caa39af072b43d5/" class="">
+      5.2 短期记忆持久化与使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/4cb3a72787f44a51/" class="active">
+      5.3 短期记忆管理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/0d7e1e8dd4294524/" class="">
+      5.4 拥有短期记忆的 RAG Agent</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/7490dfb32ad44afc/" class="">
+      5.5 长期记忆管理与持久化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/4d323650e581404a/" class="">
+      5.6 从零实现 Mini ChatGPT 助手</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/0e8a82c9b973429e/" class="">
+      5.7 pgvector 配置安装</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/ca097b913d174c22/" class="">
+      5.8 长期记忆检索与遗忘</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/938a0c83bc1e4da2/" class="">
+      5.9 基于 LangGraph 的Mini ChatGPT 助手</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/6072b2c567ba4d15/" class="">
+      5.10 使用 create_agent 搭建 Mini ChatGPT</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/" class="">
+      深度学习</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/70e5f9cdbedc4b2c/" class="">
+      学习思维导图</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-cf7621e8efb1f3153eaca44a113dcdb9" class="toggle"  />
+    <label for="section-cf7621e8efb1f3153eaca44a113dcdb9" class="flex">
+      <a href="/dl/chapter01/" class="">
+        第 1 章 深度学习简介</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/647eb9c607874e3a/" class="">
+      1.1 深度学习的发展阶段</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/f31da36a6f444afe/" class="">
+      1.2 深度学习中的关键人物</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/da9fa13021e64f3c/" class="">
+      1.3 深度学习框架介绍</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f9bf1a68c19405769f9c4a1495708a55" class="toggle"  />
+    <label for="section-f9bf1a68c19405769f9c4a1495708a55" class="flex">
+      <a href="/dl/chapter02/" class="">
+        第 2 章 环境配置</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/a0c5d1e0de0140cb/" class="">
+      2.1 体系结构介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/04f07b9246984577/" class="">
+      2.2 深度学习环境安装</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/5bf6454673194c67/" class="">
+      2.3 开发环境安装配置</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="toggle"  />
+    <label for="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="flex">
+      <a href="/dl/chapter03/" class="">
+        第 3 章 深度学习基础</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/75c5fa7839174c16/" class="">
+      3.1 线性回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/ca16f8cb6df444a6/" class="">
+      3.2 线性回归简洁实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/97e1da1143cd4554/" class="">
+      3.3 梯度下降与反向传播</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/7b865de988ea422c/" class="">
+      3.4 从零实现回归模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/18fdd1deff424a16/" class="">
+      3.5 从逻辑回归到Softmax回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/55967b0f642b4509/" class="">
+      3.6 Softmax回归简洁实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/381bbd56509e4a6f/" class="">
+      3.7 从零实现分类模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/2c061df4435d4928/" class="">
+      3.8 回归模型评估指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/e3442eff254e473c/" class="">
+      3.9 分类模型评估指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/307f927c8a1245c5/" class="">
+      3.10 过拟合与正则化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/bcb64de5aa404f18/" class="">
+      3.11 超参数与交叉验证</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/66dd7425cdd04565/" class="">
+      3.12 激活函数</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/0d3dacfff4c04794/" class="">
+      3.13 多标签分类</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-7a12cee83820a928df00362d70804a97" class="toggle"  />
+    <label for="section-7a12cee83820a928df00362d70804a97" class="flex">
+      <a href="/dl/chapter04/" class="">
+        第 4 章 卷积神经网络</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/102e183e8be94f46/" class="">
+      4.1 卷积的概念</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/5b3e3152e9e54f4f/" class="">
+      4.2 卷积的计算过程</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/762f60de801a4ccd/" class="">
+      4.3 填充和池化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/c8af5d84174b4420/" class="">
+      4.4 LeNet5网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/de007462967e4701/" class="">
+      4.5 AlexNet网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/f084f181c3554082/" class="">
+      4.6 VGG网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/911b961cc5d949b6/" class="">
+      4.7 NIN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/47da186baf3e4a0b/" class="">
+      4.8 GoogLeNet网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/da16c61397454b2c/" class="">
+      4.9 ResNet网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/1c24468824274650/" class="">
+      4.10 DenseNet网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-be9addfd3a15c372d609d09cabb94159" class="toggle"  />
+    <label for="section-be9addfd3a15c372d609d09cabb94159" class="flex">
+      <a href="/dl/chapter05/" class="">
+        第 5 章 模型训练与复用</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/4557a6f03dec4475/" class="">
+      5.1 参数及日志管理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/e7c4c6da085148d0/" class="">
+      5.2 Tensorboard可视化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/27387966672c45ed/" class="">
+      5.3 模型的保存与复用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/211b26bdd8f248ac/" class="">
+      5.4 模型的迁移学习</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/345c1b72253043cb/" class="">
+      5.5 开源模型复用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/c912dda030c946d9/" class="">
+      5.6 多GPU训练</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/f065af80f3844b0b/" class="">
+      5.7 数据预处理与缓存</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="toggle"  />
+    <label for="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="flex">
+      <a href="/dl/chapter06/" class="">
+        第 6 章 模型优化方法</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/cc35bb112783410e/" class="">
+      6.1 学习率调度器</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/fc024c283f164849/" class="">
+      6.2 梯度裁剪</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/27ed3ed136e24092/" class="">
+      6.3 批归一化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/fdd5ba4b41f74a0e/" class="">
+      6.4 层归一化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/9246afed14eb436c/" class="">
+      6.5 组归一化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/fcbc66ad051a4336/" class="">
+      6.6 动量法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/8b83d654898c40a2/" class="">
+      6.7 AdaGrad算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/078f2394980d41d2/" class="">
+      6.8 AdaDelta算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/28ad7fb39987447e/" class="">
+      6.9 Adam算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/4b81b8d39721434d/" class="">
+      6.10 初始化方法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-517b751d7c44a7ac77d25d295ed44271" class="toggle"  />
+    <label for="section-517b751d7c44a7ac77d25d295ed44271" class="flex">
+      <a href="/dl/chapter07/" class="">
+        第 7 章 循环神经网络</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/88ba4e03337b4233/" class="">
+      7.1 RNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/ec8ff069aadc49b9/" class="">
+      7.2 时序数据</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/b4c5ddcc9e904238/" class="">
+      7.3 LSTM网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/4112672112224dc1/" class="">
+      7.4 GRU网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/b6e5ccb6cd064f74/" class="">
+      7.5 BiRNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/4bf3ecf7b21e45fb/" class="">
+      7.6 CharRNN网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-b9b861f64ba32bc68dfb977497de37d9" class="toggle"  />
+    <label for="section-b9b861f64ba32bc68dfb977497de37d9" class="flex">
+      <a href="/dl/chapter08/" class="">
+        第 8 章 时序与模型融合</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/2be88fbc08a5418f/" class="">
+      8.1 TextCNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/9023d1f822a54226/" class="">
+      8.2 TextRNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/9edd7db2d439402f/" class="">
+      8.3 CNN-RNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/19c2b86e85f2461e/" class="">
+      8.4 ConvLSTM网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/1e6da79bf7b44c20/" class="">
+      8.5 3DCNN网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/5f426a9190e7454b/" class="">
+      8.6 STResNet网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-e54a1e28b1438b8266637bcb8dac1a44" class="toggle"  />
+    <label for="section-e54a1e28b1438b8266637bcb8dac1a44" class="flex">
+      <a href="/dl/chapter09/" class="">
+        第 9 章 自然语言处理</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/e0cb9a7aae814045/" class="">
+      9.1 自然语言处理介绍</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/d4703d990f8d4fed/" class="">
+      9.2 Word2Vec词向量</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/1bb6351b01a2479b/" class="">
+      9.3 Word2Vec训练与使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/40a8a1146d934c55/" class="">
+      9.4 GloVe词向量</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/c6aa1405b8cf46d8/" class="">
+      9.5 词向量的微调使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/48c26d04b342452d/" class="">
+      9.6 fastText网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/03a0166e195f443f/" class="">
+      9.7 Seq2Seq网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/271bda16904544af/" class="">
+      9.8 序列模型评价指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/fefa60e0bc854a17/" class="">
+      9.9 NMT网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/5bcd8b0920414f34/" class="">
+      9.10 注意力机制</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/8a78e8213ee04aac/" class="">
+      9.11 含注意力的NMT网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/474ac7a1867d4b5e/" class="">
+      9.12 含注意力的RNN网络</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f6636b2f9dc1df93b9fa64dd201716d9" class="toggle"  />
+    <label for="section-f6636b2f9dc1df93b9fa64dd201716d9" class="flex">
+      <a href="/dl/chapter10/" class="">
+        第10章 现代神经网络</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/7523731afc0241c0/" class="">
+      10.1 ELMo网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/4987d1044939480d/" class="">
+      10.2 Transformer网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/a469ed1a25e1498f/" class="">
+      10.3 Transformer结构</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/d50c490eef3b4565/" class="">
+      10.4 Transformer实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/f6c507b3d2d74f03/" class="">
+      10.5 Transformer对联模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/3aedea1d3f3e48dd/" class="">
+      10.6 BERT网络</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/82a1cd0def084620/" class="">
+      10.7 从零实现BERT</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/e736d3974ed0484c/" class="">
+      10.8 BERT文本分类模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/f5076cbadda84d4e/" class="">
+      10.9 BERT问题选择模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/25d9ef3d9b34472a/" class="">
+      10.10 BERT问题回答模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/64d3ec5593ec4b94/" class="">
+      10.11 BERT命名体识别模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/90ea8d3e090d48b4/" class="">
+      10.12 BERT从零训练</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/e36878dad7a647d8/" class="">
+      10.13 GPT-1模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/94dda9bbbc994913/" class="">
+      10.14 GPT-2与GPT-3模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/4af57a29308840de/" class="">
+      10.15 基于GPT-2的中文预训练模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/9f5c00cadde14d31/" class="">
+      10.16 InstructGPT与ChatGPT</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/050b54fd34ca480a/" class="">
+      10.17 ChatGPT与提示词工程</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/a90b0d71389b4d69/" class="">
+      10.18 百川大模型使用</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/40c1c9ade70c4ce7/" class="">
+      10.19 百川大模型实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/ea1b4cf8b40c4b05/" class="">
+      10.20 GPT-4与GPTs使用</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/" class="">
+      机器学习</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/43fc00b3809d4be6/" class="">
+      学习思维导图</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-48f56957e94e3cf66f3022103a7dd0ff" class="toggle"  />
+    <label for="section-48f56957e94e3cf66f3022103a7dd0ff" class="flex">
+      <a href="/ml/chapter01/" class="">
+        第 1 章 环境配置</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/baafb91f0af14a84/" class="">
+      1.1 安装使用Conda</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/7a01c403acd6488a/" class="">
+      1.2 开发环境安装配置</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-56a896338a1c41249d22a3efa0e0063c" class="toggle"  />
+    <label for="section-56a896338a1c41249d22a3efa0e0063c" class="flex">
+      <a href="/ml/chapter02/" class="">
+        第 2 章 线性回归</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/2414d4b6648d405a/" class="">
+      2.1 模型的建立与求解</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/3e9ba14da71f4fd3/" class="">
+      2.2 多变量线性回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/4a16c0dc82a84e78/" class="">
+      2.3 多项式回归</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/f8dea699983c48c6/" class="">
+      2.4 回归模型评估</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/df41c2e97f554e68/" class="">
+      2.5 梯度下降</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/71ef816e0005492d/" class="">
+      2.6 正态分布</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/803bee4f70be4dca/" class="">
+      2.7 目标函数推导</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ccd0dc9386ea80613d4cedf91b30058d" class="toggle"  />
+    <label for="section-ccd0dc9386ea80613d4cedf91b30058d" class="flex">
+      <a href="/ml/chapter03/" class="">
+        第 3 章 逻辑回归</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/96d46b53aee14c3b/" class="">
+      3.1 模型的建立与求解</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/fac70083dd764141/" class="">
+      3.2 多分类任务</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/6d7cfd79ef304cbd/" class="">
+      3.3 常见的分类评估指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/2fdc655d00c74548/" class="">
+      3.4 目标函数推导</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="toggle"  />
+    <label for="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="flex">
+      <a href="/ml/chapter04/" class="">
+        第 4 章 模型的改善与泛化</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/2089400b28f54dd9/" class="">
+      4.1 基本概念</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/56b788b624cd4971/" class="">
+      4.2 特征标准化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/ca091dc393a84518/" class="">
+      4.3过拟合</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/5097d3b8c1144427/" class="">
+      4.4 正则化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/3c7eee1621d4480b/" class="">
+      4.5 偏差、方差与交叉验证</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/c5957e0753d04746/" class="">
+      4.6 实例分析手写体识别</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-40f463d9d502d24b86ea6120b7030123" class="toggle"  />
+    <label for="section-40f463d9d502d24b86ea6120b7030123" class="flex">
+      <a href="/ml/chapter05/" class="">
+        第 5 章 K近邻</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/7c610e923e754259/" class="">
+      5.1 K近邻思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/1a97571e0a6447ef/" class="">
+      5.2 K近邻原理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/d245bda107034e65/" class="">
+      5.3 sklearn接口与示例代码</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/24378571ce404d9c/" class="">
+      5.4 kd树构建与搜索</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/40f253b916f24038/" class="">
+      5.5 从零实现K近邻</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-5a460dc18f1e79253296cf2cd0498446" class="toggle"  />
+    <label for="section-5a460dc18f1e79253296cf2cd0498446" class="flex">
+      <a href="/ml/chapter06/" class="">
+        第 6 章 文本特征与模型复用</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/e05b5928c41d4841/" class="">
+      6.1 词袋模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/de59bf74d753457e/" class="">
+      6 .2 基于K近邻算法的垃圾邮件分类</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/c6fdc78b49d44453/" class="">
+      6.3 考虑权重的词袋模型</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/825fde8589654b16/" class="">
+      6.4 词云图</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-96f45a8b8c8b75adc70c78026d93dbf6" class="toggle"  />
+    <label for="section-96f45a8b8c8b75adc70c78026d93dbf6" class="flex">
+      <a href="/ml/chapter07/" class="">
+        第 7 章 朴素贝叶斯</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/faf303eb93a241d1/" class="">
+      7.1 朴素贝叶斯算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/842c7b8684c747d2/" class="">
+      7.2 贝叶斯估计</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/724bf42b09bb440e/" class="">
+      7.3 朴素贝叶斯实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/1a9deee1d5f042b5/" class="">
+      7.4 多项式朴素贝叶斯原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/5c27cdd8b3264f50/" class="">
+      7.5 高斯朴素贝叶斯原理与实现</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-22476e49d5058c3e5e7e7366b7ab676f" class="toggle"  />
+    <label for="section-22476e49d5058c3e5e7e7366b7ab676f" class="flex">
+      <a href="/ml/chapter08/" class="">
+        第 8 章 决策树</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/690fe2be21834c2a/" class="">
+      8.1 决策树的基本思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/ee9ada9729124049/" class="">
+      8.2 决策树建模与可视化</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/5887cf1408dd4c7f/" class="">
+      8.3 决策树生成之ID3与C4.5</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/87ba589d6c17434d/" class="">
+      8.4 决策树剪枝过程</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/34bc962c974646f4/" class="">
+      8.5 从零实现ID3与C4.5算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/c44682dbb3364be4/" class="">
+      8.6 连续型特征变量下决策树实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/4eead717a84a4dbf/" class="">
+      8.7 CART生成与剪枝算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/1c72d67dffc64dc9/" class="">
+      8.8 从零实现CART算法及剪枝示例</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-2feb6a51cabb61dba860f45c1881386b" class="toggle"  />
+    <label for="section-2feb6a51cabb61dba860f45c1881386b" class="flex">
+      <a href="/ml/chapter09/" class="">
+        第 9 章 集成学习与提升算法</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/9eff4004fd6c437d/" class="">
+      9.1 集成学习算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/18980c9f757e42c8/" class="">
+      9.2 随机森林</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/8a91b358b2f74d56/" class="">
+      9.3 泰坦尼克号生还预测</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/73f6914844f549f1/" class="">
+      9.4 AdaBoost原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/71fd0e44294e4abb/" class="">
+      9.5 MultiAdaBoost原理与实现</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/f3c2341ce7d64f70/" class="">
+      9.6 Gradient Boost 原理与实现</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-938ae119c3849b03ccb6f91cef4243dd" class="toggle"  />
+    <label for="section-938ae119c3849b03ccb6f91cef4243dd" class="flex">
+      <a href="/ml/chapter10/" class="">
+        第 10 章 支持向量机</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/515b54e2307a4c8a/" class="">
+      10.1 SVM思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/9c3862bc843c4179/" class="">
+      10.2 SVM线性不可分</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/fbdb6f8adace457d/" class="">
+      10.3 SVM原理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/1a3ffa363b1d4f83/" class="">
+      10.4 SVM中的软间隔</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/8b7a06412a9f4267/" class="">
+      10.5 拉格朗日乘数法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/40e977f0a2f84ac0/" class="">
+      10.6 对偶性与KKT条件</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/b18d45a772574ddb/" class="">
+      10.7 SVM优化问题</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/c53ed12f7bc04405/" class="">
+      10.8 SVM核函数原理</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/26d9b2b328a849c2/" class="">
+      10.9 SMO算法求解SVM</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/215a1e15c0f2470d/" class="">
+      10.10 从零实现SVM分类算法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-9f4d9786d4ab755fde42c64d09b0d026" class="toggle"  />
+    <label for="section-9f4d9786d4ab755fde42c64d09b0d026" class="flex">
+      <a href="/ml/chapter11/" class="">
+        第 11 章 聚类分析</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/f9d9305a55a548a1/" class="">
+      11.1 聚类算法的思想</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/e635df24de32487a/" class="">
+      11.2 Kmeans聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/e75b8efa232249ab/" class="">
+      11.3 Kmeans算法求解</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/60e49a33d1aa4f50/" class="">
+      11.4 从零实现Kmeans聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/c8b45d8a3d8c4cf4/" class="">
+      11.5 Kmeans&#43;&#43;聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/1ede2f3557d0438f/" class="">
+      11.6 聚类外部评价指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/e6a75df19f85498c/" class="">
+      11.7 加权Kmeans聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/c52cf7920f1d4636/" class="">
+      11.8 聚类内部评价指标</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/f95259c359b146ba/" class="">
+      11.9 聚类K值选取与分析</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/b85c1a858f7c4686/" class="">
+      11.10 基于密度的聚类算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/2f01ba751d914336/" class="">
+      11.11 基于层次的聚类算法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-d5e78c45312818bb3abd5c19c858f7e5" class="toggle"  />
+    <label for="section-d5e78c45312818bb3abd5c19c858f7e5" class="flex">
+      <a href="/ml/chapter12/" class="">
+        第 12 章 降维算法</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/9478de824edd44c6/" class="">
+      12.1 主成分分析</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/909356aa90fe456a/" class="">
+      12.2 基于核函数的主成分分析</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-a82b41bb7eb95af72bc11e8a3d668acd" class="toggle"  />
+    <label for="section-a82b41bb7eb95af72bc11e8a3d668acd" class="flex">
+      <a href="/ml/chapter13/" class="">
+        第 13 章 自训练与标签传播</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/8d71301c2e414efe/" class="">
+      13.1 Self-Training 自训练算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/87fdcf0be1c34644/" class="">
+      13.2 Label Propagation算法</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/7fc8b0fc47d2427c/" class="">
+      13.3 Label Spreading 算法</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</nav>
+
+
+
+
+  <script>(function(){var e=document.querySelector("aside .book-menu-content");addEventListener("beforeunload",function(){localStorage.setItem("menu.scrollTop",e.scrollTop)}),e.scrollTop=localStorage.getItem("menu.scrollTop")})()</script>
+
+
+
+  </div>
+</aside>
+ 
+
+    <div class="book-page">
+      <header class="book-header hidden">
+        
+  <div class="flex align-center justify-between">
+  <label for="menu-control">
+    <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/menu.svg" class="book-icon" alt="Menu" />
+  </label>
+
+  <h3>5.3 短期记忆管理</h3>
+
+  <label for="toc-control">
+    
+    <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/toc.svg" class="book-icon" alt="Table of Contents" />
+    
+  </label>
+</div>
+
+
+  
+  <aside class="hidden">
+    
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#531-记忆管理的根源">5.3.1 记忆管理的根源</a></li>
+    <li><a href="#532-记忆删除">5.3.2 记忆删除</a></li>
+    <li><a href="#523-记忆修剪">5.2.3 记忆修剪</a></li>
+    <li><a href="#524-记忆总结">5.2.4 记忆总结</a></li>
+  </ul>
+</nav>
+
+  
+  <section class="book-page-qr-panel" aria-label="页面二维码与公众号二维码">
+    <section class="book-page-qr-block" aria-label="页面二维码">
+      <p class="book-page-qr-title">微信扫码查看</p>
+      <a
+        class="book-page-qr-image-link"
+        href="https://mlwithme.github.io/agent/chapter05/4cb3a72787f44a51/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="打开当前页面链接"
+      >
+        <img
+          class="book-page-qr-image"
+          src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fagent%2Fchapter05%2F4cb3a72787f44a51%2F"
+          alt="当前页面链接二维码"
+          loading="lazy"
+          decoding="async"
+          referrerpolicy="no-referrer"
+        >
+      </a>
+    </section>
+
+    <div class="book-page-qr-divider" aria-hidden="true"></div>
+
+    <section class="book-page-qr-block" aria-label="公众号二维码">
+      <p class="book-page-qr-title">关注公众号</p>
+      <div class="book-page-qr-image-link book-page-qr-image-frame">
+        <img
+          class="book-page-qr-image"
+          src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/images/gzh.png"
+          alt="公众号二维码"
+          loading="lazy"
+          decoding="async"
+        >
+      </div>
+    </section>
+  </section>
+
+
+
+
+  </aside>
+  
+ 
+      </header>
+
+      
+      
+  <article class="markdown book-article"><div class="book-article-lastmod text-small">
+        <span class="book-article-lastmod-label">最后修改时间：</span>
+        <span class="book-article-lastmod-value">2026年6月27日 11:04</span>
+      </div><h1 id="53-短期记忆管理">5.3 短期记忆管理<a class="anchor" href="#53-%e7%9f%ad%e6%9c%9f%e8%ae%b0%e5%bf%86%e7%ae%a1%e7%90%86">#</a></h1>
+<p>理解了短期记忆的底层机制之后，还有一个工程问题不得不面对，那就是对话历史会无限增长但模型的上下文窗口是有限的，这也是我们在第5.2节末尾所提及的问题，也是在实际业务场景中最容易出现的问题。</p>
+<h2 id="531-记忆管理的根源">5.3.1 记忆管理的根源<a class="anchor" href="#531-%e8%ae%b0%e5%bf%86%e7%ae%a1%e7%90%86%e7%9a%84%e6%a0%b9%e6%ba%90">#</a></h2>
+<p>在一个对话型应用中，每一轮交互都会产生新的消息——用户说一句，模型回一句，来回往复。最终，这些消息会被依次追加到全局状态的消息列表中，因此随着对话轮次的增加，列表会越来越长。当然，这在短对话中完全不是问题，不过一旦对话持续时间较长，消息列表的词元总量就会持续膨胀，进而带来两类后果。</p>
+<p>（1）超出上下文窗口直接报错</p>
+<p>每个大模型都有固定的上下文窗口限制（Context Window），例如某些模型是 8K，某些是 128K。当消息列表的总词元数超过这个上限时，模型会直接报错——而且这个错误通常是不可恢复的，只能截断历史或重新开始对话。</p>
+<p>（2）即使没超限，效果也会变差</p>
+<p>同时，即便模型支持足够长的上下文，随着历史消息越堆越多，模型的实际表现往往会明显下降。原因在于模型容易被早期那些已经过时或与当前问题无关的消息&quot;分散注意力&quot;，导致回答质量下降、响应速度变慢，这一点也更隐蔽、更容易被忽视。</p>
+<p>总结起来就是，更长的上下文不等于更好的效果，超过一定长度之后冗余的历史消息反而是一种干扰，因此我们需要通过不同的策略来进行处理。在 LangGraph 中提供了3中策略来对短期记忆进行管理，分别是记忆修剪、记忆总结和记忆删除，下面依次进行介绍。</p>
+<h2 id="532-记忆删除">5.3.2 记忆删除<a class="anchor" href="#532-%e8%ae%b0%e5%bf%86%e5%88%a0%e9%99%a4">#</a></h2>
+<p>首先，最简单的一种记忆管理方式就是将历史消息部分或全部删除，只保留一定数量需要的消息内容，如图5-3所示。</p>
+<div align=center><img width="500" src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/images/agent/202605171755.jpg"/> </div><center>图 5-3 记忆删除示意图</center>
+<p>在 LangGraph 中可以通过 <code>RemoveMessage</code> 来根据消息ID将部分或全部记忆进行删除。具体地，先定义一个函数来将待删除的记忆内容置空，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">delete_messages</span>(agent, config: RunnableConfig) <span style="color:#666">-&gt;</span> <span style="color:#007020;font-weight:bold">None</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>     snapshot <span style="color:#666">=</span> agent<span style="color:#666">.</span>get_state(config)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>     messages <span style="color:#666">=</span> snapshot<span style="color:#666">.</span>values<span style="color:#666">.</span>get(<span style="color:#4070a0">&#34;messages&#34;</span>, []) <span style="color:#007020;font-weight:bold">if</span> snapshot<span style="color:#666">.</span>values <span style="color:#007020;font-weight:bold">else</span> []
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span>     <span style="color:#007020;font-weight:bold">if</span> <span style="color:#007020">len</span>(messages) <span style="color:#666">&lt;</span> <span style="color:#40a070">2</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">5</span>         <span style="color:#007020">print</span>(<span style="color:#4070a0">&#34;当前记忆不足 2 条，跳过删除。&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">6</span>         <span style="color:#007020;font-weight:bold">return</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">7</span>     updates <span style="color:#666">=</span> {<span style="color:#4070a0">&#34;messages&#34;</span>: [RemoveMessage(<span style="color:#007020">id</span><span style="color:#666">=</span>message<span style="color:#666">.</span>id) <span style="color:#007020;font-weight:bold">for</span> message <span style="color:#007020;font-weight:bold">in</span> messages[:<span style="color:#40a070">2</span>]]}
+</span></span><span style="display:flex;"><span><span style="color:#40a070">8</span>     agent<span style="color:#666">.</span>update_state(config, updates, as_node<span style="color:#666">=</span><span style="color:#4070a0">&#34;generate_answer&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">9</span>     <span style="color:#007020">print</span>(<span style="color:#4070a0">&#34;已删除最前面的两条记忆。&#34;</span>)</span></span></code></pre></div><p>在上述代码中，第3行是获取到快照状态中所有的历史消息。第7行便是构造前两条（最先发生）消息的删除指令。第8行是将待删除的消息更新到状态快照中，即写回 checkpoint 状态里，其中 <code>as_node</code> 的作用是“假装这次更新是由 generate_answer 这个节点产出的”，因为 <code>update_state()</code> 不是单纯改数据库里的一行 JSON，它是按 LangGraph 的图执行模型去改状态的，所以它需要知道要改什么，以及这次修改算哪个节点产生的。</p>
+<p>对于 <code>as_node</code> 这个节点的选择没有强制要求，如果不指定则默认会使用图的最后一个节点，但前提是不要有歧义否则会报错。不过建议显示指定图中真实存在的节点名称，例如图4-13中的 decide、my_retrieve、rewrite_question 和 generate_answer。同时，还有一个需要注意的地方是，<code>update_state()</code> 是对 <code>messages</code> 字段进行更新，所以需要选一个本来就返回 <code>{&quot;messages&quot;: ...} </code>的节点，并且从语义上看 <code>generate_answer</code> 更接近“对消息状态做一次人工修正”，所以这里选择了 <code>generate_answer</code> 节点。当然，选择 <code>rewrite_question</code> 也是能正常运行的，但是从执行逻辑上来看最好是 <code>generate_answer</code> 节点，不然状态快照中 <code>next()</code>记录的信息会不符合逻辑。</p>
+<p>例如对于如下快照中的6条历史记忆来说：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-shell" data-lang="shell"><span style="display:flex;"><span>StateSnapshot<span style="color:#666">(</span><span style="color:#bb60d5">values</span><span style="color:#666">={</span><span style="color:#4070a0">&#39;messages&#39;</span>: <span style="color:#666">[</span>
+</span></span><span style="display:flex;"><span>HumanMessage<span style="color:#666">(</span><span style="color:#bb60d5">content</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;郭靖和杨康是什么关系？&#39;</span>, , <span style="color:#bb60d5">id</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;31e1f411-8015-4e27&#39;</span><span style="color:#666">)</span>, 
+</span></span><span style="display:flex;"><span>AIMessage<span style="color:#666">(</span><span style="color:#bb60d5">content</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;&#39;</span>, <span style="color:#bb60d5">id</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;lc_run--019e2558-e520-7be1&#39;</span>, <span style="color:#bb60d5">tool_calls</span><span style="color:#666">=[{</span><span style="color:#4070a0">&#39;name&#39;</span>: <span style="color:#4070a0">&#39;retrieve_context&#39;</span>, <span style="color:#4070a0">&#39;args&#39;</span>: <span style="color:#666">{</span><span style="color:#4070a0">&#39;query&#39;</span>: <span style="color:#4070a0">&#39;郭靖和杨康的关系&#39;</span><span style="color:#666">}</span>, <span style="color:#4070a0">&#39;id&#39;</span>: <span style="color:#4070a0">&#39;call_7cdad6b1a9394482846227&#39;</span>, <span style="color:#4070a0">&#39;type&#39;</span>: <span style="color:#4070a0">&#39;tool_call&#39;</span><span style="color:#666">}])</span>, 
+</span></span><span style="display:flex;"><span>ToolMessage<span style="color:#666">(</span><span style="color:#bb60d5">content</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;杨康边哭边说，涕泪滂沱，断断续续地道：......&#39;</span>, <span style="color:#bb60d5">name</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;retrieve_context&#39;</span>, <span style="color:#bb60d5">id</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;69d27ef5-2a11-4e2a&#39;</span>, <span style="color:#bb60d5">tool_call_id</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;call_7cdad6b1a9394482846227&#39;</span>, <span style="color:#bb60d5">artifact</span><span style="color:#666">=)</span>, 
+</span></span><span style="display:flex;"><span>AIMessage<span style="color:#666">(</span><span style="color:#bb60d5">content</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;郭靖和杨康是结义兄弟。两人在郭啸天灵前对拜八拜，结为兄弟，郭靖先出世一个月，为兄，杨康为弟。&#39;</span>, <span style="color:#bb60d5">id</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;lc_run--019e2558-f1ba-7c42&#39;</span>, <span style="color:#666">)</span>, 
+</span></span><span style="display:flex;"><span>HumanMessage<span style="color:#666">(</span><span style="color:#bb60d5">content</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;郭靖比杨康先出生几个月？&#39;</span>, , <span style="color:#bb60d5">id</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;e5336c6b-d60f-44bf&#39;</span><span style="color:#666">)</span>, 
+</span></span><span style="display:flex;"><span>AIMessage<span style="color:#666">(</span><span style="color:#bb60d5">content</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;根据提供的文本，郭靖比杨康先出生**一个月**。&#39;</span>, <span style="color:#bb60d5">id</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;lc_run--019e2559-4511-7403&#39;</span>, <span style="color:#666">)]}</span>, 
+</span></span><span style="display:flex;"><span><span style="color:#bb60d5">next</span><span style="color:#666">=()</span>, <span style="color:#bb60d5">config</span><span style="color:#666">={</span><span style="color:#4070a0">&#39;configurable&#39;</span>: <span style="color:#666">{</span><span style="color:#4070a0">&#39;thread_id&#39;</span>: <span style="color:#4070a0">&#39;5&#39;</span>, <span style="color:#4070a0">&#39;checkpoint_ns&#39;</span>: <span style="color:#4070a0">&#39;&#39;</span>, <span style="color:#4070a0">&#39;checkpoint_id&#39;</span>: <span style="color:#4070a0">&#39;1f14f650-3615-6440&#39;</span><span style="color:#666">}}</span>, <span style="color:#bb60d5">metadata</span><span style="color:#666">={</span><span style="color:#4070a0">&#39;k&#39;</span>: 20, <span style="color:#4070a0">&#39;step&#39;</span>: 6, <span style="color:#4070a0">&#39;top_n&#39;</span>: 3, <span style="color:#4070a0">&#39;source&#39;</span>: <span style="color:#4070a0">&#39;loop&#39;</span>, <span style="color:#4070a0">&#39;parents&#39;</span>: <span style="color:#666">{}}</span>, <span style="color:#bb60d5">created_at</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;2026-05-17T07:17:49.219715+00:00&#39;</span>, <span style="color:#bb60d5">parent_config</span><span style="color:#666">={</span><span style="color:#4070a0">&#39;configurable&#39;</span>: <span style="color:#666">{</span><span style="color:#4070a0">&#39;thread_id&#39;</span>: <span style="color:#4070a0">&#39;5&#39;</span>, <span style="color:#4070a0">&#39;checkpoint_ns&#39;</span>: <span style="color:#4070a0">&#39;&#39;</span>, <span style="color:#4070a0">&#39;checkpoint_id&#39;</span>: <span style="color:#4070a0">&#39;1f14f650-278b-6c8a&#39;</span><span style="color:#666">}}</span>, <span style="color:#bb60d5">tasks</span><span style="color:#666">=()</span>, <span style="color:#bb60d5">interrupts</span><span style="color:#666">=())</span></span></span></code></pre></div><p>在执行完成 <code>delete_messages</code> 以后将会变成：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-shell" data-lang="shell"><span style="display:flex;"><span>StateSnapshot<span style="color:#666">(</span><span style="color:#bb60d5">values</span><span style="color:#666">={</span><span style="color:#4070a0">&#39;messages&#39;</span>: <span style="color:#666">[</span>
+</span></span><span style="display:flex;"><span>ToolMessage<span style="color:#666">(</span><span style="color:#bb60d5">content</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;杨康边哭边说，涕泪滂沱，断断续续地道：......&#39;</span>, <span style="color:#bb60d5">name</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;retrieve_context&#39;</span>, <span style="color:#bb60d5">id</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;69d27ef5-2a11-4e2a&#39;</span>, <span style="color:#bb60d5">tool_call_id</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;call_7cdad6b1a9394482846227&#39;</span>, <span style="color:#bb60d5">artifact</span><span style="color:#666">=)</span>, 
+</span></span><span style="display:flex;"><span>AIMessage<span style="color:#666">(</span><span style="color:#bb60d5">content</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;郭靖和杨康是结义兄弟。两人在郭啸天灵前对拜八拜，结为兄弟，郭靖先出世一个月，为兄，杨康为弟。&#39;</span>, <span style="color:#bb60d5">id</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;lc_run--019e2558-f1ba-7c42&#39;</span>, <span style="color:#666">)</span>, 
+</span></span><span style="display:flex;"><span>HumanMessage<span style="color:#666">(</span><span style="color:#bb60d5">content</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;郭靖比杨康先出生几个月？&#39;</span>, , <span style="color:#bb60d5">id</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;e5336c6b-d60f-44bf&#39;</span><span style="color:#666">)</span>, 
+</span></span><span style="display:flex;"><span>AIMessage<span style="color:#666">(</span><span style="color:#bb60d5">content</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;根据提供的文本，郭靖比杨康先出生**一个月**。&#39;</span>, <span style="color:#bb60d5">id</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;lc_run--019e2559-4511-7403&#39;</span>, <span style="color:#666">)]}</span>, <span style="color:#bb60d5">next</span><span style="color:#666">=()</span>, <span style="color:#bb60d5">config</span><span style="color:#666">={</span><span style="color:#4070a0">&#39;configurable&#39;</span>: <span style="color:#666">{</span><span style="color:#4070a0">&#39;thread_id&#39;</span>: <span style="color:#4070a0">&#39;5&#39;</span>, <span style="color:#4070a0">&#39;checkpoint_ns&#39;</span>: <span style="color:#4070a0">&#39;&#39;</span>, <span style="color:#4070a0">&#39;checkpoint_id&#39;</span>: <span style="color:#4070a0">&#39;1f14f650-aa3c-6440&#39;</span><span style="color:#666">}}</span>, <span style="color:#bb60d5">metadata</span><span style="color:#666">={</span><span style="color:#4070a0">&#39;k&#39;</span>: 20, <span style="color:#4070a0">&#39;step&#39;</span>: 7, <span style="color:#4070a0">&#39;top_n&#39;</span>: 3, <span style="color:#4070a0">&#39;source&#39;</span>: <span style="color:#4070a0">&#39;update&#39;</span>, <span style="color:#4070a0">&#39;parents&#39;</span>: <span style="color:#666">{}}</span>, <span style="color:#bb60d5">created_at</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;2026-05-17T07:18:01.399182+00:00&#39;</span>, <span style="color:#bb60d5">parent_config</span><span style="color:#666">={</span><span style="color:#4070a0">&#39;configurable&#39;</span>: <span style="color:#666">{</span><span style="color:#4070a0">&#39;thread_id&#39;</span>: <span style="color:#4070a0">&#39;5&#39;</span>, <span style="color:#4070a0">&#39;checkpoint_ns&#39;</span>: <span style="color:#4070a0">&#39;&#39;</span>, <span style="color:#4070a0">&#39;checkpoint_id&#39;</span>: <span style="color:#4070a0">&#39;1f14f650-3615-6440&#39;</span><span style="color:#666">}}</span>, <span style="color:#bb60d5">tasks</span><span style="color:#666">=()</span>, <span style="color:#bb60d5">interrupts</span><span style="color:#666">=())</span></span></span></code></pre></div><p>从上述输出结果可以明显看到，前面两条消息已经被删除了。同时，基于此如果用户再次提问“基于当前保留下来的对话记忆，继续回答：郭靖比杨康先出生几个月？” 将会得到回答“郭靖比杨康先出生<strong>一个月</strong>。”</p>
+<p>新一轮对话后的数据库记忆为：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-shell" data-lang="shell"><span style="display:flex;"><span>StateSnapshot<span style="color:#666">(</span><span style="color:#bb60d5">values</span><span style="color:#666">={</span><span style="color:#4070a0">&#39;messages&#39;</span>: <span style="color:#666">[</span>ToolMessage<span style="color:#666">(</span><span style="color:#bb60d5">content</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;杨康边哭边说，涕泪滂沱，断断续续地道：......&#39;</span>, <span style="color:#bb60d5">name</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;retrieve_context&#39;</span>, <span style="color:#bb60d5">id</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;69d27ef5-2a11-4e2a&#39;</span>, <span style="color:#bb60d5">tool_call_id</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;call_7cdad6b1a9394482846227&#39;</span>, <span style="color:#bb60d5">artifact</span><span style="color:#666">=)</span>, AIMessage<span style="color:#666">(</span><span style="color:#bb60d5">content</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;郭靖和杨康是结义兄弟。两人在郭啸天灵前对拜八拜，结为兄弟，郭靖先出世一个月，为兄，杨康为弟。&#39;</span>, <span style="color:#bb60d5">id</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;lc_run--019e2558-f1ba-7c42&#39;</span>, <span style="color:#666">)</span>, HumanMessage<span style="color:#666">(</span><span style="color:#bb60d5">content</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;郭靖比杨康先出生几个月？&#39;</span>, , <span style="color:#bb60d5">id</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;e5336c6b-d60f-44bf&#39;</span><span style="color:#666">)</span>, AIMessage<span style="color:#666">(</span><span style="color:#bb60d5">content</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;根据提供的文本，郭靖比杨康先出生**一个月**。&#39;</span>, <span style="color:#bb60d5">id</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;lc_run--019e2559-4511-7403&#39;</span>, <span style="color:#666">)</span>, HumanMessage<span style="color:#666">(</span><span style="color:#bb60d5">content</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;基于当前保留下来的对话记忆，继续回答：郭靖比杨康先出生几个月？&#39;</span>, , <span style="color:#bb60d5">id</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;c052ef69-9484-4bba&#39;</span><span style="color:#666">)</span>, AIMessage<span style="color:#666">(</span><span style="color:#bb60d5">content</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;郭靖比杨康先出生**一个月**。&#39;</span>, <span style="color:#bb60d5">id</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;lc_run--019e2559-7b45-7282&#39;</span>,  <span style="color:#666">)]}</span>, <span style="color:#bb60d5">next</span><span style="color:#666">=()</span>, <span style="color:#bb60d5">config</span><span style="color:#666">={</span><span style="color:#4070a0">&#39;configurable&#39;</span>: <span style="color:#666">{</span><span style="color:#4070a0">&#39;thread_id&#39;</span>: <span style="color:#4070a0">&#39;5&#39;</span>, <span style="color:#4070a0">&#39;checkpoint_ns&#39;</span>: <span style="color:#4070a0">&#39;&#39;</span>, <span style="color:#4070a0">&#39;checkpoint_id&#39;</span>: <span style="color:#4070a0">&#39;1f14f650-bae5-6332&#39;</span><span style="color:#666">}}</span>, <span style="color:#bb60d5">metadata</span><span style="color:#666">={</span><span style="color:#4070a0">&#39;k&#39;</span>: 20, <span style="color:#4070a0">&#39;step&#39;</span>: 10, <span style="color:#4070a0">&#39;top_n&#39;</span>: 3, <span style="color:#4070a0">&#39;source&#39;</span>: <span style="color:#4070a0">&#39;loop&#39;</span>, <span style="color:#4070a0">&#39;parents&#39;</span>: <span style="color:#666">{}}</span>, <span style="color:#bb60d5">created_at</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;2026-05-17T07:18:03.146080+00:00&#39;</span>, <span style="color:#bb60d5">parent_config</span><span style="color:#666">={</span><span style="color:#4070a0">&#39;configurable&#39;</span>: <span style="color:#666">{</span><span style="color:#4070a0">&#39;thread_id&#39;</span>: <span style="color:#4070a0">&#39;5&#39;</span>, <span style="color:#4070a0">&#39;checkpoint_ns&#39;</span>: <span style="color:#4070a0">&#39;&#39;</span>, <span style="color:#4070a0">&#39;checkpoint_id&#39;</span>: <span style="color:#4070a0">&#39;1f14f650-ab4b-608e&#39;</span><span style="color:#666">}}</span>, <span style="color:#bb60d5">tasks</span><span style="color:#666">=()</span>, <span style="color:#bb60d5">interrupts</span><span style="color:#666">=())</span></span></span></code></pre></div><p>以上完整示例代码可参见 <code>Code/Chapter05/C04_short_memory_delete.py</code> 文件。</p>
+<h2 id="523-记忆修剪">5.2.3 记忆修剪<a class="anchor" href="#523-%e8%ae%b0%e5%bf%86%e4%bf%ae%e5%89%aa">#</a></h2>
+<p>在介绍完记忆删除这一策略后我们再来看记忆修剪。记忆修剪的思路非常直接，即设定一个数量上限，当消息列表的总 Token 数或者是总消息数接近这个上限时，自动裁剪掉多余的消息，只保留对应的部分。不过虽然可以通过设定 Token 限制来裁剪消息，但是实际上输入模型的 Token 还包括调用工具时的 Schema 信息、Tool ID、Tool Call信息等等，通过 Token 数量来进行记忆修剪并不太直接，因此并更建议使用消息数来进行限制，如图5-4所示。</p>
+<div align=center><img width="500" src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/images/agent/202605171756.jpg"/> </div><center>图 5-4 记忆修剪示意图</center>
+<p>在图5-4中，我们限定了历史消息的数量最多只能保留4条，且系统消息必须始终保留，同时必须以用户请求作为开始。可以看出记忆修剪在一定程度上和记忆删除类似，但是修剪的处理方式显然更加灵活。</p>
+<p>在 LangGraph 中可以通过 <code>trim_messages</code> 这个函数来对记忆进行修剪，我们只需要指定两个关键参数，即保留多少的消息数以及保留哪一部分内容即可完成整个过程。下面先来看一段示例代码。</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">if</span> <span style="color:#bb60d5">__name__</span> <span style="color:#666">==</span> <span style="color:#4070a0">&#39;__main__&#39;</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     messages <span style="color:#666">=</span> [
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>         SystemMessage(content<span style="color:#666">=</span><span style="color:#4070a0">&#34;你是一个问答助手。&#34;</span>),
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>         HumanMessage(content<span style="color:#666">=</span><span style="color:#4070a0">&#34;郭靖是谁？&#34;</span>),
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>         AIMessage(content<span style="color:#666">=</span><span style="color:#4070a0">&#34;郭靖是《射雕英雄传》的主角，出生于临安府牛家村。&#34;</span>),
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>         HumanMessage(content<span style="color:#666">=</span><span style="color:#4070a0">&#34;他的武功是谁教的？&#34;</span>),
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>         AIMessage(content<span style="color:#666">=</span><span style="color:#4070a0">&#34;郭靖先后师从江南七怪和洪七公，后又得到马钰道长的内功传授。&#34;</span>),
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>         HumanMessage(content<span style="color:#666">=</span><span style="color:#4070a0">&#34;黄蓉是谁？&#34;</span>)]
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>     trimmed <span style="color:#666">=</span> trim_messages(messages, max_tokens<span style="color:#666">=</span><span style="color:#40a070">4</span>, token_counter<span style="color:#666">=</span><span style="color:#007020">len</span>,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>         strategy<span style="color:#666">=</span><span style="color:#4070a0">&#34;last&#34;</span>, start_on<span style="color:#666">=</span><span style="color:#4070a0">&#34;human&#34;</span>, end_on<span style="color:#666">=</span>(<span style="color:#4070a0">&#34;human&#34;</span>, <span style="color:#4070a0">&#34;tool&#34;</span>),
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>         include_system<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">True</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>     <span style="color:#007020;font-weight:bold">for</span> msg <span style="color:#007020;font-weight:bold">in</span> trimmed:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>         <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;[</span><span style="color:#70a0d0">{</span>msg<span style="color:#666">.</span>type<span style="color:#70a0d0">}</span><span style="color:#4070a0">]: </span><span style="color:#70a0d0">{</span>msg<span style="color:#666">.</span>content<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)</span></span></code></pre></div><p>在上述代码中，第2~8行是模拟的一个交互对话消息列表。第9行<code>trim_messages</code> 便是用于对历史消息进行修剪，其中 <code>max_tokens</code> 用于指定最大 Token 数或历史消息数，取决于参数 <code>token_counter</code> 的设定。例如这里 <code>token_counter=len</code> 时，<code>max_tokens</code>表示最大历史消息数。第10行 <code>strategy=&quot;last&quot;</code> 表示修剪时的丢弃策略，有 <code>first</code> 和 <code>last</code> 两种策略，即保留前面 <code>max_tokens</code> 部分还是后面  <code>max_tokens</code> 部分； <code>start_on</code> 和 <code>end_on</code> 分别表示必须以什么样的消息类型开始或结束，为 <code>None</code> 则无此限制。第11行 <code>include_system</code> 表示是否一直保留系统消息，即 <code>SystemMessage</code>。通常来说会将 <code>include_system </code>设定为 <code>True</code>，因为系统消息中一般会包含固定的指令。</p>
+<p>对于上述示例来说一共需要保留4条消息记录，且保留策略为 <code>last</code>，同时除了系统消息外第1条必须为用户提问，因此最终输出结果为：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-shell" data-lang="shell"><span style="display:flex;"><span><span style="color:#666">[</span>system<span style="color:#666">]</span>: 你是一个问答助手。
+</span></span><span style="display:flex;"><span><span style="color:#666">[</span>human<span style="color:#666">]</span>: 他的武功是谁教的？
+</span></span><span style="display:flex;"><span><span style="color:#666">[</span>ai<span style="color:#666">]</span>: 郭靖先后师从江南七怪和洪七公，后又得到马钰道长的内功传授。
+</span></span><span style="display:flex;"><span><span style="color:#666">[</span>human<span style="color:#666">]</span>: 黄蓉是谁？</span></span></code></pre></div><p>如果此时仅去掉 <code>start_on=&quot;human&quot;</code> 的限制，且 <code>max_tokens=2</code>，则输出结果为：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-shell" data-lang="shell"><span style="display:flex;"><span><span style="color:#666">[</span>system<span style="color:#666">]</span>: 你是一个问答助手。
+</span></span><span style="display:flex;"><span><span style="color:#666">[</span>human<span style="color:#666">]</span>: 黄蓉是谁？</span></span></code></pre></div><p>以上完整示例代码可参见 <code>Code/Chapter05/C05_shrot_memory_trim.py</code> 文件。</p>
+<h2 id="524-记忆总结">5.2.4 记忆总结<a class="anchor" href="#524-%e8%ae%b0%e5%bf%86%e6%80%bb%e7%bb%93">#</a></h2>
+<p>记忆删除和修剪会直接裁剪掉超出上限的历史消息，这种方式简单直接但也有一个明显的代价，被裁掉的消息就彻底丢失了。如果用户在很早之前提到的信息对当前问题依然重要，模型就再也看不到了，所以需要使用一种更加友好的替代方案，即记忆总结，也叫做消息摘要。</p>
+<p>从字面意思可以知道，记忆总结它不是丢弃旧消息，而是把旧消息压缩成一段摘要保留下来，既释放了上下文空间，又没有完全丢失历史信息，它的基本逻辑是当消息列表积累到一定数量时触发一次摘要操作，让模型把当前的历史对话概括成一段文字存入全局状态中，然后删除大部分旧消息，只保留最近若干条内容，如图5-5所示。</p>
+<div align=center><img width="500" src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/images/agent/202605171757.jpg"/> </div><center>图 5-5 记忆总结示意图</center>
+<p>具体地，需要先在全局消息状态 <code>MessagesState</code> 中增加一个 <code>summary</code> 字段，用于保存历史消息的摘要总结，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">State</span>(MessagesState):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>     summary: <span style="color:#007020">str</span>  <span style="color:#60a0b0;font-style:italic"># 在 MessagesState 基础上新增摘要字段</span></span></span></code></pre></div><p>进一步，专门定义一个图节点来完成记忆总结这部分内容，代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">summarize_conversation</span>(state: State):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     summary <span style="color:#666">=</span> state<span style="color:#666">.</span>get(<span style="color:#4070a0">&#34;summary&#34;</span>, <span style="color:#4070a0">&#34;&#34;</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>     <span style="color:#007020;font-weight:bold">if</span> summary:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>         summary_message <span style="color:#666">=</span> (
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>             <span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;以下是目前为止对话的摘要：</span><span style="color:#70a0d0">{</span>summary<span style="color:#70a0d0">}</span><span style="color:#4070a0;font-weight:bold">\n\n</span><span style="color:#4070a0">&#34;</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>             <span style="color:#4070a0">&#34;请结合上方新的对话内容，对摘要进行补充和更新：&#34;</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>     <span style="color:#007020;font-weight:bold">else</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>         summary_message <span style="color:#666">=</span> <span style="color:#4070a0">&#34;</span><span style="color:#4070a0;font-weight:bold">\n</span><span style="color:#4070a0">请对上方的对话内容生成一段摘要：&#34;</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>     messages <span style="color:#666">=</span> state[<span style="color:#4070a0">&#34;messages&#34;</span>][:<span style="color:#666">-</span><span style="color:#40a070">2</span>] <span style="color:#666">+</span> [HumanMessage(content<span style="color:#666">=</span>summary_message)]
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>     response <span style="color:#666">=</span> get_llm_model()<span style="color:#666">.</span>invoke(messages)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>     delete_messages <span style="color:#666">=</span> [RemoveMessage(<span style="color:#007020">id</span><span style="color:#666">=</span>message<span style="color:#666">.</span>id) <span style="color:#007020;font-weight:bold">for</span> message <span style="color:#007020;font-weight:bold">in</span> state[<span style="color:#4070a0">&#34;messages&#34;</span>][:<span style="color:#666">-</span><span style="color:#40a070">2</span>]]
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>     <span style="color:#007020;font-weight:bold">return</span> {<span style="color:#4070a0">&#34;summary&#34;</span>: response<span style="color:#666">.</span>content, <span style="color:#4070a0">&#34;messages&#34;</span>: delete_messages}</span></span></code></pre></div><p>在上述代码中，第2行用于取当前节点之前的历史总结内容。第3~8行是根据不同的情况构造提示词。第9~10行是只保留最后两条消息，然后对其余消息进行总结，可以发现每次触发总结时，都会把上一次的总结作为上下文，让模型在此基础上继续扩展，而不是从头重新总结，这种&quot;滚动总结&quot;的设计保证了历史信息不会彻底丢失，同时消息列表的长度始终保持在可控范围内。第11行是标记已经被总结的待删除记忆内容。</p>
+<p>接着，可以通过如下方式来测试并验证，代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">if</span> <span style="color:#bb60d5">__name__</span> <span style="color:#666">==</span> <span style="color:#4070a0">&#39;__main__&#39;</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">with</span> PostgresSaver<span style="color:#666">.</span>from_conn_string(DB_URI) <span style="color:#007020;font-weight:bold">as</span> checkpointer:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>         <span style="color:#666">......</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>         messages <span style="color:#666">=</span> [
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>             SystemMessage(content<span style="color:#666">=</span><span style="color:#4070a0">&#34;你是一个问答助手。&#34;</span>),
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>             HumanMessage(content<span style="color:#666">=</span><span style="color:#4070a0">&#34;郭靖是谁？&#34;</span>),
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>             AIMessage(content<span style="color:#666">=</span><span style="color:#4070a0">&#34;郭靖是《射雕英雄传》的主角，出生于临安府牛家村。&#34;</span>),
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>             HumanMessage(content<span style="color:#666">=</span><span style="color:#4070a0">&#34;他的武功是谁教的？&#34;</span>),
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>             AIMessage(content<span style="color:#666">=</span><span style="color:#4070a0">&#34;郭靖先后师从江南七怪和洪七公，后又得到马钰道长的内功传授。&#34;</span>),
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>             HumanMessage(content<span style="color:#666">=</span><span style="color:#4070a0">&#34;黄蓉是谁？&#34;</span>)]
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>         inputs <span style="color:#666">=</span> {<span style="color:#4070a0">&#34;messages&#34;</span>: messages}
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>         <span style="color:#007020;font-weight:bold">for</span> event <span style="color:#007020;font-weight:bold">in</span> agent<span style="color:#666">.</span>stream(inputs, config<span style="color:#666">=</span>config):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>             <span style="color:#007020;font-weight:bold">for</span> node, update <span style="color:#007020;font-weight:bold">in</span> event<span style="color:#666">.</span>items():
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>                 <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;#### 节点 </span><span style="color:#70a0d0">{</span>node<span style="color:#70a0d0">}</span><span style="color:#4070a0"> 处理完毕&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>         snapshot <span style="color:#666">=</span> agent<span style="color:#666">.</span>get_state(config)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>         <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;========== 当前摘要 ==========</span><span style="color:#4070a0;font-weight:bold">\n</span><span style="color:#70a0d0">{</span>snapshot<span style="color:#666">.</span>values<span style="color:#666">.</span>get(<span style="color:#4070a0">&#39;summary&#39;</span>, <span style="color:#4070a0">&#39;&#39;</span>)<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>         print_memory(agent, config, <span style="color:#4070a0">&#34;========== 总结并删除后的数据库记忆 ==========&#34;</span>)</span></span></code></pre></div><p>根据 <code>summarize_conversation</code> 节点中的设定，上面前4条消息会被总结，然后保留最后两条消息在全局状态中。最终，上述代码运行后的出处结果类似如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-shell" data-lang="shell"><span style="display:flex;"><span><span style="color:#60a0b0;font-style:italic">#### 节点 summarize 处理完毕</span>
+</span></span><span style="display:flex;"><span><span style="color:#666">==========</span> <span style="color:#bb60d5">当前摘要</span> <span style="color:#666">==========</span>
+</span></span><span style="display:flex;"><span>对话中，用户首先询问“郭靖是谁”，回答指出他是金庸武侠小说《射雕英雄传》的主角，出生于临安府牛家村；随后用户追问“他的武功是谁教的”，但该问题尚未得到回答。当前对话仅完成前两轮，信息停留在郭靖的身份介绍层面。
+</span></span><span style="display:flex;"><span><span style="color:#666">==========</span> <span style="color:#bb60d5">总结并删除后的数据库记忆</span> <span style="color:#666">==========</span>
+</span></span><span style="display:flex;"><span>snapshot: StateSnapshot<span style="color:#666">(</span><span style="color:#bb60d5">values</span><span style="color:#666">={</span><span style="color:#4070a0">&#39;messages&#39;</span>: <span style="color:#666">[</span>AIMessage<span style="color:#666">(</span><span style="color:#bb60d5">content</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;郭靖先后师从江南七怪和洪七公，后又得到马钰道长的内功传授。&#39;</span>, <span style="color:#bb60d5">id</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;1e9a444a-ac01-4904&#39;</span><span style="color:#666">)</span>, HumanMessage<span style="color:#666">(</span><span style="color:#bb60d5">content</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;黄蓉是谁？&#39;</span>, <span style="color:#bb60d5">id</span><span style="color:#666">=</span><span style="color:#4070a0">&#39;bfdaca1a-7a7a-44c6&#39;</span><span style="color:#666">)]</span>, <span style="color:#4070a0">&#39;summary&#39;</span>: <span style="color:#4070a0">&#39;对话中，用户首先询问“郭靖是谁”...介绍层面。&#39;</span><span style="color:#666">})</span>
+</span></span><span style="display:flex;"><span>读取到 <span style="color:#bb60d5">thread_id</span><span style="color:#666">=</span><span style="color:#40a070">20260519</span> 的短期记忆，共 <span style="color:#40a070">2</span> 条消息：
+</span></span><span style="display:flex;"><span>01. ai: 郭靖先后师从江南七怪和洪七公，后又得到马钰道长的内功传授。
+</span></span><span style="display:flex;"><span>02. human: 黄蓉是谁？</span></span></code></pre></div><p>从上述输出结果可以看出，<code>summarize_conversation</code> 节点确实只对前面4条消息进行了总结，同时在全局状态中完整的保留了最近的两条消息记录，以上完整示例代码可参见 <code>Code/Chapter05/C06_shrot_memory_summary.py</code> 文件。</p>
+<p>到此，关于短期记忆管理的内容就介绍完了，在下一节内容中将会通过一个完整的示例进行介绍。</p>
+<h1 id="引用">引用<a class="anchor" href="#%e5%bc%95%e7%94%a8">#</a></h1>
+<p>[1] <a href="https://docs.langchain.com/oss/python/langgraph/add-memory">https://docs.langchain.com/oss/python/langgraph/add-memory</a></p>
+</article>
+ 
+      
+  <div class="book-page-pv text-small" id="busuanzi_container_page_pv">
+    <span class="book-page-pv-icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" focusable="false">
+        <path d="M1.5 12s3.9-6.5 10.5-6.5S22.5 12 22.5 12s-3.9 6.5-10.5 6.5S1.5 12 1.5 12Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7"/>
+        <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.7"/>
+      </svg>
+    </span>
+    <span class="book-page-pv-label">阅读</span>
+    <span class="book-page-pv-value" id="busuanzi_value_page_pv">--</span>
+  </div>
+
+
+
+      <footer class="book-footer">
+        
+  <div class="flex flex-wrap justify-between">
+
+<div>
+
+</div>
+
+<div>
+
+</div>
+
+</div>
+
+<div class="flex flex-wrap justify-between">
+    <span>
+    
+      <a href="/agent/chapter05/2caa39af072b43d5/" class="flex align-center">
+        <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/backward.svg" class="book-icon" alt="Backward" />
+        <span>5.2 短期记忆持久化与使用</span>
+      </a>
+    
+    </span>
+    <span>
+    
+      <a href="/agent/chapter05/0d7e1e8dd4294524/" class="flex align-center">
+        <span>5.4 拥有短期记忆的 RAG Agent</span>
+        <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/forward.svg" class="book-icon" alt="Forward" />
+      </a>
+    
+    </span>
+  </div>
+
+ 
+        
+  
+  <div class="book-comments"><div class="giscus"></div>
+<script src="https://giscus.app/client.js"
+        data-repo="mlwithme/mlwithme.github.io"
+        data-repo-id="R_kgDOTBt94Q"
+        data-category="Announcements"
+        data-category-id="DIC_kwDOTBt94c4C_21V"
+        data-mapping="pathname"
+        data-strict="1"
+        data-reactions-enabled="1"
+        data-emit-metadata="0"
+        data-input-position="top"
+        data-theme="preferred_color_scheme"
+        data-lang="zh-CN"
+        data-loading="lazy"
+        crossorigin="anonymous"
+        async>
+</script>
+</div>
+  
+ 
+        
+  <link rel="stylesheet" href="https://mlwithme.oss-cn-shanghai.aliyuncs.com/katex/katex.min.css" />
+  <script defer src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/katex/katex.min.js"></script>
+  <script defer src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/katex/auto-render.min.js"></script>
+  
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        if (window.renderMathInElement) {
+          renderMathInElement(
+            document.querySelector(".book-page"),
+            Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
+          );
+        }
+      });
+    </script>
+  
+
+
+        
+  
+ 
+        
+  
+    <script>(function(){document.querySelectorAll("pre:has(code)").forEach(e=>{e.addEventListener("click",e.focus),e.addEventListener("copy",function(t){if(t.preventDefault(),navigator.clipboard){const t=window.getSelection().toString()||e.textContent;navigator.clipboard.writeText(t)}})})})()</script>
+  
+
+      </footer>
+
+      <label for="menu-control" class="hidden book-menu-overlay"></label>
+    </div>
+
+    
+  
+  <aside class="book-toc">
+    <div class="book-toc-content">
+      
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#531-记忆管理的根源">5.3.1 记忆管理的根源</a></li>
+    <li><a href="#532-记忆删除">5.3.2 记忆删除</a></li>
+    <li><a href="#523-记忆修剪">5.2.3 记忆修剪</a></li>
+    <li><a href="#524-记忆总结">5.2.4 记忆总结</a></li>
+  </ul>
+</nav>
+
+  
+  <section class="book-page-qr-panel" aria-label="页面二维码与公众号二维码">
+    <section class="book-page-qr-block" aria-label="页面二维码">
+      <p class="book-page-qr-title">微信扫码查看</p>
+      <a
+        class="book-page-qr-image-link"
+        href="https://mlwithme.github.io/agent/chapter05/4cb3a72787f44a51/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="打开当前页面链接"
+      >
+        <img
+          class="book-page-qr-image"
+          src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fagent%2Fchapter05%2F4cb3a72787f44a51%2F"
+          alt="当前页面链接二维码"
+          loading="lazy"
+          decoding="async"
+          referrerpolicy="no-referrer"
+        >
+      </a>
+    </section>
+
+    <div class="book-page-qr-divider" aria-hidden="true"></div>
+
+    <section class="book-page-qr-block" aria-label="公众号二维码">
+      <p class="book-page-qr-title">关注公众号</p>
+      <div class="book-page-qr-image-link book-page-qr-image-frame">
+        <img
+          class="book-page-qr-image"
+          src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/images/gzh.png"
+          alt="公众号二维码"
+          loading="lazy"
+          decoding="async"
+        >
+      </div>
+    </section>
+  </section>
+
+
+
+
+    </div>
+  </aside>
+  
+ 
+  </main>
+
+  <button
+  type="button"
+  class="book-back-to-top"
+  aria-label="回到顶部"
+  title="回到顶部"
+>
+  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <path
+      d="M12 5.5l-5.25 5.25 1.5 1.5 2.7-2.7V18.5h2.1V9.55l2.7 2.7 1.5-1.5L12 5.5z"
+      fill="currentColor"
+    ></path>
+  </svg>
+</button>
+
+<script>
+  (function () {
+    var button = document.querySelector(".book-back-to-top");
+    if (!button) {
+      return;
+    }
+
+    var toggleButton = function () {
+      if (window.scrollY > 360) {
+        button.classList.add("is-visible");
+      } else {
+        button.classList.remove("is-visible");
+      }
+    };
+
+    button.addEventListener("click", function () {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+
+    toggleButton();
+    window.addEventListener("scroll", toggleButton, { passive: true });
+  })();
+</script>
+
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
