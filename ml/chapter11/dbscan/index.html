@@ -1,0 +1,4412 @@
+<!DOCTYPE html>
+<html lang="zh_CN" dir="ltr">
+<head>
+  <!--
+Made with Book Theme
+https://github.com/alex-shpak/hugo-book
+--><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="在前面几节内容中，我们陆续介绍了3种常见聚类算法的原理与实现过程，包括原始的Kmeans聚类算法、Kmeans&#43;&#43;聚类算法以及基于特征权重的加权Kmeans聚类算法 ，并且这3种都算是基于Kmeans框架下的聚类算法，也就是说它们本质上解决的都是一类数据的聚类问题。在本节内容中， …">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="index,follow,max-image-preview:large">
+
+
+
+
+
+<meta property="og:url" content="https://mlwithme.github.io/ml/chapter11/dbscan/">
+<meta property="og:site_name" content="《从零学AI指南手册》">
+<meta property="og:title" content="11.10 基于密度的聚类算法：DBSCAN 原理与应用">
+<meta property="og:description" content="在前面几节内容中，我们陆续介绍了3种常见聚类算法的原理与实现过程，包括原始的Kmeans聚类算法、Kmeans&#43;&#43;聚类算法以及基于特征权重的加权Kmeans聚类算法 ，并且这3种都算是基于Kmeans框架下的聚类算法，也就是说它们本质上解决的都是一类数据的聚类问题。在本节内容中， …">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:type" content="article">
+<meta property="og:image" content="https://mlwithme.oss-cn-shanghai.aliyuncs.com/share-cover.png">
+<meta property="og:image:url" content="https://mlwithme.oss-cn-shanghai.aliyuncs.com/share-cover.png">
+<meta property="og:image:secure_url" content="https://mlwithme.oss-cn-shanghai.aliyuncs.com/share-cover.png">
+<meta property="og:image:width" content="759">
+<meta property="og:image:height" content="759">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:alt" content="《从零学AI指南手册》 - 11.10 基于密度的聚类算法：DBSCAN 原理与应用">
+
+  <meta property="article:section" content="ml">
+  
+    <meta property="article:published_time" content="2026-06-22T17:10:22Z">
+  
+  
+    <meta property="article:modified_time" content="2026-06-28T21:46:33&#43;08:00">
+  
+  
+
+
+<script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"WebSite","description":"面向机器学习、深度学习与 AI Agent 的中文系统化学习手册，包含原理讲解、代码示例与实战案例。","inLanguage":"zh_CN","name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
+  </script>
+  <script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.oss-cn-shanghai.aliyuncs.com/share-cover.png"},"name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
+  </script><script type="application/ld+json">
+      {"@context":"https://schema.org","@type":"Article","articleSection":"ml","author":{"@type":"Person","name":"WangCheng","url":"https://mlwithme.github.io/author/"},"dateModified":"2026-06-28T21:46:33+08:00","datePublished":"2026-06-22T17:10:22Z","description":"在前面几节内容中，我们陆续介绍了3种常见聚类算法的原理与实现过程，包括原始的Kmeans聚类算法、Kmeans++聚类算法以及基于特征权重的加权Kmeans聚类算法 ，并且这3种都算是基于Kmeans框架下的聚类算法，也就是说它们本质上解决的都是一类数据的聚类问题。在本节内容中， …","headline":"11.10 基于密度的聚类算法：DBSCAN 原理与应用","image":["https://mlwithme.oss-cn-shanghai.aliyuncs.com/share-cover.png"],"inLanguage":"zh_CN","mainEntityOfPage":"https://mlwithme.github.io/ml/chapter11/dbscan/","publisher":{"@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.oss-cn-shanghai.aliyuncs.com/share-cover.png"},"name":"《从零学AI指南手册》"},"url":"https://mlwithme.github.io/ml/chapter11/dbscan/"}
+    </script><script type="application/ld+json">
+        {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","item":"https://mlwithme.github.io/","name":"首页","position":1},{"@type":"ListItem","item":"https://mlwithme.github.io/ml/","name":"机器学习","position":2},{"@type":"ListItem","item":"https://mlwithme.github.io/ml/chapter11/","name":"第 11 章 聚类分析、KMeans 与层次聚类教程","position":3},{"@type":"ListItem","item":"https://mlwithme.github.io/ml/chapter11/dbscan/","name":"11.10 基于密度的聚类算法：DBSCAN 原理与应用","position":4}]}
+      </script>
+
+<title>11.10 基于密度的聚类算法：DBSCAN 原理与应用 • 《从零学AI指南手册》</title>
+<link rel="icon" href="https://mlwithme.oss-cn-shanghai.aliyuncs.com/favicon.png" type="image/png">
+<link rel="shortcut icon" href="https://mlwithme.oss-cn-shanghai.aliyuncs.com/favicon.png" type="image/png">
+<link rel="apple-touch-icon" href="https://mlwithme.oss-cn-shanghai.aliyuncs.com/favicon.png">
+
+<link rel="manifest" href="/manifest.json">
+<link rel="canonical" href="https://mlwithme.github.io/ml/chapter11/dbscan/">
+<link rel="stylesheet" href="/book.min.7bef1ddd28a19c9d3bf4a9b252146d7f9b5fe85be58199fd828dc2472e8725bd.css" integrity="sha256-e&#43;8d3SihnJ079KmyUhRtf5tf6FvlgZn9go3CRy6HJb0=" crossorigin="anonymous">
+  <script defer type="module" src="/en.search.min.1b85e304b4edf759bf60d76f5b68977a95300af39fb3246a0f98780446f7050e.js" integrity="sha256-G4XjBLTt91m/YNdvW2iXepUwCvOfsyRqD5h4BEb3BQ4=" crossorigin="anonymous"></script>
+
+  
+
+
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="11.10 基于密度的聚类算法：DBSCAN 原理与应用">
+<meta name="twitter:description" content="在前面几节内容中，我们陆续介绍了3种常见聚类算法的原理与实现过程，包括原始的Kmeans聚类算法、Kmeans&#43;&#43;聚类算法以及基于特征权重的加权Kmeans聚类算法 ，并且这3种都算是基于Kmeans框架下的聚类算法，也就是说它们本质上解决的都是一类数据的聚类问题。在本节内容中， …">
+<meta name="twitter:url" content="https://mlwithme.github.io/ml/chapter11/dbscan/">
+<meta name="twitter:image" content="https://mlwithme.oss-cn-shanghai.aliyuncs.com/share-cover.png">
+<meta name="twitter:image:alt" content="《从零学AI指南手册》 - 11.10 基于密度的聚类算法：DBSCAN 原理与应用">
+<script>
+  var _hmt = _hmt || [];
+  (function() {
+    var hm = document.createElement("script");
+    hm.src = "https://hm.baidu.com/hm.js?74a336dd47fbbab3ceb99d4ad8afcb76";
+    var s = document.getElementsByTagName("script")[0];
+    s.parentNode.insertBefore(hm, s);
+  })();
+</script>
+<script async src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
+
+</head>
+<body dir="ltr" class="book-kind-page book-type-ml">
+  <input type="checkbox" class="hidden toggle" id="menu-control" />
+  <input type="checkbox" class="hidden toggle" id="toc-control" />
+  <main class="container flex">
+    
+<aside class="book-menu">
+  <div class="book-menu-content">
+    
+  <nav>
+<h2 class="book-brand">
+  <a class="flex align-center" href="/"><span>《从零学AI指南手册》</span>
+  </a>
+</h2>
+
+
+<div class="book-search hidden">
+  <input id="book-search-input" type="text" 
+    placeholder="Search"
+    aria-label="Search"
+    maxlength="64" />
+  <div class="book-search-spinner hidden"></div>
+  <ul id="book-search-results"></ul>
+</div>
+<script>document.querySelector(".book-search").classList.remove("hidden")</script>
+
+
+
+
+
+
+
+
+
+
+
+  
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/featured/" class="">
+      <span class="book-menu-link-title">精选文章</span>
+</a>
+  
+
+          
+  <ul>
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/" class="">
+      <span class="book-menu-link-title">大模型Agent开发</span>
+</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-279cf10e5100caa4f65ba3f7dd8888a4" class="toggle"  />
+    <label for="section-279cf10e5100caa4f65ba3f7dd8888a4" class="flex">
+      <a href="/agent/chapter01/" class="">
+        <span class="book-menu-link-title">第 1 章 RAG 基础概念</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/what-is-rag/" class="">
+      <span class="book-menu-link-title">1.1 RAG 提出背景</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/rag-pipeline-overview/" class="">
+      <span class="book-menu-link-title">1.2 RAG 流程概览</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-83c662c2764f1c19f8005eab77fee110" class="toggle"  />
+    <label for="section-83c662c2764f1c19f8005eab77fee110" class="flex">
+      <a href="/agent/chapter02/" class="">
+        <span class="book-menu-link-title">第 2 章 大模型接入与使用</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/intro-to-llm-sdk/" class="">
+      <span class="book-menu-link-title">2.1 SDK 介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/modern-llm-sdk/" class="">
+      <span class="book-menu-link-title">2.2 现代大模型中的 SDK</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/dashscope-api-overview/" class="">
+      <span class="book-menu-link-title">2.3 DashScope 接口体系</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/qwen-onboarding/" class="">
+      <span class="book-menu-link-title">2.4 千问大模型接入与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-1e583d7a26333453241d87c5c16592bd" class="toggle"  />
+    <label for="section-1e583d7a26333453241d87c5c16592bd" class="flex">
+      <a href="/agent/chapter03/" class="">
+        <span class="book-menu-link-title">第 3 章 文档标准化与语义检索</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/document-loading-and-preprocessing/" class="">
+      <span class="book-menu-link-title">3.1 文档加载与标准化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/text-splitting-strategies/" class="">
+      <span class="book-menu-link-title">3.2 常见文本切分策略</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/vector-database-selection/" class="">
+      <span class="book-menu-link-title">3.3 向量数据库选择</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/qwen-embedding-model/" class="">
+      <span class="book-menu-link-title">3.4 Qwen3 Embedding 模型介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/semantic-retrieval-pipeline/" class="">
+      <span class="book-menu-link-title">3.5 语义搜索引擎构建</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/milvus-tutorial/" class="">
+      <span class="book-menu-link-title">3.6  Milvus 模块解析</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="toggle"  />
+    <label for="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="flex">
+      <a href="/agent/chapter04/" class="">
+        <span class="book-menu-link-title">第 4 章 RAG 与 Agent</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/two-step-rag/" class="">
+      <span class="book-menu-link-title">4.1 两步式 RAG 搭建</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/function-calling-basics/" class="">
+      <span class="book-menu-link-title">4.2 Function Calling 概念介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/langchain-tool-decorator/" class="">
+      <span class="book-menu-link-title">4.3 LangChain 中的 Tool 修饰器</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/rag-agent-essentials/" class="">
+      <span class="book-menu-link-title">4.4 RAG Agent 原理与搭建</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/react-framework/" class="">
+      <span class="book-menu-link-title">4.5 复杂问题拆解与ReAct框架</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/two-stage-indexing/" class="">
+      <span class="book-menu-link-title">4.6 RAG 中的两阶段索引</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/qwen3-reranking/" class="">
+      <span class="book-menu-link-title">4.7 Qwen3 Reranking 原理与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/two-stage-rag-agent/" class="">
+      <span class="book-menu-link-title">4.8 基于两阶段索引的 RAG Agent</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/langgraph-basics/" class="">
+      <span class="book-menu-link-title">4.9 LangGraph 基本概念介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/langgraph-custom-rag-agent/" class="">
+      <span class="book-menu-link-title">4.10  基于 LangGraph 构建自定义 RAG Agent</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bf5130286ff0eee8f362b632167a5e6b" class="toggle"  />
+    <label for="section-bf5130286ff0eee8f362b632167a5e6b" class="flex">
+      <a href="/agent/chapter05/" class="">
+        <span class="book-menu-link-title">第 5 章 Agent 记忆机制与管理</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/agent-memory-overview/" class="">
+      <span class="book-menu-link-title">5.1 Agent 记忆机制概览</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/langchain-short-term-memory/" class="">
+      <span class="book-menu-link-title">5.2 短期记忆持久化与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/short-term-memory-management/" class="">
+      <span class="book-menu-link-title">5.3 短期记忆管理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/short-term-memory-rag-agent/" class="">
+      <span class="book-menu-link-title">5.4 拥有短期记忆的 RAG Agent</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/long-term-memory-strategies/" class="">
+      <span class="book-menu-link-title">5.5 长期记忆管理与持久化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/mini-chatgpt-from-scratch/" class="">
+      <span class="book-menu-link-title">5.6 从零实现 Mini ChatGPT 助手</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/pgvector-setup/" class="">
+      <span class="book-menu-link-title">5.7 pgvector 配置安装</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/long-term-memory-retrieval-and-forgetting/" class="">
+      <span class="book-menu-link-title">5.8 长期记忆检索与遗忘</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/langgraph-mini-chatgpt/" class="">
+      <span class="book-menu-link-title">5.9 基于 LangGraph 的Mini ChatGPT 助手</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/create-agent-mini-chatgpt/" class="">
+      <span class="book-menu-link-title">5.10 使用 create_agent 搭建 Mini ChatGPT</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/" class="">
+      <span class="book-menu-link-title">深度学习</span>
+</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/mindmap/" class="">
+      <span class="book-menu-link-title">目录思维导图</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-cf7621e8efb1f3153eaca44a113dcdb9" class="toggle"  />
+    <label for="section-cf7621e8efb1f3153eaca44a113dcdb9" class="flex">
+      <a href="/dl/chapter01/" class="">
+        <span class="book-menu-link-title">第 1 章 深度学习简介</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/dl-development-stages/" class="">
+      <span class="book-menu-link-title">1.1 深度学习的发展阶段</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/dl-key-figures/" class="">
+      <span class="book-menu-link-title">1.2 深度学习中的关键人物</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/mainstream-dl-frameworks/" class="">
+      <span class="book-menu-link-title">1.3 深度学习框架介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f9bf1a68c19405769f9c4a1495708a55" class="toggle"  />
+    <label for="section-f9bf1a68c19405769f9c4a1495708a55" class="flex">
+      <a href="/dl/chapter02/" class="">
+        <span class="book-menu-link-title">第 2 章 环境配置</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/dl-dev-environment-architecture/" class="">
+      <span class="book-menu-link-title">2.1 体系结构介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/dl-cuda-pytorch-install/" class="">
+      <span class="book-menu-link-title">2.2 深度学习环境安装</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/dl-cuda-training-env-setup/" class="">
+      <span class="book-menu-link-title">2.3 开发环境安装配置</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="toggle"  />
+    <label for="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="flex">
+      <a href="/dl/chapter03/" class="">
+        <span class="book-menu-link-title">第 3 章 深度学习基础</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/linear-regression-basics/" class="">
+      <span class="book-menu-link-title">3.1 线性回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/linear-regression-implementation/" class="">
+      <span class="book-menu-link-title">3.2 线性回归简洁实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/backpropagation-and-gradient-descent/" class="">
+      <span class="book-menu-link-title">3.3 梯度下降与反向传播</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/regression-from-scratch/" class="">
+      <span class="book-menu-link-title">3.4 从零实现回归模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/softmax-regression-basics/" class="">
+      <span class="book-menu-link-title">3.5 从逻辑回归到Softmax回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/softmax-regression-implementation/" class="">
+      <span class="book-menu-link-title">3.6 Softmax回归简洁实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/softmax-regression-from-scratch/" class="">
+      <span class="book-menu-link-title">3.7 从零实现分类模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/regression-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">3.8 回归模型评估指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/classification-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">3.9 分类模型评估指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/overfitting-and-regularization/" class="">
+      <span class="book-menu-link-title">3.10 过拟合与正则化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/hyperparameters-and-cross-validation/" class="">
+      <span class="book-menu-link-title">3.11 超参数与交叉验证</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/activation-functions/" class="">
+      <span class="book-menu-link-title">3.12 激活函数</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/multi-label-classification/" class="">
+      <span class="book-menu-link-title">3.13 多标签分类</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-7a12cee83820a928df00362d70804a97" class="toggle"  />
+    <label for="section-7a12cee83820a928df00362d70804a97" class="flex">
+      <a href="/dl/chapter04/" class="">
+        <span class="book-menu-link-title">第 4 章 卷积神经网络</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/cnn-basics/" class="">
+      <span class="book-menu-link-title">4.1 卷积的概念</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/convolution-operation/" class="">
+      <span class="book-menu-link-title">4.2 卷积的计算过程</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/convolution-and-pooling/" class="">
+      <span class="book-menu-link-title">4.3 填充和池化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/lenet5/" class="">
+      <span class="book-menu-link-title">4.4 LeNet5网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/alexnet/" class="">
+      <span class="book-menu-link-title">4.5 AlexNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/vgg/" class="">
+      <span class="book-menu-link-title">4.6 VGG网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/nin/" class="">
+      <span class="book-menu-link-title">4.7 NIN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/googlenet/" class="">
+      <span class="book-menu-link-title">4.8 GoogLeNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/resnet/" class="">
+      <span class="book-menu-link-title">4.9 ResNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/densenet/" class="">
+      <span class="book-menu-link-title">4.10 DenseNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-be9addfd3a15c372d609d09cabb94159" class="toggle"  />
+    <label for="section-be9addfd3a15c372d609d09cabb94159" class="flex">
+      <a href="/dl/chapter05/" class="">
+        <span class="book-menu-link-title">第 5 章 模型训练与复用</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/training-logs-management/" class="">
+      <span class="book-menu-link-title">5.1 参数及日志管理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/tensorboard-tutorial/" class="">
+      <span class="book-menu-link-title">5.2 Tensorboard可视化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/pytorch-model-save-load/" class="">
+      <span class="book-menu-link-title">5.3 模型的保存与复用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/transfer-learning-tutorial/" class="">
+      <span class="book-menu-link-title">5.4 模型的迁移学习</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/pretrained-model-reuse/" class="">
+      <span class="book-menu-link-title">5.5 开源模型复用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/multi-gpu-training/" class="">
+      <span class="book-menu-link-title">5.6 多GPU训练</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/training-data-preprocessing-cache/" class="">
+      <span class="book-menu-link-title">5.7 数据预处理与缓存</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="toggle"  />
+    <label for="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="flex">
+      <a href="/dl/chapter06/" class="">
+        <span class="book-menu-link-title">第 6 章 模型优化方法</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/learning-rate-scheduler/" class="">
+      <span class="book-menu-link-title">6.1 学习率调度器</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/gradient-clipping/" class="">
+      <span class="book-menu-link-title">6.2 梯度裁剪</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/batch-norm/" class="">
+      <span class="book-menu-link-title">6.3 批归一化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/layer-norm/" class="">
+      <span class="book-menu-link-title">6.4 层归一化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/group-norm/" class="">
+      <span class="book-menu-link-title">6.5 组归一化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/momentum/" class="">
+      <span class="book-menu-link-title">6.6 动量法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/ada-grad/" class="">
+      <span class="book-menu-link-title">6.7 AdaGrad算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/ada-delta/" class="">
+      <span class="book-menu-link-title">6.8 AdaDelta算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/adam/" class="">
+      <span class="book-menu-link-title">6.9 Adam算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/weight-initialization/" class="">
+      <span class="book-menu-link-title">6.10 初始化方法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-517b751d7c44a7ac77d25d295ed44271" class="toggle"  />
+    <label for="section-517b751d7c44a7ac77d25d295ed44271" class="flex">
+      <a href="/dl/chapter07/" class="">
+        <span class="book-menu-link-title">第 7 章 循环神经网络</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/rnn-basics/" class="">
+      <span class="book-menu-link-title">7.1 RNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/time-series-modeling/" class="">
+      <span class="book-menu-link-title">7.2 时序数据</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/lstm/" class="">
+      <span class="book-menu-link-title">7.3 LSTM网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/gru/" class="">
+      <span class="book-menu-link-title">7.4 GRU网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/bi-rnn/" class="">
+      <span class="book-menu-link-title">7.5 BiRNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/char-rnn/" class="">
+      <span class="book-menu-link-title">7.6 CharRNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-b9b861f64ba32bc68dfb977497de37d9" class="toggle"  />
+    <label for="section-b9b861f64ba32bc68dfb977497de37d9" class="flex">
+      <a href="/dl/chapter08/" class="">
+        <span class="book-menu-link-title">第 8 章 时序与模型融合</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/textcnn/" class="">
+      <span class="book-menu-link-title">8.1 TextCNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/textrnn/" class="">
+      <span class="book-menu-link-title">8.2 TextRNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/cnn-rnn/" class="">
+      <span class="book-menu-link-title">8.3 CNN-RNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/convlstm/" class="">
+      <span class="book-menu-link-title">8.4 ConvLSTM网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/3dcnn/" class="">
+      <span class="book-menu-link-title">8.5 3DCNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/stresnet/" class="">
+      <span class="book-menu-link-title">8.6 STResNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-e54a1e28b1438b8266637bcb8dac1a44" class="toggle"  />
+    <label for="section-e54a1e28b1438b8266637bcb8dac1a44" class="flex">
+      <a href="/dl/chapter09/" class="">
+        <span class="book-menu-link-title">第 9 章 自然语言处理</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/nlp-basics/" class="">
+      <span class="book-menu-link-title">9.1 自然语言处理介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/word2vec-principle/" class="">
+      <span class="book-menu-link-title">9.2 Word2Vec词向量</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/word2vec-training-and-usage/" class="">
+      <span class="book-menu-link-title">9.3 Word2Vec训练与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/glove/" class="">
+      <span class="book-menu-link-title">9.4 GloVe词向量</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/word-vector-finetuning/" class="">
+      <span class="book-menu-link-title">9.5 词向量的微调使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/fasttext/" class="">
+      <span class="book-menu-link-title">9.6 fastText网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/seq2seq-tutorial/" class="">
+      <span class="book-menu-link-title">9.7 Seq2Seq网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/seq-model-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">9.8 序列模型评价指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/nmt-seq2seq/" class="">
+      <span class="book-menu-link-title">9.9 NMT网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/attention-mechanism/" class="">
+      <span class="book-menu-link-title">9.10 注意力机制</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/nmt-with-attention/" class="">
+      <span class="book-menu-link-title">9.11 含注意力的NMT网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/rnn-with-attention/" class="">
+      <span class="book-menu-link-title">9.12 含注意力的RNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f6636b2f9dc1df93b9fa64dd201716d9" class="toggle"  />
+    <label for="section-f6636b2f9dc1df93b9fa64dd201716d9" class="flex">
+      <a href="/dl/chapter10/" class="">
+        <span class="book-menu-link-title">第 10 章 现代神经网络</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/elmo/" class="">
+      <span class="book-menu-link-title">10.1 ELMo网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-principle/" class="">
+      <span class="book-menu-link-title">10.2 Transformer网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-architecture/" class="">
+      <span class="book-menu-link-title">10.3 Transformer结构</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-implementation/" class="">
+      <span class="book-menu-link-title">10.4 Transformer实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-couplet-model/" class="">
+      <span class="book-menu-link-title">10.5 Transformer对联模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-principle/" class="">
+      <span class="book-menu-link-title">10.6 BERT网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-from-scratch/" class="">
+      <span class="book-menu-link-title">10.7 从零实现BERT</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-text-classification/" class="">
+      <span class="book-menu-link-title">10.8 BERT文本分类模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-sentence-pair-matching/" class="">
+      <span class="book-menu-link-title">10.9 BERT问题选择模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-question-answering/" class="">
+      <span class="book-menu-link-title">10.10 BERT问题回答模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-ner/" class="">
+      <span class="book-menu-link-title">10.11 BERT命名体识别模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-pretraining/" class="">
+      <span class="book-menu-link-title">10.12 BERT从零训练</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-1/" class="">
+      <span class="book-menu-link-title">10.13 GPT-1模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-2-and-gpt-3/" class="">
+      <span class="book-menu-link-title">10.14 GPT-2与GPT-3模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-2-chinese-pretraining/" class="">
+      <span class="book-menu-link-title">10.15 基于GPT-2的中文预训练模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/instructgpt-and-chatgpt/" class="">
+      <span class="book-menu-link-title">10.16 InstructGPT与ChatGPT</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/chatgpt-prompt-engineering/" class="">
+      <span class="book-menu-link-title">10.17 ChatGPT与提示词工程</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/baichuan-usage/" class="">
+      <span class="book-menu-link-title">10.18 百川大模型使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/baichuan-implementation/" class="">
+      <span class="book-menu-link-title">10.19 百川大模型实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-4-and-gpts/" class="">
+      <span class="book-menu-link-title">10.20 GPT-4与GPTs使用</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/" class="">
+      <span class="book-menu-link-title">机器学习</span>
+</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/mindmap/" class="">
+      <span class="book-menu-link-title">目录思维导图</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-48f56957e94e3cf66f3022103a7dd0ff" class="toggle"  />
+    <label for="section-48f56957e94e3cf66f3022103a7dd0ff" class="flex">
+      <a href="/ml/chapter01/" class="">
+        <span class="book-menu-link-title">第 1 章 环境配置</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/conda-install-tutorial/" class="">
+      <span class="book-menu-link-title">1.1 安装使用Conda</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/ml-conda-env-setup/" class="">
+      <span class="book-menu-link-title">1.2 开发环境安装配置</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-56a896338a1c41249d22a3efa0e0063c" class="toggle"  />
+    <label for="section-56a896338a1c41249d22a3efa0e0063c" class="flex">
+      <a href="/ml/chapter02/" class="">
+        <span class="book-menu-link-title">第 2 章 线性回归</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/linear-regression-basics/" class="">
+      <span class="book-menu-link-title">2.1 模型的建立与求解</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/multivariate-linear-regression/" class="">
+      <span class="book-menu-link-title">2.2 多变量线性回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/polynomial-regression/" class="">
+      <span class="book-menu-link-title">2.3 多项式回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/regression-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">2.4 回归模型评估</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/gradient-descent-derivation/" class="">
+      <span class="book-menu-link-title">2.5 梯度下降</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/normal-distribution/" class="">
+      <span class="book-menu-link-title">2.6 正态分布</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/linear-regression-loss-derivation/" class="">
+      <span class="book-menu-link-title">2.7 目标函数推导</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ccd0dc9386ea80613d4cedf91b30058d" class="toggle"  />
+    <label for="section-ccd0dc9386ea80613d4cedf91b30058d" class="flex">
+      <a href="/ml/chapter03/" class="">
+        <span class="book-menu-link-title">第 3 章 逻辑回归</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/logistic-regression-basics/" class="">
+      <span class="book-menu-link-title">3.1 模型的建立与求解</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/logistic-regression-multiclass/" class="">
+      <span class="book-menu-link-title">3.2 多分类任务</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/classification-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">3.3 常见的分类评估指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/logistic-regression-loss-derivation/" class="">
+      <span class="book-menu-link-title">3.4 目标函数推导</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="toggle"  />
+    <label for="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="flex">
+      <a href="/ml/chapter04/" class="">
+        <span class="book-menu-link-title">第 4 章 模型的改善与泛化</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/generalization-basics/" class="">
+      <span class="book-menu-link-title">4.1 基本概念</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/feature-scaling/" class="">
+      <span class="book-menu-link-title">4.2 特征标准化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/overfitting-solutions/" class="">
+      <span class="book-menu-link-title">4.3过拟合</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/l1-l2-regularization/" class="">
+      <span class="book-menu-link-title">4.4 正则化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/bias-and-variance/" class="">
+      <span class="book-menu-link-title">4.5 偏差、方差与交叉验证</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/handwritten-digit-recognition-case/" class="">
+      <span class="book-menu-link-title">4.6 实例分析手写体识别</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-40f463d9d502d24b86ea6120b7030123" class="toggle"  />
+    <label for="section-40f463d9d502d24b86ea6120b7030123" class="flex">
+      <a href="/ml/chapter05/" class="">
+        <span class="book-menu-link-title">第 5 章 K近邻</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/knn-principle/" class="">
+      <span class="book-menu-link-title">5.1 K近邻思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/knn-algorithm-details/" class="">
+      <span class="book-menu-link-title">5.2 K近邻原理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/sklearn-knn-example/" class="">
+      <span class="book-menu-link-title">5.3 sklearn接口与示例代码</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/kd-tree-knn/" class="">
+      <span class="book-menu-link-title">5.4 kd树构建与搜索</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/knn-from-scratch/" class="">
+      <span class="book-menu-link-title">5.5 从零实现K近邻</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-5a460dc18f1e79253296cf2cd0498446" class="toggle"  />
+    <label for="section-5a460dc18f1e79253296cf2cd0498446" class="flex">
+      <a href="/ml/chapter06/" class="">
+        <span class="book-menu-link-title">第 6 章 文本特征与模型复用</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/bag-of-words/" class="">
+      <span class="book-menu-link-title">6.1 词袋模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/knn-spam-classification/" class="">
+      <span class="book-menu-link-title">6 .2 基于K近邻算法的垃圾邮件分类</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/tf-idf/" class="">
+      <span class="book-menu-link-title">6.3 考虑权重的词袋模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/wordcloud-generation/" class="">
+      <span class="book-menu-link-title">6.4 词云图</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-96f45a8b8c8b75adc70c78026d93dbf6" class="toggle"  />
+    <label for="section-96f45a8b8c8b75adc70c78026d93dbf6" class="flex">
+      <a href="/ml/chapter07/" class="">
+        <span class="book-menu-link-title">第 7 章 朴素贝叶斯</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/naive-bayes-basics/" class="">
+      <span class="book-menu-link-title">7.1 朴素贝叶斯算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/bayes-estimation/" class="">
+      <span class="book-menu-link-title">7.2 贝叶斯估计</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/naive-bayes-implementation/" class="">
+      <span class="book-menu-link-title">7.3 朴素贝叶斯实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/multinomial-naive-bayes/" class="">
+      <span class="book-menu-link-title">7.4 多项式朴素贝叶斯原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/gaussian-naive-bayes/" class="">
+      <span class="book-menu-link-title">7.5 高斯朴素贝叶斯原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-22476e49d5058c3e5e7e7366b7ab676f" class="toggle"  />
+    <label for="section-22476e49d5058c3e5e7e7366b7ab676f" class="flex">
+      <a href="/ml/chapter08/" class="">
+        <span class="book-menu-link-title">第 8 章 决策树</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-principle/" class="">
+      <span class="book-menu-link-title">8.1 决策树的基本思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-sklearn/" class="">
+      <span class="book-menu-link-title">8.2 决策树建模与可视化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/id3-vs-c45/" class="">
+      <span class="book-menu-link-title">8.3 决策树生成之ID3与C4.5</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-pruning/" class="">
+      <span class="book-menu-link-title">8.4 决策树剪枝过程</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-from-scratch/" class="">
+      <span class="book-menu-link-title">8.5 从零实现ID3与C4.5算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-continuous-features/" class="">
+      <span class="book-menu-link-title">8.6 连续型特征变量下决策树实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/cart-algorithm/" class="">
+      <span class="book-menu-link-title">8.7 CART生成与剪枝算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/cart-from-scratch/" class="">
+      <span class="book-menu-link-title">8.8 从零实现CART算法及剪枝示例</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-2feb6a51cabb61dba860f45c1881386b" class="toggle"  />
+    <label for="section-2feb6a51cabb61dba860f45c1881386b" class="flex">
+      <a href="/ml/chapter09/" class="">
+        <span class="book-menu-link-title">第 9 章 集成学习与提升算法</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/ensemble-learning-basics/" class="">
+      <span class="book-menu-link-title">9.1 集成学习算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/random-forest-principle/" class="">
+      <span class="book-menu-link-title">9.2 随机森林</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/random-forest-titanic/" class="">
+      <span class="book-menu-link-title">9.3 泰坦尼克号生还预测</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/adaboost/" class="">
+      <span class="book-menu-link-title">9.4 AdaBoost原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/multi-adaboost/" class="">
+      <span class="book-menu-link-title">9.5 MultiAdaBoost原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/gradient-boost/" class="">
+      <span class="book-menu-link-title">9.6 Gradient Boost 原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-938ae119c3849b03ccb6f91cef4243dd" class="toggle"  />
+    <label for="section-938ae119c3849b03ccb6f91cef4243dd" class="flex">
+      <a href="/ml/chapter10/" class="">
+        <span class="book-menu-link-title">第 10 章 支持向量机</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-principle/" class="">
+      <span class="book-menu-link-title">10.1 SVM思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-nonlinear-kernel/" class="">
+      <span class="book-menu-link-title">10.2 SVM线性不可分</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-max-margin/" class="">
+      <span class="book-menu-link-title">10.3 SVM原理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-soft-margin/" class="">
+      <span class="book-menu-link-title">10.4 SVM中的软间隔</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/lagrange-multipliers/" class="">
+      <span class="book-menu-link-title">10.5 拉格朗日乘数法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/kkt-conditions/" class="">
+      <span class="book-menu-link-title">10.6 对偶性与KKT条件</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-optimization/" class="">
+      <span class="book-menu-link-title">10.7 SVM优化问题</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-kernel-functions/" class="">
+      <span class="book-menu-link-title">10.8 SVM核函数原理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/smo-algorithm/" class="">
+      <span class="book-menu-link-title">10.9 SMO算法求解SVM</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-from-scratch/" class="">
+      <span class="book-menu-link-title">10.10 从零实现SVM分类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-9f4d9786d4ab755fde42c64d09b0d026" class="toggle" checked />
+    <label for="section-9f4d9786d4ab755fde42c64d09b0d026" class="flex">
+      <a href="/ml/chapter11/" class="">
+        <span class="book-menu-link-title">第 11 章 聚类分析</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/clustering-basics/" class="">
+      <span class="book-menu-link-title">11.1 聚类算法的思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-principle/" class="">
+      <span class="book-menu-link-title">11.2 Kmeans聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-iteration/" class="">
+      <span class="book-menu-link-title">11.3 Kmeans算法求解</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-from-scratch/" class="">
+      <span class="book-menu-link-title">11.4 从零实现Kmeans聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-plus-plus/" class="">
+      <span class="book-menu-link-title">11.5 Kmeans&#43;&#43;聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/clustering-external-metrics/" class="">
+      <span class="book-menu-link-title">11.6 聚类外部评价指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/weighted-kmeans/" class="">
+      <span class="book-menu-link-title">11.7 加权Kmeans聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/clustering-internal-metrics/" class="">
+      <span class="book-menu-link-title">11.8 聚类内部评价指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-k-selection/" class="">
+      <span class="book-menu-link-title">11.9 聚类K值选取与分析</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/dbscan/" class="active">
+      <span class="book-menu-link-title">11.10 基于密度的聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/hierarchical-clustering/" class="">
+      <span class="book-menu-link-title">11.11 基于层次的聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-d5e78c45312818bb3abd5c19c858f7e5" class="toggle"  />
+    <label for="section-d5e78c45312818bb3abd5c19c858f7e5" class="flex">
+      <a href="/ml/chapter12/" class="">
+        <span class="book-menu-link-title">第 12 章 降维算法</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/pca-principle/" class="">
+      <span class="book-menu-link-title">12.1 主成分分析</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/kpca/" class="">
+      <span class="book-menu-link-title">12.2 基于核函数的主成分分析</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-a82b41bb7eb95af72bc11e8a3d668acd" class="toggle"  />
+    <label for="section-a82b41bb7eb95af72bc11e8a3d668acd" class="flex">
+      <a href="/ml/chapter13/" class="">
+        <span class="book-menu-link-title">第 13 章 自训练与标签传播</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/self-training/" class="">
+      <span class="book-menu-link-title">13.1 Self-Training 自训练算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/label-propagation/" class="">
+      <span class="book-menu-link-title">13.2 Label Propagation算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/label-spreading/" class="">
+      <span class="book-menu-link-title">13.3 Label Spreading 算法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</nav>
+
+
+
+
+  <script>(function(){var e=document.querySelector("aside .book-menu-content");addEventListener("beforeunload",function(){localStorage.setItem("menu.scrollTop",e.scrollTop)}),e.scrollTop=localStorage.getItem("menu.scrollTop")})()</script>
+
+
+
+  </div>
+</aside>
+ 
+
+    <div class="book-page">
+      <header class="book-header hidden">
+        
+  <div class="flex align-center justify-between">
+  <label for="menu-control">
+    <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/menu.svg" class="book-icon" alt="Menu" />
+  </label>
+
+  <h3>11.10 基于密度的聚类算法：DBSCAN 原理与应用</h3>
+
+  <label for="toc-control">
+    
+    <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/toc.svg" class="book-icon" alt="Table of Contents" />
+    
+  </label>
+</div>
+
+
+  
+  <aside class="hidden">
+    
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#11101-dbscan算法思想">11.10.1 DBSCAN算法思想</a></li>
+    <li><a href="#11102-dbscan示例代码">11.10.2 DBSCAN示例代码</a></li>
+    <li><a href="#11103-dbscan算法核心概念">11.10.3 DBSCAN算法核心概念</a></li>
+    <li><a href="#11104-dbscan算法原理">11.10.4 DBSCAN算法原理</a></li>
+    <li><a href="#11105-dbscan计算示例">11.10.5 DBSCAN计算示例</a></li>
+    <li><a href="#11106-dbscan优缺点">11.10.6 DBSCAN优缺点</a></li>
+    <li><a href="#11107-从零实现dbscan算法">11.10.7 从零实现DBSCAN算法</a></li>
+    <li><a href="#11108-dbscan使用示例">11.10.8 DBSCAN使用示例</a></li>
+    <li><a href="#11109-小结">11.10.9 小结</a></li>
+  </ul>
+</nav>
+
+  
+  <section class="book-page-qr-panel" aria-label="页面二维码与公众号二维码">
+    <section class="book-page-qr-block" aria-label="页面二维码">
+      <p class="book-page-qr-title">微信扫码查看</p>
+      <a
+        class="book-page-qr-image-link"
+        href="https://mlwithme.github.io/ml/chapter11/dbscan/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="打开当前页面链接"
+      >
+        <img
+          class="book-page-qr-image"
+          src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fml%2Fchapter11%2Fdbscan%2F"
+          alt="当前页面链接二维码"
+          loading="lazy"
+          decoding="async"
+          referrerpolicy="no-referrer"
+        >
+      </a>
+    </section>
+
+    <div class="book-page-qr-divider" aria-hidden="true"></div>
+
+    <section class="book-page-qr-block" aria-label="公众号二维码">
+      <p class="book-page-qr-title">关注公众号</p>
+      <div class="book-page-qr-image-link book-page-qr-image-frame">
+        <img
+          class="book-page-qr-image"
+          src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/images/gzh.png"
+          alt="公众号二维码"
+          loading="lazy"
+          decoding="async"
+        >
+      </div>
+    </section>
+  </section>
+
+
+
+
+  </aside>
+  
+ 
+      </header>
+
+      
+      
+  <article class="markdown book-article"><nav class="book-breadcrumbs text-small book-breadcrumbs--page" aria-label="面包屑导航">
+    <ol class="book-breadcrumbs__list"><li class="book-breadcrumbs__item"><a class="book-breadcrumbs__link" href="https://mlwithme.github.io/">首页</a></li><li class="book-breadcrumbs__item"><a class="book-breadcrumbs__link" href="https://mlwithme.github.io/ml/">机器学习</a></li><li class="book-breadcrumbs__item"><a class="book-breadcrumbs__link" href="https://mlwithme.github.io/ml/chapter11/">第 11 章 聚类分析</a></li><li class="book-breadcrumbs__item"><span class="book-breadcrumbs__current" aria-current="page">11.10 基于密度的聚类算法</span></li></ol>
+  </nav><div class="book-article-lastmod text-small">
+        <span class="book-article-lastmod-label">更新于</span>
+        <span class="book-article-lastmod-value">2026年6月28日</span>
+      </div><h1 id="1110-基于密度的聚类算法">11.10 基于密度的聚类算法<a class="anchor" href="#1110-%e5%9f%ba%e4%ba%8e%e5%af%86%e5%ba%a6%e7%9a%84%e8%81%9a%e7%b1%bb%e7%ae%97%e6%b3%95">#</a></h1>
+<p>在前面几节内容中，我们陆续介绍了3种常见聚类算法的原理与实现过程，包括原始的Kmeans聚类算法、Kmeans++聚类算法以及基于特征权重的加权Kmeans聚类算法 ，并且这3种都算是基于Kmeans框架下的聚类算法，也就是说它们本质上解决的都是一类数据的聚类问题。在本节内容中，我们将开始介绍一种新的聚类算法，即基于密度的聚类算法，其学习路线如图11-23所示。</p>
+<div align=center><img width="450" src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/images/ml/240427160551.jpg" alt="图 11-23 基于密度的聚类算法学习路线"/> </div><center>图 11-23 基于密度的聚类算法学习路线</center>
+<h2 id="11101-dbscan算法思想">11.10.1 DBSCAN算法思想<a class="anchor" href="#11101-dbscan%e7%ae%97%e6%b3%95%e6%80%9d%e6%83%b3">#</a></h2>
+<p>由于在实际场景中我们遇到的不仅仅只有图11-2所示簇结构的数据集，还可能存在一些其它簇结构形式的数据，例如图11-24所示的结构类型。</p>
+<div align=center><img width="450" src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/images/ml/22050420884.jpg" alt="图 11-24 异形数据集"/></div><center>图 11-24 异形数据集</center>
+<p>如图11-24所示，对于这两种异形的数据集来说，不管是采用前面介绍的3种聚类算法中的哪一种，最后得到的结果都会很差，因为类Kmeans聚类算法都不适合对这种数据进行聚类处理，并且如果一定要用类Kmeans聚类算法来进行聚类，那么将会得到如图11-25所示的结果。</p>
+<div align=center><img width="450" src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/images/ml/22050408396.jpg" alt="图 11-25 异形数据集K-means聚类结果"/></div><center>图 11-25 异形数据集K-means聚类结果</center>
+<p>如图11-25所示，左右两边均是采用Kmeans++算法聚类后的结果，其中不同颜色表示聚类算法给出的聚类结果，可以看到由于类Kmeans聚类算法的特性，其在这类数据集上的表现并不好。对于图11-25所示这样结构的数据，一种更好的办法是基于密度来进行聚类。</p>
+<p>基于密度的聚类算法（Density Based Spatial Clustering of Applications with Noise, DBSCAN），1996年由Martin Ester等人提出[1] [2]，它的核心思想是根据样本之间的密度（紧凑程度）来对样本进行聚类处理。例如对于图11-25中所示的两种异形数据来说，两种类别之间有着明显空白之处（密度小），而对于各类别内部的样本来说样本之间分布却非常紧凑（密度大），因此只需要将所有各自相互紧邻的样本点划分为不同的簇结构即可完成整个聚类过程。可以发现，基于这样的聚类思想不管待聚类的数据集是什么样的分布形式，都可以很好的对其进行聚类处理。同时，从算法的全称可以看出，DBSCAN算法的原理除了是基于密度这一特性外，它还能有效地发掘数据中的异常样本，即那些密度低且相对孤立的样本点。</p>
+<h2 id="11102-dbscan示例代码">11.10.2 DBSCAN示例代码<a class="anchor" href="#11102-dbscan%e7%a4%ba%e4%be%8b%e4%bb%a3%e7%a0%81">#</a></h2>
+<p>在介绍完DBSCAN算法的思想以后，我们再来看如何借助sklearn来完成整个建模过程，完整示例代码可参见 <code>AllBooKCode/Chapter11/C17_dbscan_train.py</code> 文件。具体地，先构造类似图11-25所示的数据集，然后使用sklearn中的DBSCAN模块来完成整个聚类过程，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">from</span> <span style="color:#0e84b5;font-weight:bold">sklearn.cluster</span> <span style="color:#007020;font-weight:bold">import</span> DBSCAN
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span> <span style="color:#007020;font-weight:bold">from</span> <span style="color:#0e84b5;font-weight:bold">sklearn.datasets</span> <span style="color:#007020;font-weight:bold">import</span> make_moons
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span> <span style="color:#007020;font-weight:bold">if</span> <span style="color:#bb60d5">__name__</span> <span style="color:#666">==</span> <span style="color:#4070a0">&#39;__main__&#39;</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">5</span>     X, y <span style="color:#666">=</span> make_moons(n_samples<span style="color:#666">=</span><span style="color:#40a070">700</span>, noise<span style="color:#666">=</span><span style="color:#40a070">0.05</span>, random_state<span style="color:#666">=</span><span style="color:#40a070">2020</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">6</span>     X <span style="color:#666">=</span> StandardScaler()<span style="color:#666">.</span>fit_transform(X)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">7</span>     db <span style="color:#666">=</span> DBSCAN(eps<span style="color:#666">=</span><span style="color:#40a070">0.3</span>, min_samples<span style="color:#666">=</span><span style="color:#40a070">10</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">8</span>     db<span style="color:#666">.</span>fit(X)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">9</span>     <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;调整兰德系数为: </span><span style="color:#70a0d0">{</span>adjusted_rand_score(y, db<span style="color:#666">.</span>labels_)<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)</span></span></code></pre></div><p>在上述代码中，第1行是导入基于密度的聚类模块。第2行是导入一个函数，并通过第5行所示的方式来构造形如图11-25右边所示数据集。第6行是对数据样本进行标准化处理。第7行是利用DDBSCAN聚类算法对样本进行聚类处理，其中<code>eps</code>和<code>min_samples</code>表示用于构建核心样本的两个关键参数，<code>eps</code>越大且<code>min_samples</code>越小则最终得到的簇结构将会偏少，反之则得到簇结构将会偏多，详细原理见下文。第8~9行则是对于样本进行聚类处理，并通过调整兰德系数来对聚类结果进行评估。</p>
+<h2 id="11103-dbscan算法核心概念">11.10.3 DBSCAN算法核心概念<a class="anchor" href="#11103-dbscan%e7%ae%97%e6%b3%95%e6%a0%b8%e5%bf%83%e6%a6%82%e5%bf%b5">#</a></h2>
+<p>在正式介绍DBSCAN算法的原理之前，先来介绍算法中几个非常重要的核心概念，核心样本、直接可达、可达和异常样本。同时，在DBSCAN算法中还有两个非常关键的超参数，半径$r$和最小样本数$\text{minPts}$，如图11-26所示。</p>
+<div align=center><img width="180" src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/images/ml/22050558061.jpg" alt="图 11-26 核心样本原理图"/></div><center>图 11-26 核心样本原理图</center>
+<p>1）核心样本（Core Point）：以样本点$p$为圆心$r$为半径作圆，如果圆域内至少存在$\text{minPts}$个样本（包括$p$自身），则称$p$为核心样本，否则称为非核心样本（Non-core Point）。</p>
+<p>2）直接可达（Directly Reachable ）：以核心样本$p$为圆心$r$为半径，圆域内的所有样本点对于$p$来说直接可达。</p>
+<p>如图11-26所示，以样本点$p$为圆心$r$为半径作圆，圆域内恰好存在$\text{minPts}=6$个样本，则此时称$p$为核心样本，称$q$称为非核心样本。同时，称圆域内的所有样本对于核心样本$p$来说直接可达。值得注意的一点是，直接可达是针对核心样本而言，例如图11-26中样本$q$对于$p$来说直接可达，但不能说成样本$p$对于$q$来说直接可达。</p>
+<p>3）可达（Reachable）：如果存在样本点 $p_1,p_2,...,p_n$，且 $p=p_1,q=p_n$，$p_{i+1}$对于$p_i$来说直接可达，那么称$q$对于$p$来说可达。注意，这里暗含着$p_1,...,p_{n-1}$均为核心样本。</p>
+<p>4）异常点（Outliers）：如果样本点$O$对于其它任何样本点来说均不直接可达，则称样本点$O$为异常点。</p>
+<div align=center><img width="400" src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/images/ml/22050545409.jpg" alt="图 11-27 样本可达原理图"/></div><center>图 11-27 样本可达原理图</center>
+<p>如图11-27所示，$p_1,p_2,p_3,p_4$均为核心样本，且$p_2$对于$p_1$来说直接可达，$p_3$对于$p_2$来说直接可达，$p_4$对于$p_3$来说直接可达，因此$p_4$对于$p_1$来说可达。同时，由于样本点$O$既不是核心样本，且对于其它样本来说也不直接可达，因此$O$为异常点。</p>
+<h2 id="11104-dbscan算法原理">11.10.4 DBSCAN算法原理<a class="anchor" href="#11104-dbscan%e7%ae%97%e6%b3%95%e5%8e%9f%e7%90%86">#</a></h2>
+<p>在介绍完DBSCAN算法中的几个核心概念后我们再来学习DBSCAN算法的原理就相对简单一些了。总的来说DBSCAN算法的聚类过程大致可以分为两大步：①先计算得到每个样本点以$r$为半径圆域内的样本点，并得到相应的核心样本点；②然后再依次遍历每个样本，根据其是否为核心样本来对直接可达的样本点进行簇类别的划分。</p>
+<p>具体地，整个聚类过程的详细步骤可以通过如下伪代码来进行表示：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">dbscan</span>():
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     label_num <span style="color:#666">=</span> <span style="color:#40a070">0</span>  
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>     labels <span style="color:#666">=</span>[<span style="color:#666">-</span><span style="color:#40a070">1</span>,<span style="color:#666">...</span>,<span style="color:#666">-</span><span style="color:#40a070">1</span>] <span style="color:#60a0b0;font-style:italic"># 长度为样本个数，均为-1的簇标签向量</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>     <span style="color:#007020;font-weight:bold">for</span> i <span style="color:#666">=</span> <span style="color:#40a070">0</span>,<span style="color:#666">...</span>,n <span style="color:#60a0b0;font-style:italic"># 遍历所有样本点</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>         <span style="color:#007020;font-weight:bold">if</span> (样本i已经访问过) 或 (样本i不是核心样本):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>             <span style="color:#007020;font-weight:bold">continue</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>         idx <span style="color:#666">=</span> i
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>         <span style="color:#007020;font-weight:bold">while</span> <span style="color:#007020;font-weight:bold">True</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>             <span style="color:#007020;font-weight:bold">if</span> 第idx个样本没有被访问过:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>                 为当前样本labels[idx]赋予一个簇类别label_num
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>                 <span style="color:#007020;font-weight:bold">if</span> 当前样本idx为核心样本:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>                     <span style="color:#007020;font-weight:bold">for</span> j <span style="color:#666">=</span> <span style="color:#40a070">0</span>,<span style="color:#666">...</span>,k :  <span style="color:#60a0b0;font-style:italic"># 遍历第idx个核心样本周围的所有样本</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>                         <span style="color:#007020;font-weight:bold">if</span> 第j个样本未被访问过:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>                             将样本j对应的索引加入到栈s中
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>             <span style="color:#007020;font-weight:bold">if</span> 栈为空:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>                 退出当前循环
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>             idx <span style="color:#666">=</span> s<span style="color:#666">.</span>pop() <span style="color:#60a0b0;font-style:italic"># 取栈中最后一个元素并删除</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>         label_num <span style="color:#666">+=</span> <span style="color:#40a070">1</span></span></span></code></pre></div><p>最后，簇标签向量<code>labels</code>中保存的便是每个样本点所属的簇编号，同时如果<code>labels[i]</code>为-1，则表示第<code>i</code>个样本点为异常点。</p>
+<h2 id="11105-dbscan计算示例">11.10.5 DBSCAN计算示例<a class="anchor" href="#11105-dbscan%e8%ae%a1%e7%ae%97%e7%a4%ba%e4%be%8b">#</a></h2>
+<p>在介绍完DBSCAN算法的原理后，我们下面再来通过一个实际的例子对算法的整个聚类过程进行示例，以便大家能够理解得更加透彻。</p>
+<div align=center><img width="400" src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/images/ml/22050533786.jpg" alt="图 11-28 dbscan聚类过程示例图"/></div><center>图 11-28 dbscan聚类过程示例图</center>
+<p>如图11-28所示，图中一共包含有12个样本点，$\text{minPts}=4$，且同时我们已经以每个样本点为圆心$r$为半径进行了作圆。根据图示可知样本2、3和8均为核心样本。下面，开始一步步来模拟DBSCAN算法的整个聚类过程。在阅读下面内容时建议结合11.10.4节中的伪代码进行理解。</p>
+<p>不失一般性，以1到12的顺序遍历每个样本点。此时，由于第1个样本点为非核心样本所以继续遍历第2个样本。</p>
+<p>由于第2个样本为核心样本，且第2个样本未被访问过，记<code>label[2]=0</code>，进一步继续遍历第2个样本点周围的3个样本点1、3和6。因为这3个样本点均未被访问过，所以放入栈中<code>s=[1,3,6]</code>。由于此时栈不为空，所以取栈<code>s</code>中的最后一个样本出栈，此时<code>s=[1,3]</code>。因为第6个样本点未被访问过，所以记<code>label[6]=0</code>，进一步因为第6个样本不是核心样本所以不用遍历其周围的样本点。由于此时栈不为空，所以取栈<code>s</code>中的最后一个样本出栈，此时<code>s=[1]</code>。因为第3个样本点为核心样本，且第3个样本未被访问过，记<code>label[3]=0</code>，进一步继续遍历第3个样本点周围的3个样本点2、4和5。由于第2个样本点之前被访问过，所以只需要将4和5放入栈中，即<code>s=[1,4,5]</code>。由于此时栈不为空，所以取栈<code>s</code>中的最后一个样本出栈，此时<code>s=[1,4]</code>。因为第5个样本点未被访问过，所以记<code>label[5]=0</code>，进一步因为第5个样本不是核心样本所以不用遍历其周围的样本点。由于此时栈不为空，所以取栈<code>s</code>中的最后一个样本出栈，此时<code>s=[1]</code>。因为第4个样本点未被访问过，所以记<code>label[4]=0</code>，进一步因为第4个样本不是核心样本所以不用遍历其周围的样本点。由于此时栈不为空，所以继续取栈<code>s</code>中的最后一个样本出栈，此时<code>s=[]</code>。因为第1个样本点未被访问过，所以记<code>label[1]=0</code>，进一步因为第1个样本不是核心样本所以不用遍历其周围的样本点。由于此时栈为空，所以退出当前while循环。</p>
+<p>到此，图11-28中第1个簇已经聚类完毕，即图中的红色样本点。</p>
+<p>进一步，开始遍历第3个样本点。由于第3个样本点已近被访问过，所以开始遍历第4个样本点。同时，第4、5、6个样本点均在上面被访问过，于是开始遍历第7个样本点。由于第7个样本不是核心样本，所以继续遍历第8个样本。</p>
+<p>由于第8个样本为核心样本，且第8个样本未被访问过，记<code>label[8]=1</code>，进一步继续遍历第8个样本点周围的3个样本点7、9和10。因为这3个样本点均未被访问过，所以放入栈中<code>s=[7,9,10]</code>。由于此时栈不为空，所以取栈<code>s</code>中的最后一个样本出栈，此时<code>s=[7,9]</code>。因为第10个样本点未被访问过，所以记<code>label[10]=1</code>，进一步因为第10个样本不是核心样本所以不用遍历其周围的样本点。由于此时栈不为空，所以取栈<code>s</code>中的最后一个样本出栈，此时<code>s=[7]</code>。因为第9个样本点未被访问过，所以记<code>label[9]=1</code>，进一步因为第9个样本不是核心样本所以不用遍历其周围的样本点。由于此时栈不为空，所以取栈<code>s</code>中的最后一个样本出栈，此时<code>s=[]</code>。因为第7个样本点未被访问过，所以记<code>label[7]=1</code>，进一步因为第7个样本不是核心样本所以不用遍历其周围的样本点。由于此时栈为空，所以退出当前循环。</p>
+<p>到此，图11-28中第2个簇已经聚类完毕，即图中的蓝色样本点。</p>
+<p>进一步，最外层for循环开始遍历第9个样本。由于第9个样本点已经被访问过，同理第10个样本点也被访问过，所以开始遍历第11个样本点。由于第11个样本点不是核心样本，所以继续遍历第12个样本点。同样，虽然第12个样本点未被访问过，但是其同样不是核心样本点，所以退出循环，整个遍历过程结束，绿色样本表示异常样本。</p>
+<p>最终，将会得到如下所示的聚类：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> label[<span style="color:#40a070">1</span>]<span style="color:#666">=</span><span style="color:#40a070">0</span>, label[<span style="color:#40a070">2</span>]<span style="color:#666">=</span><span style="color:#40a070">0</span>, label[<span style="color:#40a070">3</span>]<span style="color:#666">=</span><span style="color:#40a070">0</span>, label[<span style="color:#40a070">4</span>]<span style="color:#666">=</span><span style="color:#40a070">0</span>, label[<span style="color:#40a070">5</span>]<span style="color:#666">=</span><span style="color:#40a070">0</span>, label[<span style="color:#40a070">6</span>]<span style="color:#666">=</span><span style="color:#40a070">0</span>, 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span> label[<span style="color:#40a070">7</span>]<span style="color:#666">=</span><span style="color:#40a070">1</span>, label[<span style="color:#40a070">8</span>]<span style="color:#666">=</span><span style="color:#40a070">1</span>, label[<span style="color:#40a070">9</span>]<span style="color:#666">=</span><span style="color:#40a070">1</span>, label[<span style="color:#40a070">10</span>]<span style="color:#666">=</span><span style="color:#40a070">1</span>, label[<span style="color:#40a070">11</span>]<span style="color:#666">=-</span><span style="color:#40a070">1</span>, label[<span style="color:#40a070">12</span>]<span style="color:#666">=-</span><span style="color:#40a070">1</span></span></span></code></pre></div><p>以上示例就是DBSCAN算法的整个聚类流程，同时各位读者还可以去网站[3]来看查看DBSCAN算法的动态聚类过程。</p>
+<h2 id="11106-dbscan优缺点">11.10.6 DBSCAN优缺点<a class="anchor" href="#11106-dbscan%e4%bc%98%e7%bc%ba%e7%82%b9">#</a></h2>
+<p>在介绍完整个DBSCAN的算法原理后我们再来看看它的一些优缺点。对于DBSCAN算法来说，其最大的优点在于它能够对任何形状的数据集进行聚类，其次在聚类之前并不需要指定簇的数量，这一点同类Kmeans算法不同。同时，在聚类结束后DBSCAN算法还能顺便从数据集中找到异常样本，而这对于某些异常检测场景来说是非常有用的。</p>
+<p>虽然DBSCAN算法有着上述明显的优点，但是也存在不少缺点，其中最明显的就是慢。DBSCAN聚类算法慢主要体现在两个方面，一方面是根据半径$r$来查找每个样本点周围样本的过程；另一方面则是对每个样本点进行簇划分的过程。当然最慢的还前者，如果采用暴力法则需要$O(n^2)$的时间复杂度，采用类似于kd树这样的方法则也需要$O(n\text{log}n)$的时间复杂度，这相较于类Kmeans聚类算法$O(\text{num\_iter})$的时间复杂度来说明显慢了不少。同时，在聚类过程中如果簇与簇边界上的样本对于不同簇中的核心样本来说均是直接可达的，那么其最终归属于哪个簇则取决于样本的遍历顺序。例如在图11-28中，如果6号样本点也是核心样本，那么7号样本点属于左边的簇还是右边的簇则取决于是先遍历到6号样本还是8号样本。除此之外，如果某个数据集各个簇内部的密度差异过大，那么DBSCAN算法聚类结果将会大受影响。最后，对于半径$r$和$\text{minPts}$的选择也需要一定的经验。</p>
+<p>到此，对于DBSCAN聚类算法的整个原理部分就介绍完了，下面我们再来介绍如何一步一步进行实现。</p>
+<h2 id="11107-从零实现dbscan算法">11.10.7 从零实现DBSCAN算法<a class="anchor" href="#11107-%e4%bb%8e%e9%9b%b6%e5%ae%9e%e7%8e%b0dbscan%e7%ae%97%e6%b3%95">#</a></h2>
+<p>根据上面介绍的原理可知，DBSCAN聚类算法主要分为两大步：第1步是搜索得到每个样本点周围以$r$为半径$\text{minPts}$为阈值的样本点；第2步便是依次遍历每个样本，根据其是否为核心样本来对直接可达的样本点进行簇类别的划分。下面开始分别来对这两部分的代码实现进行介绍。以下完整示例代码可参见 <a href="https://github.com/moon-hotel/MachineLearningWithMe/blob/master/AllBooKCode/Chapter11/C18_dbscan_imp.py">AllBooKCode/Chapter11/C18_dbscan_imp.py</a> 文件。</p>
+<p><strong>1. 样本搜索实现</strong></p>
+<p>作为实现DBSCAN聚类算法的关键一步，首先需要知道每个样本以自身为圆心$r$为半径，在这个圆域内有多少样本点。当然，最容易想到也但也最低效的做法就是依次遍历每个样本点，然后再分别计算它们与自身的距离并判断是否在半径$r$以内。不过这里我们可以沿用之前在第5章介绍K近邻时所使用的kd树来完成这一过程。</p>
+<p>对于KNN算法来说，其核心在于如何快速找到距离自身最近的K个样本点。因此，只需要对这部分代码稍加改动就能够实现如何快速找到距离自身半径为$r$圆域内的样本点。</p>
+<p>首先，定义一个<code>MyNearestNeighbors</code>，并继承自之前实现的类<code>MyKDTree</code>，代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">MyNearestNeighbors</span>(MyKDTree):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">__init__</span>(<span style="color:#007020">self</span>, X, p, r<span style="color:#666">=</span><span style="color:#40a070">0.5</span>):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>         <span style="color:#007020">super</span>(MyNearestNeighbors, <span style="color:#007020">self</span>)<span style="color:#666">.</span><span style="color:#06287e">__init__</span>(points<span style="color:#666">=</span>X, p<span style="color:#666">=</span>p)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>r <span style="color:#666">=</span> r</span></span></code></pre></div><p>在上述代码中，第2行<code>X</code>表示原始的数据集；<code>p</code>表示$L_p$距离中的参数$p$，当<code>p=2</code>时表示使用欧氏距离；<code>r</code>表示半径。在根据上述初始化方法实例化类对象后，便得到了一个根据<code>X</code>构造而成的kd树。</p>
+<p>下面，再根据kd树中的K近邻搜索代码修改为此处所需要的根据距离来搜索的代码即可，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">query_radius_single</span>(<span style="color:#007020">self</span>, point):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>         query_radius_nodes <span style="color:#666">=</span> []
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>         visited <span style="color:#666">=</span> []
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>         <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">radius_node</span>(point, curr_node, order<span style="color:#666">=</span><span style="color:#40a070">0</span>):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>             <span style="color:#007020;font-weight:bold">nonlocal</span> query_radius_nodes
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>             logging<span style="color:#666">.</span>debug(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;    query_radius 搜索当前访问节点为：</span><span style="color:#70a0d0">{</span>curr_node<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>             <span style="color:#007020;font-weight:bold">if</span> curr_node <span style="color:#007020;font-weight:bold">is</span> <span style="color:#007020;font-weight:bold">None</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>                 <span style="color:#007020;font-weight:bold">return</span> <span style="color:#007020;font-weight:bold">None</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>             visited<span style="color:#666">.</span>append(curr_node)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>             <span style="color:#007020;font-weight:bold">if</span> <span style="color:#007020">self</span><span style="color:#666">.</span>distance(point, curr_node<span style="color:#666">.</span>data, <span style="color:#007020">self</span><span style="color:#666">.</span>p) <span style="color:#666">&lt;=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>r:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>                 query_radius_nodes <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>append(query_radius_nodes, curr_node, point)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>             cmp_dim <span style="color:#666">=</span> order <span style="color:#666">%</span> <span style="color:#007020">self</span><span style="color:#666">.</span>dim
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>             <span style="color:#007020;font-weight:bold">if</span> point[cmp_dim] <span style="color:#666">&lt;</span> curr_node<span style="color:#666">.</span>data[cmp_dim]:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>                 radius_node(point, curr_node<span style="color:#666">.</span>left_child, order <span style="color:#666">+</span> <span style="color:#40a070">1</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>             <span style="color:#007020;font-weight:bold">else</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>                 radius_node(point, curr_node<span style="color:#666">.</span>right_child, order <span style="color:#666">+</span> <span style="color:#40a070">1</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>             <span style="color:#007020;font-weight:bold">if</span> np<span style="color:#666">.</span>abs(curr_node<span style="color:#666">.</span>data[cmp_dim] <span style="color:#666">-</span> point[cmp_dim]) <span style="color:#666">&lt;</span> <span style="color:#007020">self</span><span style="color:#666">.</span>r:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span>                 child <span style="color:#666">=</span> curr_node<span style="color:#666">.</span>left_child <span style="color:#007020;font-weight:bold">if</span> curr_node<span style="color:#666">.</span>left_child \
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span>                                                 <span style="color:#007020;font-weight:bold">not</span> <span style="color:#007020;font-weight:bold">in</span> visited <span style="color:#007020;font-weight:bold">else</span> curr_node<span style="color:#666">.</span>right_child
+</span></span><span style="display:flex;"><span><span style="color:#40a070">21</span>                 radius_node(point, child, order <span style="color:#666">+</span> <span style="color:#40a070">1</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">22</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">23</span>         radius_node(point, <span style="color:#007020">self</span><span style="color:#666">.</span>root, <span style="color:#40a070">0</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">24</span>         <span style="color:#007020;font-weight:bold">return</span> query_radius_nodes</span></span></code></pre></div><p>在上述代码中，第1行<code>point</code>表示传入的一个样本点，形状为<code>[n_features,]</code>。第5~23行则是递归遍历整个kd树并完成找寻距离<code>point</code>半径为<code>self.r</code>圆域内的所有样本点。具体的搜索原理大家可以参考第5.4节中的内容，在这里就不再赘述。</p>
+<p>进一步，需要实现一个方法来循环完成对所有样本点周围样本的搜索过程，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">radius_neighbors</span>(<span style="color:#007020">self</span>, points):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>         result_points <span style="color:#666">=</span> []
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>         result_ind <span style="color:#666">=</span> []
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>         <span style="color:#007020;font-weight:bold">for</span> point <span style="color:#007020;font-weight:bold">in</span> points:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>             radius_nodes <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>query_radius_single(point)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>             tmp_points <span style="color:#666">=</span> []
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>             tmp_ind <span style="color:#666">=</span> []
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>             <span style="color:#007020;font-weight:bold">for</span> node <span style="color:#007020;font-weight:bold">in</span> radius_nodes:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>                 tmp_points<span style="color:#666">.</span>append(node<span style="color:#666">.</span>data)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>                 tmp_ind<span style="color:#666">.</span>append(<span style="color:#007020">int</span>(node<span style="color:#666">.</span>index))
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>             result_points<span style="color:#666">.</span>append(np<span style="color:#666">.</span>array(tmp_points))
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>             result_ind<span style="color:#666">.</span>append(np<span style="color:#666">.</span>array(tmp_ind, dtype<span style="color:#666">=</span>np<span style="color:#666">.</span>int64))
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>             logging<span style="color:#666">.</span>debug(<span style="color:#4070a0">&#34;搜索下一个样本点……&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>         <span style="color:#007020;font-weight:bold">return</span> result_points, result_ind</span></span></code></pre></div><p>在上述代码中，第1行<code>points</code>表示传入的所有样本点，形状为<code>[n_samples,n_features]</code>。第4~7行是遍历每个样本点，并找到每个样本点周围的样本点。第8~10行是取每个样本点周围的样本点以及对应的索引。第14行则是返回整体最后的结果。</p>
+<p>到此，我们就完成了对于样本点周围样本的搜索，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">test_query_radius</span>():
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">import</span> <span style="color:#0e84b5;font-weight:bold">numpy</span> <span style="color:#007020;font-weight:bold">as</span> <span style="color:#0e84b5;font-weight:bold">np</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>     <span style="color:#007020;font-weight:bold">from</span> <span style="color:#0e84b5;font-weight:bold">sklearn.neighbors</span> <span style="color:#007020;font-weight:bold">import</span> NearestNeighbors
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>     samples <span style="color:#666">=</span> np<span style="color:#666">.</span>array([[<span style="color:#40a070">0.</span>, <span style="color:#40a070">0.</span>], [<span style="color:#40a070">4</span>, <span style="color:#40a070">5</span>], [<span style="color:#40a070">0.</span>, <span style="color:#40a070">1</span>], [<span style="color:#40a070">1.</span>, <span style="color:#40a070">1</span>],
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>                         [<span style="color:#40a070">3</span>, <span style="color:#40a070">6</span>], [<span style="color:#40a070">4</span>, <span style="color:#40a070">9</span>], [<span style="color:#40a070">7</span>, <span style="color:#40a070">2</span>], [<span style="color:#40a070">10</span>, <span style="color:#40a070">7</span>], [<span style="color:#40a070">8</span>, <span style="color:#40a070">8</span>], [<span style="color:#40a070">9</span>, <span style="color:#40a070">6</span>]])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>     query <span style="color:#666">=</span> np<span style="color:#666">.</span>array([[<span style="color:#40a070">1.</span>, <span style="color:#40a070">2</span>], [<span style="color:#40a070">1</span>, <span style="color:#40a070">1</span>], [<span style="color:#40a070">4</span>, <span style="color:#40a070">3</span>], [<span style="color:#40a070">7</span>, <span style="color:#40a070">5</span>], [<span style="color:#40a070">6</span>, <span style="color:#40a070">6</span>]])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>     r <span style="color:#666">=</span> <span style="color:#40a070">1.6</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>     neigh <span style="color:#666">=</span> NearestNeighbors(radius<span style="color:#666">=</span>r, leaf_size<span style="color:#666">=</span><span style="color:#40a070">1</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>     neigh<span style="color:#666">.</span>fit(samples)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>     neighborhoods <span style="color:#666">=</span> neigh<span style="color:#666">.</span>radius_neighbors(query, return_distance<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">False</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>     logging<span style="color:#666">.</span>info(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34; ====== 查找样本点周围r=</span><span style="color:#70a0d0">{</span>r<span style="color:#70a0d0">}</span><span style="color:#4070a0">内的样本，NearestNeighbors 运行结果：&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>     logging<span style="color:#666">.</span>info(neighborhoods)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>     model <span style="color:#666">=</span> MyNearestNeighbors(samples, p<span style="color:#666">=</span><span style="color:#40a070">2</span>, r<span style="color:#666">=</span>r)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>     _, neighborhoods <span style="color:#666">=</span> model<span style="color:#666">.</span>radius_neighbors(query)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>     logging<span style="color:#666">.</span>info(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34; ====== 查找样本点周围r=</span><span style="color:#70a0d0">{</span>r<span style="color:#70a0d0">}</span><span style="color:#4070a0">内的样本，MyNearestNeighbors 运行结果：&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>     logging<span style="color:#666">.</span>info(neighborhoods)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span> <span style="color:#007020;font-weight:bold">if</span> <span style="color:#bb60d5">__name__</span> <span style="color:#666">==</span> <span style="color:#4070a0">&#39;__main__&#39;</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span>     test_query_radius()</span></span></code></pre></div><p>上述代码运行结束后的结果如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#666">======</span> 查找样本点周围r<span style="color:#666">=</span><span style="color:#40a070">1.6</span>内的样本<span style="">，</span>NearestNeighbors 运行结果<span style="">：</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span> [array([<span style="color:#40a070">2</span>, <span style="color:#40a070">3</span>]) array([<span style="color:#40a070">0</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">3</span>]) array([], dtype<span style="color:#666">=</span>int64)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>  array([], dtype<span style="color:#666">=</span>int64) array([], dtype<span style="color:#666">=</span>int64)]
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">5</span> <span style="color:#666">======</span> 查找样本点周围r<span style="color:#666">=</span><span style="color:#40a070">1.6</span>内的样本<span style="">，</span>MyNearestNeighbors 运行结果<span style="">：</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">6</span> [array([<span style="color:#40a070">3</span>, <span style="color:#40a070">2</span>]), array([<span style="color:#40a070">3</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">0</span>]), array([], dtype<span style="color:#666">=</span>int64), 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">7</span>  array([], dtype<span style="color:#666">=</span>int64), array([], dtype<span style="color:#666">=</span>int64)]</span></span></code></pre></div><p>上述结果中，列表中的每个元素表示距离<code>query</code>中对应样本在半径为<code>r=1.6</code>以内的样本点的索引。从输出结果可以看出，所有样本中距离点[1,2]距离小于等于1.6的样本有2、3两个样本，距离点[1,1]距离小于等于1.6的样本有0、2、3这3个样本。</p>
+<p><strong>2. 样本划分实现</strong></p>
+<p>在完成每个样本点以自身为圆心$r$为半径圆域内样本的搜索过程后，便可以进一步实现样本的簇划分过程。在这之前，需要先定义一个辅助函数，即实现11.10.4节中的伪代码来完成整个划分过程，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">my_dbscan_inner</span>(is_core, neighborhoods, labels):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     label_num <span style="color:#666">=</span> <span style="color:#40a070">0</span>  <span style="color:#60a0b0;font-style:italic"># 用来记录簇的编号</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>     stack <span style="color:#666">=</span> []  <span style="color:#60a0b0;font-style:italic"># 深度优先遍历时用的栈</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>     <span style="color:#007020;font-weight:bold">for</span> i <span style="color:#007020;font-weight:bold">in</span> <span style="color:#007020">range</span>(labels<span style="color:#666">.</span>shape[<span style="color:#40a070">0</span>]):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>         <span style="color:#007020;font-weight:bold">if</span> labels[i] <span style="color:#666">!=</span> <span style="color:#666">-</span><span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">or</span> <span style="color:#007020;font-weight:bold">not</span> is_core[i]: 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>             <span style="color:#007020;font-weight:bold">continue</span>  
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>         idx <span style="color:#666">=</span> i
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>         <span style="color:#007020;font-weight:bold">while</span> <span style="color:#007020;font-weight:bold">True</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>             <span style="color:#007020;font-weight:bold">if</span> labels[idx] <span style="color:#666">==</span> <span style="color:#666">-</span><span style="color:#40a070">1</span>:  
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>                 labels[idx] <span style="color:#666">=</span> label_num
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>                 <span style="color:#007020;font-weight:bold">if</span> is_core[idx]:  
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>                     neighb <span style="color:#666">=</span> neighborhoods[idx]  
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>                     <span style="color:#007020;font-weight:bold">for</span> j <span style="color:#007020;font-weight:bold">in</span> <span style="color:#007020">range</span>(neighb<span style="color:#666">.</span>shape[<span style="color:#40a070">0</span>]):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>                         v <span style="color:#666">=</span> neighb[j]
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>                         <span style="color:#007020;font-weight:bold">if</span> labels[v] <span style="color:#666">==</span> <span style="color:#666">-</span><span style="color:#40a070">1</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>                             stack<span style="color:#666">.</span>append(v) 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>             <span style="color:#007020;font-weight:bold">if</span> <span style="color:#007020">len</span>(stack) <span style="color:#666">==</span> <span style="color:#40a070">0</span>:  <span style="color:#60a0b0;font-style:italic"># </span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>                 <span style="color:#007020;font-weight:bold">break</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span>             idx <span style="color:#666">=</span> stack<span style="color:#666">.</span>pop()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span>         label_num <span style="color:#666">+=</span> <span style="color:#40a070">1</span></span></span></code></pre></div><p>在上述代码中，第1行<code>is_core</code>是一个只含0和1，形状为<code> [n_samples,]</code>的向量，<code> is_core[i]=1</code> 表示第<code>i</code>个样本为核心样本；<code>neighborhoods</code>为一个列表，<code>neighborhoods[i] </code>表示第<code>i</code>个样本以$r$为半径周围存在样本的索引；<code>labels</code>为一个形状为<code>[n_samples,]</code>的向量， <code>labels[i]</code>表示第<code>i</code>个样本所属的簇编号，初始情况全部为-1，即没有被访问过。第2行中<code>label_num</code>用来记录当前时刻的簇编号。第3行中<code>stack</code>是深度优先遍历样本时的栈。第4行构造索引开始遍历每一个样本。第5~6行判断如果该样本<code>i</code>已经访问过或者不是核心样本则继续遍历下一个样本，即只有没访问过且为核心样本才继续往下进行。第8行开始进行深度优先遍历。第9~10行判断如果第<code>idx</code>个样本没有被访问过，则为第<code>idx</code>样本赋予一个簇类别。第11~12行判断如果第<code>idx</code>个样本是核心样本，则取以第<code>idx</code>个核心样本为圆心，周围半径$r$内的所有样本点。第13~16行开始遍历核心样本点周围的所有样本，如果该样本没有被访问过则将其放入到栈中。第17行判断如果栈为空，则表示当前簇中所有样本都访问完毕，即此轮深度遍历结束。第19行是返回栈中最后一个元素并将其从栈中删除；第20行是累加簇编号，并进入下一个簇的划分过程中。</p>
+<p>到此，对于DBSCAN算法中最重要的两个部分就实现完毕了，下面需要将这两部分结合起来实现最终的DBSCAN算法。</p>
+<p><strong>3. DBSCAN实现</strong></p>
+<p>在有了前面的铺垫之后，DBSCAN算法实现起来就变得非常容易了。首先仍旧需要先定义一个类并实现相应的构造函数，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">MyDBSCAN</span>(<span style="color:#007020">object</span>):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">__init__</span>(<span style="color:#007020">self</span>, eps<span style="color:#666">=</span><span style="color:#40a070">0.5</span>, p<span style="color:#666">=</span><span style="color:#40a070">2</span>, min_samples<span style="color:#666">=</span><span style="color:#40a070">5</span>):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>eps <span style="color:#666">=</span> eps
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>p <span style="color:#666">=</span> p
+</span></span><span style="display:flex;"><span><span style="color:#40a070">5</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>min_samples <span style="color:#666">=</span> min_samples  <span style="color:#60a0b0;font-style:italic"># 成为核心样本周围样本的最小数量</span></span></span></code></pre></div><p>在上述代码中，第2行中<code>eps</code>表示半径，<code>p</code>表示$L_p$距离中的参数$p$，<code>min_samples</code>表示构成核心样本的最小样本数。</p>
+<p>进一步，利用第11.10.7节中实现的代码来完成整个聚类过程的实现，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">fit</span>(<span style="color:#007020">self</span>, X):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>         neighbors_model <span style="color:#666">=</span> MyNearestNeighbors(X, p<span style="color:#666">=</span><span style="color:#007020">self</span><span style="color:#666">.</span>p, r<span style="color:#666">=</span><span style="color:#007020">self</span><span style="color:#666">.</span>eps)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>         time1 <span style="color:#666">=</span> time<span style="color:#666">.</span>time()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>         _, neighborhoods <span style="color:#666">=</span> neighbors_model<span style="color:#666">.</span>radius_neighbors(X)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>         time2 <span style="color:#666">=</span> time<span style="color:#666">.</span>time()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>         logging<span style="color:#666">.</span>info(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;计算每个样本点周围的样本花费时间为：</span><span style="color:#70a0d0">{</span>time2 <span style="color:#666">-</span> time1<span style="color:#70a0d0">}</span><span style="color:#4070a0">s&#34;</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>         <span style="color:#60a0b0;font-style:italic"># 得到每个样本点在以self.eps为半径的区域内存在样本点的个数</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>         n_neighbors <span style="color:#666">=</span> np<span style="color:#666">.</span>array([<span style="color:#007020">len</span>(neighbors) <span style="color:#007020;font-weight:bold">for</span> neighbors <span style="color:#007020;font-weight:bold">in</span> neighborhoods])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>         labels <span style="color:#666">=</span> np<span style="color:#666">.</span>full(X<span style="color:#666">.</span>shape[<span style="color:#40a070">0</span>], <span style="color:#666">-</span><span style="color:#40a070">1</span>, dtype<span style="color:#666">=</span>np<span style="color:#666">.</span>intp)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>         core_samples <span style="color:#666">=</span> np<span style="color:#666">.</span>asarray(n_neighbors <span style="color:#666">&gt;=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>min_samples, dtype<span style="color:#666">=</span>np<span style="color:#666">.</span>uint8)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>         my_dbscan_inner(core_samples, neighborhoods, labels)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>         time3 <span style="color:#666">=</span> time<span style="color:#666">.</span>time()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>         logging<span style="color:#666">.</span>info(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;对每个样本点进行簇划分花费的时间为</span><span style="color:#70a0d0">{</span>time3 <span style="color:#666">-</span> time2<span style="color:#70a0d0">}</span><span style="color:#4070a0">s&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>labels_ <span style="color:#666">=</span> labels</span></span></code></pre></div><p>在上述代码中，第1行中<code>X</code>表示数据集，形状为<code>[n_samples,n_features]</code>。第2行是实例化一个<code>MyNearestNeighbors</code>类对象并同时完成了kd树的构建。第4行是返回得到<code>X</code>中每个变量以自身为圆心<code>self.eps</code>为半径圆域内的所有样本点。第8行是得到每个样本点周围圆域内样本的个数。第9行是初始化一个全为-1的簇标记向量。第10行是得到核心样本的索引向量，<code>core_samples[i]=1</code>表示第<code>i</code>个样本为核心样本。第11行是对每个样本进行簇类别的划分，并得到最终的结果。</p>
+<p>到此，对于整个DBSCAN算法的实现过程就介绍完了，下面来看使用示例。</p>
+<h2 id="11108-dbscan使用示例">11.10.8 DBSCAN使用示例<a class="anchor" href="#11108-dbscan%e4%bd%bf%e7%94%a8%e7%a4%ba%e4%be%8b">#</a></h2>
+<p>在完成DBSCAN算法的实现过程后，可以通过如下所示的方式来进行使用，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">test_circle_dbscan</span>():
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     plt<span style="color:#666">.</span>figure(figsize<span style="color:#666">=</span>(<span style="color:#40a070">8</span>, <span style="color:#40a070">4</span>))
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>     X, labels_true <span style="color:#666">=</span> make_circles(n_samples<span style="color:#666">=</span><span style="color:#40a070">700</span>, noise<span style="color:#666">=</span><span style="color:#40a070">0.05</span>, random_state<span style="color:#666">=</span><span style="color:#40a070">2022</span>,factor<span style="color:#666">=</span><span style="color:#40a070">0.5</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>     X <span style="color:#666">=</span> StandardScaler()<span style="color:#666">.</span>fit_transform(X)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>     db <span style="color:#666">=</span> DBSCAN(eps<span style="color:#666">=</span><span style="color:#40a070">0.3</span>, min_samples<span style="color:#666">=</span><span style="color:#40a070">10</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>     db<span style="color:#666">.</span>fit(X)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>     logging<span style="color:#666">.</span>info(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;DBSCAN: </span><span style="color:#70a0d0">{</span>adjusted_rand_score(labels_true, db<span style="color:#666">.</span>labels_)<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>     my_db <span style="color:#666">=</span> MyDBSCAN(eps<span style="color:#666">=</span><span style="color:#40a070">0.3</span>, min_samples<span style="color:#666">=</span><span style="color:#40a070">10</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>     my_db<span style="color:#666">.</span>fit(X)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>     logging<span style="color:#666">.</span>info(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;MyDBSCAN: </span><span style="color:#70a0d0">{</span>adjusted_rand_score(labels_true, my_db<span style="color:#666">.</span>labels_)<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>     plt<span style="color:#666">.</span>subplot(<span style="color:#40a070">1</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">1</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>     plt<span style="color:#666">.</span>scatter(X[:, <span style="color:#40a070">0</span>], X[:, <span style="color:#40a070">1</span>], c<span style="color:#666">=</span>db<span style="color:#666">.</span>labels_, alpha<span style="color:#666">=</span><span style="color:#40a070">0.7</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>     plt<span style="color:#666">.</span>title(<span style="color:#4070a0">&#34;Clustered by DBSCAN&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>     plt<span style="color:#666">.</span>subplot(<span style="color:#40a070">1</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">2</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>     plt<span style="color:#666">.</span>scatter(X[:, <span style="color:#40a070">0</span>], X[:, <span style="color:#40a070">1</span>], c<span style="color:#666">=</span>my_db<span style="color:#666">.</span>labels_, alpha<span style="color:#666">=</span><span style="color:#40a070">0.7</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>     plt<span style="color:#666">.</span>title(<span style="color:#4070a0">&#34;Clustered by MyDBSCAN&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>     plt<span style="color:#666">.</span>tight_layout()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span>     plt<span style="color:#666">.</span>show()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span>     
+</span></span><span style="display:flex;"><span><span style="color:#40a070">21</span> <span style="color:#007020;font-weight:bold">if</span> <span style="color:#bb60d5">__name__</span> <span style="color:#666">==</span> <span style="color:#4070a0">&#39;__main__&#39;</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">22</span>     test_circle_dbscan() </span></span></code></pre></div><p>在上述代码中，第3~4行用来构造数据集并进行标准化；第5-9行是分别用sklearn中的<code>DBSCAN</code>算法和上面实现的<code>MyDBSCAN</code>做对比；第12~19行则是对两者预测后的结果进行可视化。</p>
+<p>在上述代码运行结束后将会得到如下所示的输出结果：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> DBSCAN: <span style="color:#40a070">1.0</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span> 计算每个样本点周围的样本花费时间为<span style="">：</span><span style="color:#40a070">31.7</span>s
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span> 对每个样本点进行簇划分花费的时间为0<span style="color:#40a070">.0136</span>s
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span> MyDBSCAN: 聚类结果兰德系数为: <span style="color:#40a070">1.0</span></span></span></code></pre></div><p>根据上述结果可以发现，<code>DBSCAN</code>和<code>MyDBSCAN</code>在调整兰德系数这一指标上的结果没有任何区别，同时还可以发现<code>MyDBSCAN</code>算法在聚类过程中主要时间都花费在了第1步计算核心样本上了。进一步，根据聚类标签还可以得到如图11-29所示的可视化结果。</p>
+<div align=center><img width="450" src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/images/ml/22050628569.jpg" alt="图 11-29 DBSCAN与MyDBSCAN算法聚类结果对比图"/></div><center>图 11-29 DBSCAN与MyDBSCAN算法聚类结果对比图</center>
+<h2 id="11109-小结">11.10.9 小结<a class="anchor" href="#11109-%e5%b0%8f%e7%bb%93">#</a></h2>
+<p>在本节内容中，我们首先通过一个引例介绍了传统基于Kmeans框架聚类算法的不足之处，并一步步引出了基于密度的聚类算法DBSCAN的思想；然后介绍了如何借助sklearn来完成DBSCAN的建模过程；进一步详细介绍了DBSCAN算法的核心概念和基本原理，还通过一个实际的计算示例来进一步介绍了DBSCAN算法的整个聚类过程；最后，我们一步步地介绍了DBSCAN算法的实现过程，并通过一个实际的示例来介绍了DBSCAN算法的使用方式。在下一节内容中我们将介绍另外一种也是本章的最后一个聚类算法——层次聚类算法。</p>
+<h1 id="引用">引用<a class="anchor" href="#%e5%bc%95%e7%94%a8">#</a></h1>
+<p>[1] <a href="https://en.wikipedia.org/wiki/DBSCAN">https://en.wikipedia.org/wiki/DBSCAN</a></p>
+<p>[2] Ester M, Kriegel H P, Sander J, et al. A density-based algorithm for discovering clusters in large spatial databases with noise[C]//kdd. 1996, 96(34): 226-231.</p>
+<p>[3] <a href="https://www.naftaliharris.com/blog/visualizing-dbscan-clustering/">https://www.naftaliharris.com/blog/visualizing-dbscan-clustering/</a></p>
+<p>[4] <a href="https://scikit-learn.org/stable/modules/clustering.html#dbscan">https://scikit-learn.org/stable/modules/clustering.html#dbscan</a></p>
+<div class="book-page-pv text-small" id="busuanzi_container_page_pv">
+      <span class="book-page-pv-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" focusable="false">
+          <path d="M1.5 12s3.9-6.5 10.5-6.5S22.5 12 22.5 12s-3.9 6.5-10.5 6.5S1.5 12 1.5 12Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7"/>
+          <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.7"/>
+        </svg>
+      </span>
+      <span class="book-page-pv-label">阅读</span>
+      <span class="book-page-pv-value" id="busuanzi_value_page_pv">--</span>
+    </div><section class="book-article-index book-related-articles" aria-labelledby="related-articles-title">
+    <h2 id="related-articles-title">相关阅读</h2>
+    <div class="book-article-grid"><article class="book-article-card book-related-article-card">
+              <h3 class="book-article-card-title">
+                <a href="/ml/chapter05/kd-tree-knn/">5.4 kd树构建与搜索</a>
+              </h3><p class="book-article-card-desc">在前面几节内容中，我们分别介绍了K近邻分类器的基本原理及其如何通过开源的sklearn框架实现K近邻的建模。不过到目前为止，还有一个问题没有解决，也就是如何快速地找到当前样本点周围最近的K个样本点。通常来讲，这一问题可以通过kd树来解决，下 …</p></article></div>
+  </section></article>
+ 
+      
+
+
+      <footer class="book-footer">
+        
+  <div class="flex flex-wrap justify-between">
+
+<div>
+
+</div>
+
+<div>
+
+</div>
+
+</div>
+
+<div class="flex flex-wrap justify-between">
+    <span>
+    
+      <a href="/ml/chapter11/kmeans-k-selection/" class="flex align-center">
+        <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/backward.svg" class="book-icon" alt="Backward" />
+        <span>11.9 聚类K值选取与分析</span>
+      </a>
+    
+    </span>
+    <span>
+    
+      <a href="/ml/chapter11/hierarchical-clustering/" class="flex align-center">
+        <span>11.11 基于层次的聚类算法</span>
+        <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/forward.svg" class="book-icon" alt="Forward" />
+      </a>
+    
+    </span>
+  </div>
+
+ 
+        
+  
+  <div class="book-comments"><div class="giscus"></div>
+<script src="https://giscus.app/client.js"
+        data-repo="mlwithme/mlwithme.github.io"
+        data-repo-id="R_kgDOTBt94Q"
+        data-category="Announcements"
+        data-category-id="DIC_kwDOTBt94c4C_21V"
+        data-mapping="pathname"
+        data-strict="1"
+        data-reactions-enabled="1"
+        data-emit-metadata="0"
+        data-input-position="top"
+        data-theme="preferred_color_scheme"
+        data-lang="zh-CN"
+        data-loading="lazy"
+        crossorigin="anonymous"
+        async>
+</script>
+</div>
+  
+ 
+        
+  <link rel="stylesheet" href="https://mlwithme.oss-cn-shanghai.aliyuncs.com/katex/katex.min.css" />
+  <script defer src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/katex/katex.min.js"></script>
+  <script defer src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/katex/auto-render.min.js"></script>
+  
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        if (window.renderMathInElement) {
+          renderMathInElement(
+            document.querySelector(".book-page"),
+            Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
+          );
+        }
+      });
+    </script>
+  
+
+        
+  
+ 
+        
+  
+    <script>(function(){document.querySelectorAll("pre:has(code)").forEach(e=>{e.addEventListener("click",e.focus),e.addEventListener("copy",function(t){if(t.preventDefault(),navigator.clipboard){const t=window.getSelection().toString()||e.textContent;navigator.clipboard.writeText(t)}})})})()</script>
+  
+
+      </footer>
+
+      <label for="menu-control" class="hidden book-menu-overlay"></label>
+    </div>
+
+    
+  
+  <aside class="book-toc">
+    <div class="book-toc-content">
+      
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#11101-dbscan算法思想">11.10.1 DBSCAN算法思想</a></li>
+    <li><a href="#11102-dbscan示例代码">11.10.2 DBSCAN示例代码</a></li>
+    <li><a href="#11103-dbscan算法核心概念">11.10.3 DBSCAN算法核心概念</a></li>
+    <li><a href="#11104-dbscan算法原理">11.10.4 DBSCAN算法原理</a></li>
+    <li><a href="#11105-dbscan计算示例">11.10.5 DBSCAN计算示例</a></li>
+    <li><a href="#11106-dbscan优缺点">11.10.6 DBSCAN优缺点</a></li>
+    <li><a href="#11107-从零实现dbscan算法">11.10.7 从零实现DBSCAN算法</a></li>
+    <li><a href="#11108-dbscan使用示例">11.10.8 DBSCAN使用示例</a></li>
+    <li><a href="#11109-小结">11.10.9 小结</a></li>
+  </ul>
+</nav>
+
+  
+  <section class="book-page-qr-panel" aria-label="页面二维码与公众号二维码">
+    <section class="book-page-qr-block" aria-label="页面二维码">
+      <p class="book-page-qr-title">微信扫码查看</p>
+      <a
+        class="book-page-qr-image-link"
+        href="https://mlwithme.github.io/ml/chapter11/dbscan/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="打开当前页面链接"
+      >
+        <img
+          class="book-page-qr-image"
+          src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fml%2Fchapter11%2Fdbscan%2F"
+          alt="当前页面链接二维码"
+          loading="lazy"
+          decoding="async"
+          referrerpolicy="no-referrer"
+        >
+      </a>
+    </section>
+
+    <div class="book-page-qr-divider" aria-hidden="true"></div>
+
+    <section class="book-page-qr-block" aria-label="公众号二维码">
+      <p class="book-page-qr-title">关注公众号</p>
+      <div class="book-page-qr-image-link book-page-qr-image-frame">
+        <img
+          class="book-page-qr-image"
+          src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/images/gzh.png"
+          alt="公众号二维码"
+          loading="lazy"
+          decoding="async"
+        >
+      </div>
+    </section>
+  </section>
+
+
+
+
+    </div>
+  </aside>
+  
+ 
+  </main>
+
+  <button
+  type="button"
+  class="book-back-to-top"
+  aria-label="回到顶部"
+  title="回到顶部"
+>
+  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <path
+      d="M12 5.5l-5.25 5.25 1.5 1.5 2.7-2.7V18.5h2.1V9.55l2.7 2.7 1.5-1.5L12 5.5z"
+      fill="currentColor"
+    ></path>
+  </svg>
+</button>
+
+<script>
+  (function () {
+    var button = document.querySelector(".book-back-to-top");
+    if (!button) {
+      return;
+    }
+
+    var toggleButton = function () {
+      if (window.scrollY > 360) {
+        button.classList.add("is-visible");
+      } else {
+        button.classList.remove("is-visible");
+      }
+    };
+
+    button.addEventListener("click", function () {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+
+    toggleButton();
+    window.addEventListener("scroll", toggleButton, { passive: true });
+  })();
+</script>
+
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

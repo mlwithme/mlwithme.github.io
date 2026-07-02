@@ -1,0 +1,4346 @@
+<!DOCTYPE html>
+<html lang="zh_CN" dir="ltr">
+<head>
+  <!--
+Made with Book Theme
+https://github.com/alex-shpak/hugo-book
+--><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="经过前面两个小节内容的介绍，对于朴素贝叶斯算法的原理我们已经有了清晰的认识。在本节内容中，我们将开始分步对各个部分的实现进行详细地介绍。同时，需要说明的是以下实现代码均参考自sklearn 0.24.0 中的`CategoricalNB`模块，只是对部分处理逻辑进行了修改与简化， …">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="index,follow,max-image-preview:large">
+
+
+
+
+
+<meta property="og:url" content="https://mlwithme.github.io/ml/chapter07/naive-bayes-implementation/">
+<meta property="og:site_name" content="《从零学AI指南手册》">
+<meta property="og:title" content="7.3 朴素贝叶斯实现：从原理到代码建模">
+<meta property="og:description" content="经过前面两个小节内容的介绍，对于朴素贝叶斯算法的原理我们已经有了清晰的认识。在本节内容中，我们将开始分步对各个部分的实现进行详细地介绍。同时，需要说明的是以下实现代码均参考自sklearn 0.24.0 中的`CategoricalNB`模块，只是对部分处理逻辑进行了修改与简化， …">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:type" content="article">
+<meta property="og:image" content="https://mlwithme.oss-cn-shanghai.aliyuncs.com/share-cover.png">
+<meta property="og:image:url" content="https://mlwithme.oss-cn-shanghai.aliyuncs.com/share-cover.png">
+<meta property="og:image:secure_url" content="https://mlwithme.oss-cn-shanghai.aliyuncs.com/share-cover.png">
+<meta property="og:image:width" content="759">
+<meta property="og:image:height" content="759">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:alt" content="《从零学AI指南手册》 - 7.3 朴素贝叶斯实现：从原理到代码建模">
+
+  <meta property="article:section" content="ml">
+  
+    <meta property="article:published_time" content="2026-06-22T17:10:22Z">
+  
+  
+    <meta property="article:modified_time" content="2026-06-28T21:46:32&#43;08:00">
+  
+  
+
+
+<script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"WebSite","description":"面向机器学习、深度学习与 AI Agent 的中文系统化学习手册，包含原理讲解、代码示例与实战案例。","inLanguage":"zh_CN","name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
+  </script>
+  <script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.oss-cn-shanghai.aliyuncs.com/share-cover.png"},"name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
+  </script><script type="application/ld+json">
+      {"@context":"https://schema.org","@type":"Article","articleSection":"ml","author":{"@type":"Person","name":"WangCheng","url":"https://mlwithme.github.io/author/"},"dateModified":"2026-06-28T21:46:32+08:00","datePublished":"2026-06-22T17:10:22Z","description":"经过前面两个小节内容的介绍，对于朴素贝叶斯算法的原理我们已经有了清晰的认识。在本节内容中，我们将开始分步对各个部分的实现进行详细地介绍。同时，需要说明的是以下实现代码均参考自sklearn 0.24.0 中的`CategoricalNB`模块，只是对部分处理逻辑进行了修改与简化， …","headline":"7.3 朴素贝叶斯实现：从原理到代码建模","image":["https://mlwithme.oss-cn-shanghai.aliyuncs.com/share-cover.png"],"inLanguage":"zh_CN","mainEntityOfPage":"https://mlwithme.github.io/ml/chapter07/naive-bayes-implementation/","publisher":{"@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.oss-cn-shanghai.aliyuncs.com/share-cover.png"},"name":"《从零学AI指南手册》"},"url":"https://mlwithme.github.io/ml/chapter07/naive-bayes-implementation/"}
+    </script><script type="application/ld+json">
+        {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","item":"https://mlwithme.github.io/","name":"首页","position":1},{"@type":"ListItem","item":"https://mlwithme.github.io/ml/","name":"机器学习","position":2},{"@type":"ListItem","item":"https://mlwithme.github.io/ml/chapter07/","name":"第 7 章 朴素贝叶斯原理与高斯、多项式贝叶斯","position":3},{"@type":"ListItem","item":"https://mlwithme.github.io/ml/chapter07/naive-bayes-implementation/","name":"7.3 朴素贝叶斯实现：从原理到代码建模","position":4}]}
+      </script>
+
+<title>7.3 朴素贝叶斯实现：从原理到代码建模 • 《从零学AI指南手册》</title>
+<link rel="icon" href="https://mlwithme.oss-cn-shanghai.aliyuncs.com/favicon.png" type="image/png">
+<link rel="shortcut icon" href="https://mlwithme.oss-cn-shanghai.aliyuncs.com/favicon.png" type="image/png">
+<link rel="apple-touch-icon" href="https://mlwithme.oss-cn-shanghai.aliyuncs.com/favicon.png">
+
+<link rel="manifest" href="/manifest.json">
+<link rel="canonical" href="https://mlwithme.github.io/ml/chapter07/naive-bayes-implementation/">
+<link rel="stylesheet" href="/book.min.7bef1ddd28a19c9d3bf4a9b252146d7f9b5fe85be58199fd828dc2472e8725bd.css" integrity="sha256-e&#43;8d3SihnJ079KmyUhRtf5tf6FvlgZn9go3CRy6HJb0=" crossorigin="anonymous">
+  <script defer type="module" src="/en.search.min.1b85e304b4edf759bf60d76f5b68977a95300af39fb3246a0f98780446f7050e.js" integrity="sha256-G4XjBLTt91m/YNdvW2iXepUwCvOfsyRqD5h4BEb3BQ4=" crossorigin="anonymous"></script>
+
+  
+
+
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="7.3 朴素贝叶斯实现：从原理到代码建模">
+<meta name="twitter:description" content="经过前面两个小节内容的介绍，对于朴素贝叶斯算法的原理我们已经有了清晰的认识。在本节内容中，我们将开始分步对各个部分的实现进行详细地介绍。同时，需要说明的是以下实现代码均参考自sklearn 0.24.0 中的`CategoricalNB`模块，只是对部分处理逻辑进行了修改与简化， …">
+<meta name="twitter:url" content="https://mlwithme.github.io/ml/chapter07/naive-bayes-implementation/">
+<meta name="twitter:image" content="https://mlwithme.oss-cn-shanghai.aliyuncs.com/share-cover.png">
+<meta name="twitter:image:alt" content="《从零学AI指南手册》 - 7.3 朴素贝叶斯实现：从原理到代码建模">
+<script>
+  var _hmt = _hmt || [];
+  (function() {
+    var hm = document.createElement("script");
+    hm.src = "https://hm.baidu.com/hm.js?74a336dd47fbbab3ceb99d4ad8afcb76";
+    var s = document.getElementsByTagName("script")[0];
+    s.parentNode.insertBefore(hm, s);
+  })();
+</script>
+<script async src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
+
+</head>
+<body dir="ltr" class="book-kind-page book-type-ml">
+  <input type="checkbox" class="hidden toggle" id="menu-control" />
+  <input type="checkbox" class="hidden toggle" id="toc-control" />
+  <main class="container flex">
+    
+<aside class="book-menu">
+  <div class="book-menu-content">
+    
+  <nav>
+<h2 class="book-brand">
+  <a class="flex align-center" href="/"><span>《从零学AI指南手册》</span>
+  </a>
+</h2>
+
+
+<div class="book-search hidden">
+  <input id="book-search-input" type="text" 
+    placeholder="Search"
+    aria-label="Search"
+    maxlength="64" />
+  <div class="book-search-spinner hidden"></div>
+  <ul id="book-search-results"></ul>
+</div>
+<script>document.querySelector(".book-search").classList.remove("hidden")</script>
+
+
+
+
+
+
+
+
+
+
+
+  
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/featured/" class="">
+      <span class="book-menu-link-title">精选文章</span>
+</a>
+  
+
+          
+  <ul>
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/" class="">
+      <span class="book-menu-link-title">大模型Agent开发</span>
+</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-279cf10e5100caa4f65ba3f7dd8888a4" class="toggle"  />
+    <label for="section-279cf10e5100caa4f65ba3f7dd8888a4" class="flex">
+      <a href="/agent/chapter01/" class="">
+        <span class="book-menu-link-title">第 1 章 RAG 基础概念</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/what-is-rag/" class="">
+      <span class="book-menu-link-title">1.1 RAG 提出背景</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/rag-pipeline-overview/" class="">
+      <span class="book-menu-link-title">1.2 RAG 流程概览</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-83c662c2764f1c19f8005eab77fee110" class="toggle"  />
+    <label for="section-83c662c2764f1c19f8005eab77fee110" class="flex">
+      <a href="/agent/chapter02/" class="">
+        <span class="book-menu-link-title">第 2 章 大模型接入与使用</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/intro-to-llm-sdk/" class="">
+      <span class="book-menu-link-title">2.1 SDK 介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/modern-llm-sdk/" class="">
+      <span class="book-menu-link-title">2.2 现代大模型中的 SDK</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/dashscope-api-overview/" class="">
+      <span class="book-menu-link-title">2.3 DashScope 接口体系</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/qwen-onboarding/" class="">
+      <span class="book-menu-link-title">2.4 千问大模型接入与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-1e583d7a26333453241d87c5c16592bd" class="toggle"  />
+    <label for="section-1e583d7a26333453241d87c5c16592bd" class="flex">
+      <a href="/agent/chapter03/" class="">
+        <span class="book-menu-link-title">第 3 章 文档标准化与语义检索</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/document-loading-and-preprocessing/" class="">
+      <span class="book-menu-link-title">3.1 文档加载与标准化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/text-splitting-strategies/" class="">
+      <span class="book-menu-link-title">3.2 常见文本切分策略</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/vector-database-selection/" class="">
+      <span class="book-menu-link-title">3.3 向量数据库选择</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/qwen-embedding-model/" class="">
+      <span class="book-menu-link-title">3.4 Qwen3 Embedding 模型介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/semantic-retrieval-pipeline/" class="">
+      <span class="book-menu-link-title">3.5 语义搜索引擎构建</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/milvus-tutorial/" class="">
+      <span class="book-menu-link-title">3.6  Milvus 模块解析</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="toggle"  />
+    <label for="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="flex">
+      <a href="/agent/chapter04/" class="">
+        <span class="book-menu-link-title">第 4 章 RAG 与 Agent</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/two-step-rag/" class="">
+      <span class="book-menu-link-title">4.1 两步式 RAG 搭建</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/function-calling-basics/" class="">
+      <span class="book-menu-link-title">4.2 Function Calling 概念介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/langchain-tool-decorator/" class="">
+      <span class="book-menu-link-title">4.3 LangChain 中的 Tool 修饰器</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/rag-agent-essentials/" class="">
+      <span class="book-menu-link-title">4.4 RAG Agent 原理与搭建</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/react-framework/" class="">
+      <span class="book-menu-link-title">4.5 复杂问题拆解与ReAct框架</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/two-stage-indexing/" class="">
+      <span class="book-menu-link-title">4.6 RAG 中的两阶段索引</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/qwen3-reranking/" class="">
+      <span class="book-menu-link-title">4.7 Qwen3 Reranking 原理与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/two-stage-rag-agent/" class="">
+      <span class="book-menu-link-title">4.8 基于两阶段索引的 RAG Agent</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/langgraph-basics/" class="">
+      <span class="book-menu-link-title">4.9 LangGraph 基本概念介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/langgraph-custom-rag-agent/" class="">
+      <span class="book-menu-link-title">4.10  基于 LangGraph 构建自定义 RAG Agent</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bf5130286ff0eee8f362b632167a5e6b" class="toggle"  />
+    <label for="section-bf5130286ff0eee8f362b632167a5e6b" class="flex">
+      <a href="/agent/chapter05/" class="">
+        <span class="book-menu-link-title">第 5 章 Agent 记忆机制与管理</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/agent-memory-overview/" class="">
+      <span class="book-menu-link-title">5.1 Agent 记忆机制概览</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/langchain-short-term-memory/" class="">
+      <span class="book-menu-link-title">5.2 短期记忆持久化与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/short-term-memory-management/" class="">
+      <span class="book-menu-link-title">5.3 短期记忆管理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/short-term-memory-rag-agent/" class="">
+      <span class="book-menu-link-title">5.4 拥有短期记忆的 RAG Agent</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/long-term-memory-strategies/" class="">
+      <span class="book-menu-link-title">5.5 长期记忆管理与持久化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/mini-chatgpt-from-scratch/" class="">
+      <span class="book-menu-link-title">5.6 从零实现 Mini ChatGPT 助手</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/pgvector-setup/" class="">
+      <span class="book-menu-link-title">5.7 pgvector 配置安装</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/long-term-memory-retrieval-and-forgetting/" class="">
+      <span class="book-menu-link-title">5.8 长期记忆检索与遗忘</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/langgraph-mini-chatgpt/" class="">
+      <span class="book-menu-link-title">5.9 基于 LangGraph 的Mini ChatGPT 助手</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/create-agent-mini-chatgpt/" class="">
+      <span class="book-menu-link-title">5.10 使用 create_agent 搭建 Mini ChatGPT</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/" class="">
+      <span class="book-menu-link-title">深度学习</span>
+</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/mindmap/" class="">
+      <span class="book-menu-link-title">目录思维导图</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-cf7621e8efb1f3153eaca44a113dcdb9" class="toggle"  />
+    <label for="section-cf7621e8efb1f3153eaca44a113dcdb9" class="flex">
+      <a href="/dl/chapter01/" class="">
+        <span class="book-menu-link-title">第 1 章 深度学习简介</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/dl-development-stages/" class="">
+      <span class="book-menu-link-title">1.1 深度学习的发展阶段</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/dl-key-figures/" class="">
+      <span class="book-menu-link-title">1.2 深度学习中的关键人物</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/mainstream-dl-frameworks/" class="">
+      <span class="book-menu-link-title">1.3 深度学习框架介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f9bf1a68c19405769f9c4a1495708a55" class="toggle"  />
+    <label for="section-f9bf1a68c19405769f9c4a1495708a55" class="flex">
+      <a href="/dl/chapter02/" class="">
+        <span class="book-menu-link-title">第 2 章 环境配置</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/dl-dev-environment-architecture/" class="">
+      <span class="book-menu-link-title">2.1 体系结构介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/dl-cuda-pytorch-install/" class="">
+      <span class="book-menu-link-title">2.2 深度学习环境安装</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/dl-cuda-training-env-setup/" class="">
+      <span class="book-menu-link-title">2.3 开发环境安装配置</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="toggle"  />
+    <label for="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="flex">
+      <a href="/dl/chapter03/" class="">
+        <span class="book-menu-link-title">第 3 章 深度学习基础</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/linear-regression-basics/" class="">
+      <span class="book-menu-link-title">3.1 线性回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/linear-regression-implementation/" class="">
+      <span class="book-menu-link-title">3.2 线性回归简洁实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/backpropagation-and-gradient-descent/" class="">
+      <span class="book-menu-link-title">3.3 梯度下降与反向传播</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/regression-from-scratch/" class="">
+      <span class="book-menu-link-title">3.4 从零实现回归模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/softmax-regression-basics/" class="">
+      <span class="book-menu-link-title">3.5 从逻辑回归到Softmax回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/softmax-regression-implementation/" class="">
+      <span class="book-menu-link-title">3.6 Softmax回归简洁实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/softmax-regression-from-scratch/" class="">
+      <span class="book-menu-link-title">3.7 从零实现分类模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/regression-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">3.8 回归模型评估指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/classification-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">3.9 分类模型评估指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/overfitting-and-regularization/" class="">
+      <span class="book-menu-link-title">3.10 过拟合与正则化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/hyperparameters-and-cross-validation/" class="">
+      <span class="book-menu-link-title">3.11 超参数与交叉验证</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/activation-functions/" class="">
+      <span class="book-menu-link-title">3.12 激活函数</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/multi-label-classification/" class="">
+      <span class="book-menu-link-title">3.13 多标签分类</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-7a12cee83820a928df00362d70804a97" class="toggle"  />
+    <label for="section-7a12cee83820a928df00362d70804a97" class="flex">
+      <a href="/dl/chapter04/" class="">
+        <span class="book-menu-link-title">第 4 章 卷积神经网络</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/cnn-basics/" class="">
+      <span class="book-menu-link-title">4.1 卷积的概念</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/convolution-operation/" class="">
+      <span class="book-menu-link-title">4.2 卷积的计算过程</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/convolution-and-pooling/" class="">
+      <span class="book-menu-link-title">4.3 填充和池化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/lenet5/" class="">
+      <span class="book-menu-link-title">4.4 LeNet5网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/alexnet/" class="">
+      <span class="book-menu-link-title">4.5 AlexNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/vgg/" class="">
+      <span class="book-menu-link-title">4.6 VGG网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/nin/" class="">
+      <span class="book-menu-link-title">4.7 NIN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/googlenet/" class="">
+      <span class="book-menu-link-title">4.8 GoogLeNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/resnet/" class="">
+      <span class="book-menu-link-title">4.9 ResNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/densenet/" class="">
+      <span class="book-menu-link-title">4.10 DenseNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-be9addfd3a15c372d609d09cabb94159" class="toggle"  />
+    <label for="section-be9addfd3a15c372d609d09cabb94159" class="flex">
+      <a href="/dl/chapter05/" class="">
+        <span class="book-menu-link-title">第 5 章 模型训练与复用</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/training-logs-management/" class="">
+      <span class="book-menu-link-title">5.1 参数及日志管理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/tensorboard-tutorial/" class="">
+      <span class="book-menu-link-title">5.2 Tensorboard可视化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/pytorch-model-save-load/" class="">
+      <span class="book-menu-link-title">5.3 模型的保存与复用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/transfer-learning-tutorial/" class="">
+      <span class="book-menu-link-title">5.4 模型的迁移学习</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/pretrained-model-reuse/" class="">
+      <span class="book-menu-link-title">5.5 开源模型复用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/multi-gpu-training/" class="">
+      <span class="book-menu-link-title">5.6 多GPU训练</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/training-data-preprocessing-cache/" class="">
+      <span class="book-menu-link-title">5.7 数据预处理与缓存</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="toggle"  />
+    <label for="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="flex">
+      <a href="/dl/chapter06/" class="">
+        <span class="book-menu-link-title">第 6 章 模型优化方法</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/learning-rate-scheduler/" class="">
+      <span class="book-menu-link-title">6.1 学习率调度器</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/gradient-clipping/" class="">
+      <span class="book-menu-link-title">6.2 梯度裁剪</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/batch-norm/" class="">
+      <span class="book-menu-link-title">6.3 批归一化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/layer-norm/" class="">
+      <span class="book-menu-link-title">6.4 层归一化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/group-norm/" class="">
+      <span class="book-menu-link-title">6.5 组归一化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/momentum/" class="">
+      <span class="book-menu-link-title">6.6 动量法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/ada-grad/" class="">
+      <span class="book-menu-link-title">6.7 AdaGrad算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/ada-delta/" class="">
+      <span class="book-menu-link-title">6.8 AdaDelta算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/adam/" class="">
+      <span class="book-menu-link-title">6.9 Adam算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/weight-initialization/" class="">
+      <span class="book-menu-link-title">6.10 初始化方法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-517b751d7c44a7ac77d25d295ed44271" class="toggle"  />
+    <label for="section-517b751d7c44a7ac77d25d295ed44271" class="flex">
+      <a href="/dl/chapter07/" class="">
+        <span class="book-menu-link-title">第 7 章 循环神经网络</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/rnn-basics/" class="">
+      <span class="book-menu-link-title">7.1 RNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/time-series-modeling/" class="">
+      <span class="book-menu-link-title">7.2 时序数据</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/lstm/" class="">
+      <span class="book-menu-link-title">7.3 LSTM网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/gru/" class="">
+      <span class="book-menu-link-title">7.4 GRU网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/bi-rnn/" class="">
+      <span class="book-menu-link-title">7.5 BiRNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/char-rnn/" class="">
+      <span class="book-menu-link-title">7.6 CharRNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-b9b861f64ba32bc68dfb977497de37d9" class="toggle"  />
+    <label for="section-b9b861f64ba32bc68dfb977497de37d9" class="flex">
+      <a href="/dl/chapter08/" class="">
+        <span class="book-menu-link-title">第 8 章 时序与模型融合</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/textcnn/" class="">
+      <span class="book-menu-link-title">8.1 TextCNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/textrnn/" class="">
+      <span class="book-menu-link-title">8.2 TextRNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/cnn-rnn/" class="">
+      <span class="book-menu-link-title">8.3 CNN-RNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/convlstm/" class="">
+      <span class="book-menu-link-title">8.4 ConvLSTM网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/3dcnn/" class="">
+      <span class="book-menu-link-title">8.5 3DCNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/stresnet/" class="">
+      <span class="book-menu-link-title">8.6 STResNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-e54a1e28b1438b8266637bcb8dac1a44" class="toggle"  />
+    <label for="section-e54a1e28b1438b8266637bcb8dac1a44" class="flex">
+      <a href="/dl/chapter09/" class="">
+        <span class="book-menu-link-title">第 9 章 自然语言处理</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/nlp-basics/" class="">
+      <span class="book-menu-link-title">9.1 自然语言处理介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/word2vec-principle/" class="">
+      <span class="book-menu-link-title">9.2 Word2Vec词向量</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/word2vec-training-and-usage/" class="">
+      <span class="book-menu-link-title">9.3 Word2Vec训练与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/glove/" class="">
+      <span class="book-menu-link-title">9.4 GloVe词向量</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/word-vector-finetuning/" class="">
+      <span class="book-menu-link-title">9.5 词向量的微调使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/fasttext/" class="">
+      <span class="book-menu-link-title">9.6 fastText网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/seq2seq-tutorial/" class="">
+      <span class="book-menu-link-title">9.7 Seq2Seq网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/seq-model-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">9.8 序列模型评价指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/nmt-seq2seq/" class="">
+      <span class="book-menu-link-title">9.9 NMT网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/attention-mechanism/" class="">
+      <span class="book-menu-link-title">9.10 注意力机制</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/nmt-with-attention/" class="">
+      <span class="book-menu-link-title">9.11 含注意力的NMT网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/rnn-with-attention/" class="">
+      <span class="book-menu-link-title">9.12 含注意力的RNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f6636b2f9dc1df93b9fa64dd201716d9" class="toggle"  />
+    <label for="section-f6636b2f9dc1df93b9fa64dd201716d9" class="flex">
+      <a href="/dl/chapter10/" class="">
+        <span class="book-menu-link-title">第 10 章 现代神经网络</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/elmo/" class="">
+      <span class="book-menu-link-title">10.1 ELMo网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-principle/" class="">
+      <span class="book-menu-link-title">10.2 Transformer网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-architecture/" class="">
+      <span class="book-menu-link-title">10.3 Transformer结构</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-implementation/" class="">
+      <span class="book-menu-link-title">10.4 Transformer实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-couplet-model/" class="">
+      <span class="book-menu-link-title">10.5 Transformer对联模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-principle/" class="">
+      <span class="book-menu-link-title">10.6 BERT网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-from-scratch/" class="">
+      <span class="book-menu-link-title">10.7 从零实现BERT</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-text-classification/" class="">
+      <span class="book-menu-link-title">10.8 BERT文本分类模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-sentence-pair-matching/" class="">
+      <span class="book-menu-link-title">10.9 BERT问题选择模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-question-answering/" class="">
+      <span class="book-menu-link-title">10.10 BERT问题回答模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-ner/" class="">
+      <span class="book-menu-link-title">10.11 BERT命名体识别模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-pretraining/" class="">
+      <span class="book-menu-link-title">10.12 BERT从零训练</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-1/" class="">
+      <span class="book-menu-link-title">10.13 GPT-1模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-2-and-gpt-3/" class="">
+      <span class="book-menu-link-title">10.14 GPT-2与GPT-3模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-2-chinese-pretraining/" class="">
+      <span class="book-menu-link-title">10.15 基于GPT-2的中文预训练模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/instructgpt-and-chatgpt/" class="">
+      <span class="book-menu-link-title">10.16 InstructGPT与ChatGPT</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/chatgpt-prompt-engineering/" class="">
+      <span class="book-menu-link-title">10.17 ChatGPT与提示词工程</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/baichuan-usage/" class="">
+      <span class="book-menu-link-title">10.18 百川大模型使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/baichuan-implementation/" class="">
+      <span class="book-menu-link-title">10.19 百川大模型实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-4-and-gpts/" class="">
+      <span class="book-menu-link-title">10.20 GPT-4与GPTs使用</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/" class="">
+      <span class="book-menu-link-title">机器学习</span>
+</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/mindmap/" class="">
+      <span class="book-menu-link-title">目录思维导图</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-48f56957e94e3cf66f3022103a7dd0ff" class="toggle"  />
+    <label for="section-48f56957e94e3cf66f3022103a7dd0ff" class="flex">
+      <a href="/ml/chapter01/" class="">
+        <span class="book-menu-link-title">第 1 章 环境配置</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/conda-install-tutorial/" class="">
+      <span class="book-menu-link-title">1.1 安装使用Conda</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/ml-conda-env-setup/" class="">
+      <span class="book-menu-link-title">1.2 开发环境安装配置</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-56a896338a1c41249d22a3efa0e0063c" class="toggle"  />
+    <label for="section-56a896338a1c41249d22a3efa0e0063c" class="flex">
+      <a href="/ml/chapter02/" class="">
+        <span class="book-menu-link-title">第 2 章 线性回归</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/linear-regression-basics/" class="">
+      <span class="book-menu-link-title">2.1 模型的建立与求解</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/multivariate-linear-regression/" class="">
+      <span class="book-menu-link-title">2.2 多变量线性回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/polynomial-regression/" class="">
+      <span class="book-menu-link-title">2.3 多项式回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/regression-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">2.4 回归模型评估</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/gradient-descent-derivation/" class="">
+      <span class="book-menu-link-title">2.5 梯度下降</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/normal-distribution/" class="">
+      <span class="book-menu-link-title">2.6 正态分布</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/linear-regression-loss-derivation/" class="">
+      <span class="book-menu-link-title">2.7 目标函数推导</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ccd0dc9386ea80613d4cedf91b30058d" class="toggle"  />
+    <label for="section-ccd0dc9386ea80613d4cedf91b30058d" class="flex">
+      <a href="/ml/chapter03/" class="">
+        <span class="book-menu-link-title">第 3 章 逻辑回归</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/logistic-regression-basics/" class="">
+      <span class="book-menu-link-title">3.1 模型的建立与求解</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/logistic-regression-multiclass/" class="">
+      <span class="book-menu-link-title">3.2 多分类任务</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/classification-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">3.3 常见的分类评估指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/logistic-regression-loss-derivation/" class="">
+      <span class="book-menu-link-title">3.4 目标函数推导</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="toggle"  />
+    <label for="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="flex">
+      <a href="/ml/chapter04/" class="">
+        <span class="book-menu-link-title">第 4 章 模型的改善与泛化</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/generalization-basics/" class="">
+      <span class="book-menu-link-title">4.1 基本概念</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/feature-scaling/" class="">
+      <span class="book-menu-link-title">4.2 特征标准化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/overfitting-solutions/" class="">
+      <span class="book-menu-link-title">4.3过拟合</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/l1-l2-regularization/" class="">
+      <span class="book-menu-link-title">4.4 正则化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/bias-and-variance/" class="">
+      <span class="book-menu-link-title">4.5 偏差、方差与交叉验证</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/handwritten-digit-recognition-case/" class="">
+      <span class="book-menu-link-title">4.6 实例分析手写体识别</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-40f463d9d502d24b86ea6120b7030123" class="toggle"  />
+    <label for="section-40f463d9d502d24b86ea6120b7030123" class="flex">
+      <a href="/ml/chapter05/" class="">
+        <span class="book-menu-link-title">第 5 章 K近邻</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/knn-principle/" class="">
+      <span class="book-menu-link-title">5.1 K近邻思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/knn-algorithm-details/" class="">
+      <span class="book-menu-link-title">5.2 K近邻原理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/sklearn-knn-example/" class="">
+      <span class="book-menu-link-title">5.3 sklearn接口与示例代码</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/kd-tree-knn/" class="">
+      <span class="book-menu-link-title">5.4 kd树构建与搜索</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/knn-from-scratch/" class="">
+      <span class="book-menu-link-title">5.5 从零实现K近邻</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-5a460dc18f1e79253296cf2cd0498446" class="toggle"  />
+    <label for="section-5a460dc18f1e79253296cf2cd0498446" class="flex">
+      <a href="/ml/chapter06/" class="">
+        <span class="book-menu-link-title">第 6 章 文本特征与模型复用</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/bag-of-words/" class="">
+      <span class="book-menu-link-title">6.1 词袋模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/knn-spam-classification/" class="">
+      <span class="book-menu-link-title">6 .2 基于K近邻算法的垃圾邮件分类</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/tf-idf/" class="">
+      <span class="book-menu-link-title">6.3 考虑权重的词袋模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/wordcloud-generation/" class="">
+      <span class="book-menu-link-title">6.4 词云图</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-96f45a8b8c8b75adc70c78026d93dbf6" class="toggle" checked />
+    <label for="section-96f45a8b8c8b75adc70c78026d93dbf6" class="flex">
+      <a href="/ml/chapter07/" class="">
+        <span class="book-menu-link-title">第 7 章 朴素贝叶斯</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/naive-bayes-basics/" class="">
+      <span class="book-menu-link-title">7.1 朴素贝叶斯算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/bayes-estimation/" class="">
+      <span class="book-menu-link-title">7.2 贝叶斯估计</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/naive-bayes-implementation/" class="active">
+      <span class="book-menu-link-title">7.3 朴素贝叶斯实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/multinomial-naive-bayes/" class="">
+      <span class="book-menu-link-title">7.4 多项式朴素贝叶斯原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/gaussian-naive-bayes/" class="">
+      <span class="book-menu-link-title">7.5 高斯朴素贝叶斯原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-22476e49d5058c3e5e7e7366b7ab676f" class="toggle"  />
+    <label for="section-22476e49d5058c3e5e7e7366b7ab676f" class="flex">
+      <a href="/ml/chapter08/" class="">
+        <span class="book-menu-link-title">第 8 章 决策树</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-principle/" class="">
+      <span class="book-menu-link-title">8.1 决策树的基本思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-sklearn/" class="">
+      <span class="book-menu-link-title">8.2 决策树建模与可视化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/id3-vs-c45/" class="">
+      <span class="book-menu-link-title">8.3 决策树生成之ID3与C4.5</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-pruning/" class="">
+      <span class="book-menu-link-title">8.4 决策树剪枝过程</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-from-scratch/" class="">
+      <span class="book-menu-link-title">8.5 从零实现ID3与C4.5算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-continuous-features/" class="">
+      <span class="book-menu-link-title">8.6 连续型特征变量下决策树实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/cart-algorithm/" class="">
+      <span class="book-menu-link-title">8.7 CART生成与剪枝算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/cart-from-scratch/" class="">
+      <span class="book-menu-link-title">8.8 从零实现CART算法及剪枝示例</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-2feb6a51cabb61dba860f45c1881386b" class="toggle"  />
+    <label for="section-2feb6a51cabb61dba860f45c1881386b" class="flex">
+      <a href="/ml/chapter09/" class="">
+        <span class="book-menu-link-title">第 9 章 集成学习与提升算法</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/ensemble-learning-basics/" class="">
+      <span class="book-menu-link-title">9.1 集成学习算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/random-forest-principle/" class="">
+      <span class="book-menu-link-title">9.2 随机森林</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/random-forest-titanic/" class="">
+      <span class="book-menu-link-title">9.3 泰坦尼克号生还预测</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/adaboost/" class="">
+      <span class="book-menu-link-title">9.4 AdaBoost原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/multi-adaboost/" class="">
+      <span class="book-menu-link-title">9.5 MultiAdaBoost原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/gradient-boost/" class="">
+      <span class="book-menu-link-title">9.6 Gradient Boost 原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-938ae119c3849b03ccb6f91cef4243dd" class="toggle"  />
+    <label for="section-938ae119c3849b03ccb6f91cef4243dd" class="flex">
+      <a href="/ml/chapter10/" class="">
+        <span class="book-menu-link-title">第 10 章 支持向量机</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-principle/" class="">
+      <span class="book-menu-link-title">10.1 SVM思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-nonlinear-kernel/" class="">
+      <span class="book-menu-link-title">10.2 SVM线性不可分</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-max-margin/" class="">
+      <span class="book-menu-link-title">10.3 SVM原理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-soft-margin/" class="">
+      <span class="book-menu-link-title">10.4 SVM中的软间隔</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/lagrange-multipliers/" class="">
+      <span class="book-menu-link-title">10.5 拉格朗日乘数法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/kkt-conditions/" class="">
+      <span class="book-menu-link-title">10.6 对偶性与KKT条件</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-optimization/" class="">
+      <span class="book-menu-link-title">10.7 SVM优化问题</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-kernel-functions/" class="">
+      <span class="book-menu-link-title">10.8 SVM核函数原理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/smo-algorithm/" class="">
+      <span class="book-menu-link-title">10.9 SMO算法求解SVM</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-from-scratch/" class="">
+      <span class="book-menu-link-title">10.10 从零实现SVM分类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-9f4d9786d4ab755fde42c64d09b0d026" class="toggle"  />
+    <label for="section-9f4d9786d4ab755fde42c64d09b0d026" class="flex">
+      <a href="/ml/chapter11/" class="">
+        <span class="book-menu-link-title">第 11 章 聚类分析</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/clustering-basics/" class="">
+      <span class="book-menu-link-title">11.1 聚类算法的思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-principle/" class="">
+      <span class="book-menu-link-title">11.2 Kmeans聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-iteration/" class="">
+      <span class="book-menu-link-title">11.3 Kmeans算法求解</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-from-scratch/" class="">
+      <span class="book-menu-link-title">11.4 从零实现Kmeans聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-plus-plus/" class="">
+      <span class="book-menu-link-title">11.5 Kmeans&#43;&#43;聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/clustering-external-metrics/" class="">
+      <span class="book-menu-link-title">11.6 聚类外部评价指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/weighted-kmeans/" class="">
+      <span class="book-menu-link-title">11.7 加权Kmeans聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/clustering-internal-metrics/" class="">
+      <span class="book-menu-link-title">11.8 聚类内部评价指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-k-selection/" class="">
+      <span class="book-menu-link-title">11.9 聚类K值选取与分析</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/dbscan/" class="">
+      <span class="book-menu-link-title">11.10 基于密度的聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/hierarchical-clustering/" class="">
+      <span class="book-menu-link-title">11.11 基于层次的聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-d5e78c45312818bb3abd5c19c858f7e5" class="toggle"  />
+    <label for="section-d5e78c45312818bb3abd5c19c858f7e5" class="flex">
+      <a href="/ml/chapter12/" class="">
+        <span class="book-menu-link-title">第 12 章 降维算法</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/pca-principle/" class="">
+      <span class="book-menu-link-title">12.1 主成分分析</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/kpca/" class="">
+      <span class="book-menu-link-title">12.2 基于核函数的主成分分析</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-a82b41bb7eb95af72bc11e8a3d668acd" class="toggle"  />
+    <label for="section-a82b41bb7eb95af72bc11e8a3d668acd" class="flex">
+      <a href="/ml/chapter13/" class="">
+        <span class="book-menu-link-title">第 13 章 自训练与标签传播</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/self-training/" class="">
+      <span class="book-menu-link-title">13.1 Self-Training 自训练算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/label-propagation/" class="">
+      <span class="book-menu-link-title">13.2 Label Propagation算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/label-spreading/" class="">
+      <span class="book-menu-link-title">13.3 Label Spreading 算法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</nav>
+
+
+
+
+  <script>(function(){var e=document.querySelector("aside .book-menu-content");addEventListener("beforeunload",function(){localStorage.setItem("menu.scrollTop",e.scrollTop)}),e.scrollTop=localStorage.getItem("menu.scrollTop")})()</script>
+
+
+
+  </div>
+</aside>
+ 
+
+    <div class="book-page">
+      <header class="book-header hidden">
+        
+  <div class="flex align-center justify-between">
+  <label for="menu-control">
+    <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/menu.svg" class="book-icon" alt="Menu" />
+  </label>
+
+  <h3>7.3 朴素贝叶斯实现：从原理到代码建模</h3>
+
+  <label for="toc-control">
+    
+    <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/toc.svg" class="book-icon" alt="Table of Contents" />
+    
+  </label>
+</div>
+
+
+  
+  <aside class="hidden">
+    
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#731-特征计数实现">7.3.1 特征计数实现</a></li>
+    <li><a href="#732-先验概率实现">7.3.2 先验概率实现</a></li>
+    <li><a href="#733-条件概率实现">7.3.3 条件概率实现</a></li>
+    <li><a href="#734-模型拟合实现">7.3.4 模型拟合实现</a></li>
+    <li><a href="#735-后验概率实现">7.3.5 后验概率实现</a></li>
+    <li><a href="#736-使用示例">7.3.6 使用示例</a></li>
+    <li><a href="#737-小结">7.3.7 小结</a></li>
+  </ul>
+</nav>
+
+  
+  <section class="book-page-qr-panel" aria-label="页面二维码与公众号二维码">
+    <section class="book-page-qr-block" aria-label="页面二维码">
+      <p class="book-page-qr-title">微信扫码查看</p>
+      <a
+        class="book-page-qr-image-link"
+        href="https://mlwithme.github.io/ml/chapter07/naive-bayes-implementation/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="打开当前页面链接"
+      >
+        <img
+          class="book-page-qr-image"
+          src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fml%2Fchapter07%2Fnaive-bayes-implementation%2F"
+          alt="当前页面链接二维码"
+          loading="lazy"
+          decoding="async"
+          referrerpolicy="no-referrer"
+        >
+      </a>
+    </section>
+
+    <div class="book-page-qr-divider" aria-hidden="true"></div>
+
+    <section class="book-page-qr-block" aria-label="公众号二维码">
+      <p class="book-page-qr-title">关注公众号</p>
+      <div class="book-page-qr-image-link book-page-qr-image-frame">
+        <img
+          class="book-page-qr-image"
+          src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/images/gzh.png"
+          alt="公众号二维码"
+          loading="lazy"
+          decoding="async"
+        >
+      </div>
+    </section>
+  </section>
+
+
+
+
+  </aside>
+  
+ 
+      </header>
+
+      
+      
+  <article class="markdown book-article"><nav class="book-breadcrumbs text-small book-breadcrumbs--page" aria-label="面包屑导航">
+    <ol class="book-breadcrumbs__list"><li class="book-breadcrumbs__item"><a class="book-breadcrumbs__link" href="https://mlwithme.github.io/">首页</a></li><li class="book-breadcrumbs__item"><a class="book-breadcrumbs__link" href="https://mlwithme.github.io/ml/">机器学习</a></li><li class="book-breadcrumbs__item"><a class="book-breadcrumbs__link" href="https://mlwithme.github.io/ml/chapter07/">第 7 章 朴素贝叶斯</a></li><li class="book-breadcrumbs__item"><span class="book-breadcrumbs__current" aria-current="page">7.3 朴素贝叶斯实现</span></li></ol>
+  </nav><div class="book-article-lastmod text-small">
+        <span class="book-article-lastmod-label">更新于</span>
+        <span class="book-article-lastmod-value">2026年6月28日</span>
+      </div><h1 id="73-朴素贝叶斯实现">7.3 朴素贝叶斯实现<a class="anchor" href="#73-%e6%9c%b4%e7%b4%a0%e8%b4%9d%e5%8f%b6%e6%96%af%e5%ae%9e%e7%8e%b0">#</a></h1>
+<p>经过前面两个小节内容的介绍，对于朴素贝叶斯算法的原理我们已经有了清晰的认识。在本节内容中，我们将开始分步对各个部分的实现进行详细地介绍。同时，需要说明的是以下实现代码均参考自sklearn 0.24.0 中的<code>CategoricalNB</code>模块，只是对部分处理逻辑进行了修改与简化，完整代码见 <code>AllBooKCode/Chapter07/C01_naive_bayes_category.py</code>  文件。</p>
+<h2 id="731-特征计数实现">7.3.1 特征计数实现<a class="anchor" href="#731-%e7%89%b9%e5%be%81%e8%ae%a1%e6%95%b0%e5%ae%9e%e7%8e%b0">#</a></h2>
+<p>通过7.1节的内容可知，不管是计算先验概率还是条件概率，在这之前都需要先统计训练集中各个样本及样本特征取值的分布情况。因此，这里首先需要初始化相关的计数器，然后再对样本和特征取值的分布情况进行统计。</p>
+<p>具体地，对于计数器的初始化工作实现过程，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">MyCategoricalNB</span>(<span style="color:#007020">object</span>):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">__init__</span>(<span style="color:#007020">self</span>, alpha<span style="color:#666">=</span><span style="color:#40a070">1.0</span>):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>alpha <span style="color:#666">=</span> alpha
+</span></span><span style="display:flex;"><span><span style="color:#40a070">5</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">6</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">_init_counters</span>(<span style="color:#007020">self</span>):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">7</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>class_count_ <span style="color:#666">=</span> np<span style="color:#666">.</span>zeros(<span style="color:#007020">self</span><span style="color:#666">.</span>n_classes, dtype<span style="color:#666">=</span>np<span style="color:#666">.</span>float64)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">8</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>category_count_ <span style="color:#666">=</span> [np<span style="color:#666">.</span>zeros((<span style="color:#007020">self</span><span style="color:#666">.</span>n_classes, <span style="color:#40a070">0</span>))
+</span></span><span style="display:flex;"><span><span style="color:#40a070">9</span>                                 <span style="color:#007020;font-weight:bold">for</span> _ <span style="color:#007020;font-weight:bold">in</span> <span style="color:#007020">range</span>(<span style="color:#007020">self</span><span style="color:#666">.</span>n_features_)]</span></span></code></pre></div><p>在上述代码中，第3~4行是初始化平滑项系数<code>alpha</code>。第7行<code>class_count_</code>被初始化成了一个形状为<code>[n_classes,]</code>的全零向量，其中<code>n_classes</code>表示分类的类别数量，而每个维度分别表示每个类别的样本数量（例如<code>[2,2,3]</code>表示0、1、2这3个类别的样本数分别是2、2、3），其目的是后续用于计算每个类别的先验概率。第8行<code>category_count_</code>被初始化成了一个包含有<code>n_features_</code>个元素的列表，其中<code>n_features_</code>表示数据集的特征维度数量，同时<code>category_count_</code>中每个元素的形状是<code>[n_classes,0]</code>（后续每个元素将会更新为<code>[n_classes,len(X_i)]</code>的形状，<code> len(X_i)</code>表示<code>X_i</code>这个特征的取值情况数量）；而<code>category_count_</code>的作用是记录在各个类别下每个特征变量中各种取值情况的数量，例如<code>category_count_[i][j][k]</code>为10表示含义就是特征<code>i</code>在类别<code>j</code>下特征取值为<code>k</code>的样本数量为10个。</p>
+<p>在初始化两个计数器之后，进一步便可以实现各个类别及特征分布的统计，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">_count</span>(<span style="color:#007020">self</span>, X, Y):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>         <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">_update_cat_count</span>(X_feature, Y, cat_count, n_classes):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>             <span style="color:#007020;font-weight:bold">for</span> j <span style="color:#007020;font-weight:bold">in</span> <span style="color:#007020">range</span>(n_classes):  <span style="color:#60a0b0;font-style:italic"># 遍历每个类别</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>                 mask <span style="color:#666">=</span> Y[:, j]<span style="color:#666">.</span>astype(<span style="color:#007020">bool</span>)  <span style="color:#60a0b0;font-style:italic"># 取每个类别下对应样本的索引</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>                 counts <span style="color:#666">=</span> np<span style="color:#666">.</span>bincount(X_feature[mask])  <span style="color:#60a0b0;font-style:italic"># 统计当前类别下，特征X_feature中各个取值下的数量</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>                 indices <span style="color:#666">=</span> np<span style="color:#666">.</span>nonzero(counts)[<span style="color:#40a070">0</span>]
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>                 cat_count[j, indices] <span style="color:#666">+=</span> counts[indices]
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>                 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>class_count_ <span style="color:#666">+=</span> Y<span style="color:#666">.</span>sum(axis<span style="color:#666">=</span><span style="color:#40a070">0</span>)  <span style="color:#60a0b0;font-style:italic"># Y: shape(n,n_classes)   Y.sum(): shape(n_classes,)</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>n_categories_ <span style="color:#666">=</span> X<span style="color:#666">.</span>max(axis<span style="color:#666">=</span><span style="color:#40a070">0</span>) <span style="color:#666">+</span> <span style="color:#40a070">1</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>         <span style="color:#007020;font-weight:bold">for</span> i <span style="color:#007020;font-weight:bold">in</span> <span style="color:#007020">range</span>(<span style="color:#007020">self</span><span style="color:#666">.</span>n_features_):  <span style="color:#60a0b0;font-style:italic"># 遍历每个特征</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>             X_feature <span style="color:#666">=</span> X[:, i]  <span style="color:#60a0b0;font-style:italic"># 取每一列的特征</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>             <span style="color:#007020">self</span><span style="color:#666">.</span>category_count_[i] <span style="color:#666">=</span> np<span style="color:#666">.</span>pad(<span style="color:#007020">self</span><span style="color:#666">.</span>category_count_[i],
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>                          [(<span style="color:#40a070">0</span>, <span style="color:#40a070">0</span>), (<span style="color:#40a070">0</span>, <span style="color:#007020">self</span><span style="color:#666">.</span>n_categories_[i])], <span style="color:#4070a0">&#39;constant&#39;</span>)                                   
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>             _update_cat_count(X_feature, Y,<span style="color:#007020">self</span><span style="color:#666">.</span>category_count_[i],<span style="color:#007020">self</span><span style="color:#666">.</span>n_classes)</span></span></code></pre></div><p>在上述代码中，第1行参数<code>Y</code>是原始标签经过one-hot编码后的形式，例如3分类问题中类别1会被编码成<code>[0,1,0]</code>的形式，因此<code>Y</code>的形状为<code>[n,n_classes]</code>。第9行代码是计算得到每个类别对应的样本数量。第10行则是统计每个特征维度的取值数量（因为特征取值是从0开始的所以后面加了1）,例如<code>[3 3 3 3]</code>表示四个特征维度的取值均有3种情况。第11~12行开始遍历每个特征并取对应的特征列。第13~14行是对<code>category_count_</code>中的每个元素填充<code>self.n_categories_[i]</code>列全0向量，此时<code>category_count_</code>中每个元素将会变成形状为<code>[n_classes,len(X_i)]</code>的全零矩阵。第15行则是根据输入的每一列特征等相关参数来更新<code>category_count_</code>计数器。</p>
+<p>第3~5行为遍历每一个样本类别，并取每个类别下对应样本的索引，同时统计当前类别下特征列<code>X_feature</code>中各个取值下的数量。同时，第5行中<code>np.bincount</code>的作用的是统计每个值出现的次数，例如：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> counts <span style="color:#666">=</span> np<span style="color:#666">.</span>bincount(np<span style="color:#666">.</span>array([<span style="color:#40a070">0</span>, <span style="color:#40a070">3</span>, <span style="color:#40a070">5</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">4</span>, <span style="color:#40a070">4</span>]))
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span> <span style="color:#007020">print</span>(counts)  <span style="color:#60a0b0;font-style:italic"># [1 1 0 1 2 1]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span> <span style="color:#60a0b0;font-style:italic"># 表示[0, 3, 5, 1, 4, 4]中0,1,2,3,4,5这个6个值的出现的频次分别是1,1,0,1,2,1</span></span></span></code></pre></div><p>第6~7行则是用来更新<code>cat_count</code>中当前输入特征每种取值情况的分布数量，例如<code>cat_count[i,k]</code>表示的是第<code>i</code>个类别下，特征<code>X_feature</code>的第<code>k</code>个取值的数量。</p>
+<p>例如对于表7-1中的数据集来说，其对应的<code>category_count_</code>计数器的结果为：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> [[[<span style="color:#40a070">4.</span>, <span style="color:#40a070">1.</span>],[<span style="color:#40a070">3.</span>, <span style="color:#40a070">7.</span>]], 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>  [[<span style="color:#40a070">4.</span>, <span style="color:#40a070">1.</span>],[<span style="color:#40a070">4.</span>, <span style="color:#40a070">6.</span>]], 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>  [[<span style="color:#40a070">1.</span>, <span style="color:#40a070">1.</span>, <span style="color:#40a070">3.</span>],[<span style="color:#40a070">2.</span>, <span style="color:#40a070">3.</span>, <span style="color:#40a070">5.</span>]]]</span></span></code></pre></div><p>其中<code>[[4., 1.],[3., 7.]]</code>分别表示的含义就是：对于第1个特征$X^{(1)}$来说，在$Y=0$这个类别下，$X^{(1)}$取值为0的情况有4种（表中第4~7号样本），取值为1的情况有1种（第14号样本）；在$Y=1$这个类别下，$X^{(1)}$取值为0的情况有3种（第1~3号样本），取值为1的情况有7种（第8~13和第15号样本）。同理，对于第2个特征$X^{(2)}$来说，在$Y=0$这个类别下，$X^{(2)}$取值为0的情况有4种，取值为1的情况有1种；在$Y=1$这个类别下，$X^{(2)}$取值为0的情况有4种，取值为1的情况有6种。</p>
+<p>到此，对于数据集中样本及特征分布情况的计数就算是统计完了，接下来开始实现计算先验概率和条件概率。</p>
+<h2 id="732-先验概率实现">7.3.2 先验概率实现<a class="anchor" href="#732-%e5%85%88%e9%aa%8c%e6%a6%82%e7%8e%87%e5%ae%9e%e7%8e%b0">#</a></h2>
+<p>有了数据集中各个样本的分布情况后，计算先验概率就变得十分简单了，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span>    <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">_update_class_prior</span>(<span style="color:#007020">self</span>):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>        <span style="color:#007020">self</span><span style="color:#666">.</span>class_prior_ <span style="color:#666">=</span> (<span style="color:#007020">self</span><span style="color:#666">.</span>class_count_ <span style="color:#666">+</span> <span style="color:#007020">self</span><span style="color:#666">.</span>alpha) <span style="color:#666">/</span>  <span style="color:#60a0b0;font-style:italic"># shape: [n_classes, ] </span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>       			(<span style="color:#007020">self</span><span style="color:#666">.</span>class_count_<span style="color:#666">.</span>sum() <span style="color:#666">+</span> <span style="color:#007020">self</span><span style="color:#666">.</span>n_classes <span style="color:#666">*</span> <span style="color:#007020">self</span><span style="color:#666">.</span>alpha)</span></span></code></pre></div><p>在上述代码中，第2~3行便是用来计算各个类别的先验概率，其中带有<code>alpha</code>的地方便是第7.2.1节内容中的平滑处理项。</p>
+<h2 id="733-条件概率实现">7.3.3 条件概率实现<a class="anchor" href="#733-%e6%9d%a1%e4%bb%b6%e6%a6%82%e7%8e%87%e5%ae%9e%e7%8e%b0">#</a></h2>
+<p>进一步，可以根据<code>category_count_</code>中的统计结果来实现各特征取值的条件概率，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">_update_feature_prob</span>(<span style="color:#007020">self</span>):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>         feature_prob <span style="color:#666">=</span> []
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>         <span style="color:#007020;font-weight:bold">for</span> i <span style="color:#007020;font-weight:bold">in</span> <span style="color:#007020">range</span>(<span style="color:#007020">self</span><span style="color:#666">.</span>n_features_):  <span style="color:#60a0b0;font-style:italic"># 遍历 每一个特征</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span>             smoothed_cat_count <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>category_count_[i] <span style="color:#666">+</span> <span style="color:#007020">self</span><span style="color:#666">.</span>alpha
+</span></span><span style="display:flex;"><span><span style="color:#40a070">5</span>             smoothed_class_count <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>category_count_[i]<span style="color:#666">.</span>sum(axis<span style="color:#666">=</span><span style="color:#40a070">1</span>) <span style="color:#666">+</span>        
+</span></span><span style="display:flex;"><span><span style="color:#40a070">6</span>                              <span style="color:#007020">self</span><span style="color:#666">.</span>category_count_[i]<span style="color:#666">.</span>shape[<span style="color:#40a070">1</span>] <span style="color:#666">*</span> <span style="color:#007020">self</span><span style="color:#666">.</span>alpha
+</span></span><span style="display:flex;"><span><span style="color:#40a070">7</span>             cond_prob <span style="color:#666">=</span> smoothed_cat_count <span style="color:#666">/</span> smoothed_class_count<span style="color:#666">.</span>reshape(<span style="color:#666">-</span><span style="color:#40a070">1</span>, <span style="color:#40a070">1</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">8</span>             feature_prob<span style="color:#666">.</span>append(cond_prob)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">9</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>feature_prob_ <span style="color:#666">=</span> feature_prob</span></span></code></pre></div><p>在上述代码中，第4行是取当前特征在不同类别下各个特征的取值的统计结果，并加上平滑项系数。第5~6行是计算在当前特征下各类别样本的总数，并进行平滑处理。第7行是计算每个特征取值对应的条件概率。第9行中<code>feature_prob_ </code>为一个包含有<code>n_features_</code>个元素的列表，每个元素的<code>shape</code>为 <code>[self.n_classes, 特征取值数]</code>，因此<code>feature_prob_[i][j][k]</code>表示的就是特征<code>i</code>在类别<code>j</code>下取值为<code>k</code>时的概率。</p>
+<p>例如对于表7-1中的训练数据集来说，计算得到<code>feature_prob_</code>的结果如下所示：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> [[<span style="color:#40a070">0.8</span> <span style="color:#40a070">0.2</span>]     [[<span style="color:#40a070">0.8</span> <span style="color:#40a070">0.2</span>]     [[<span style="color:#40a070">0.2</span> <span style="color:#40a070">0.2</span> <span style="color:#40a070">0.6</span>]  
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>  [<span style="color:#40a070">0.3</span> <span style="color:#40a070">0.7</span>]]     [<span style="color:#40a070">0.4</span> <span style="color:#40a070">0.6</span>]]     [<span style="color:#40a070">0.2</span> <span style="color:#40a070">0.3</span> <span style="color:#40a070">0.5</span>]]</span></span></code></pre></div><p>上述结果中，第1个元素表示：对于第1个特征$X^{(1)}$来说，在$Y=0$这个类别下，$X^{(1)}=0$的概率为$0.8$，$X^{(1)}=1$的概率为$0.2$；对于第1个特征$X^{(1)}$来说，在$Y=1$这个类别下，$X^{(1)}=0$的概率为$0.3$，$X^{(1)}=1$的概率为$0.7$。这一结果也可以同7.1.3节中的计算结果进行对比。</p>
+<h2 id="734-模型拟合实现">7.3.4 模型拟合实现<a class="anchor" href="#734-%e6%a8%a1%e5%9e%8b%e6%8b%9f%e5%90%88%e5%ae%9e%e7%8e%b0">#</a></h2>
+<p>上述先验概率和条件概率的计算过程对应便是整个模型的拟合过程，换句话说对于贝叶斯算法来说，所谓模型拟合就是计算先验概率和条件概率。在实现这部分代码之后，再通过一个函数将整个过程整合起来即可，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">fit</span>(<span style="color:#007020">self</span>, X, y):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>n_features_ <span style="color:#666">=</span> X<span style="color:#666">.</span>shape[<span style="color:#40a070">1</span>]
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>         labelbin <span style="color:#666">=</span> LabelBinarizer()  
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>         Y <span style="color:#666">=</span> labelbin<span style="color:#666">.</span>fit_transform(y) 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>classes_ <span style="color:#666">=</span> labelbin<span style="color:#666">.</span>classes_  
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>         <span style="color:#007020;font-weight:bold">if</span> Y<span style="color:#666">.</span>shape[<span style="color:#40a070">1</span>] <span style="color:#666">==</span> <span style="color:#40a070">1</span>: 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>             Y <span style="color:#666">=</span> np<span style="color:#666">.</span>concatenate((<span style="color:#40a070">1</span> <span style="color:#666">-</span> Y, Y), axis<span style="color:#666">=</span><span style="color:#40a070">1</span>) 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>n_classes <span style="color:#666">=</span> Y<span style="color:#666">.</span>shape[<span style="color:#40a070">1</span>]
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>_init_counters()  <span style="color:#60a0b0;font-style:italic"># 初始化计数器</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>_count(X, Y)  <span style="color:#60a0b0;font-style:italic"># 对各个特征的取值情况进行计数，以计算条件概率等</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>_update_class_prior()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>_update_feature_prob()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>         <span style="color:#007020;font-weight:bold">return</span> <span style="color:#007020">self</span></span></span></code></pre></div><p>在上述代码中，第2~4行用来将原始<code>[0,1,2,3...]</code>这样的标签转换为one-hot编码形式的标签值，形状为<code>[n,n_classes]</code>。第5行用来记录原始的标签类别，形状为<code>[n_classes,]</code>。第6~7行用来处理当数据集为二分类时<code>fit_transform</code>处理后的结果并不是one-hot形式，需要添加一列来转换成one-hot形式。第8行是获取数据集的类别数量。第9~12行则分别是上面3节内容介绍到的初始化计数器、特征取值分布情况统计、计算先验概率和计算条件概率。</p>
+<h2 id="735-后验概率实现">7.3.5 后验概率实现<a class="anchor" href="#735-%e5%90%8e%e9%aa%8c%e6%a6%82%e7%8e%87%e5%ae%9e%e7%8e%b0">#</a></h2>
+<p>在完成模型的拟合过程后，对于新输入的样本来说其最终的预测结果则取决于对应的极大后验概率，这部分示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">_joint_likelihood</span>(<span style="color:#007020">self</span>, X):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>         <span style="color:#007020;font-weight:bold">if</span> <span style="color:#007020;font-weight:bold">not</span> X<span style="color:#666">.</span>shape[<span style="color:#40a070">1</span>] <span style="color:#666">==</span> <span style="color:#007020">self</span><span style="color:#666">.</span>n_features_:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>             <span style="color:#007020;font-weight:bold">raise</span> <span style="color:#007020">ValueError</span>(<span style="color:#4070a0">&#34;期望输入特征个数为 </span><span style="color:#70a0d0">%d</span><span style="color:#4070a0"> , 实际输入为 </span><span style="color:#70a0d0">%d</span><span style="color:#4070a0"> &#34;</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>                              <span style="color:#666">%</span> (<span style="color:#007020">self</span><span style="color:#666">.</span>n_features_, X<span style="color:#666">.</span>shape[<span style="color:#40a070">1</span>]))
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>         jll <span style="color:#666">=</span> np<span style="color:#666">.</span>ones((X<span style="color:#666">.</span>shape[<span style="color:#40a070">0</span>], <span style="color:#007020">self</span><span style="color:#666">.</span>class_count_<span style="color:#666">.</span>shape[<span style="color:#40a070">0</span>])) 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>         <span style="color:#007020;font-weight:bold">for</span> i <span style="color:#007020;font-weight:bold">in</span> <span style="color:#007020">range</span>(<span style="color:#007020">self</span><span style="color:#666">.</span>n_features_):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>             indices <span style="color:#666">=</span> X[:, i]  <span style="color:#60a0b0;font-style:italic"># 取对应的每一列特征</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>             <span style="color:#007020;font-weight:bold">if</span> <span style="color:#007020">self</span><span style="color:#666">.</span>feature_prob_[i]<span style="color:#666">.</span>shape[<span style="color:#40a070">1</span>] <span style="color:#666">&lt;=</span> indices<span style="color:#666">.</span>max():
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>                 <span style="color:#007020;font-weight:bold">raise</span> <span style="color:#007020">IndexError</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;测试集中的第</span><span style="color:#70a0d0">{</span>i<span style="color:#70a0d0">}</span><span style="color:#4070a0">个特征维度的取值情况&#34;</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>                     <span style="color:#4070a0">f</span><span style="color:#4070a0">&#34; </span><span style="color:#70a0d0">{</span>indices<span style="color:#666">.</span>max()<span style="color:#70a0d0">}</span><span style="color:#4070a0"> 超出了训练集中该维度的取值情况！&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>             jll <span style="color:#666">*=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>feature_prob_[i][:, indices]<span style="color:#666">.</span>T  
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>         total_ll <span style="color:#666">=</span> jll <span style="color:#666">*</span> <span style="color:#007020">self</span><span style="color:#666">.</span>class_prior_  
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>         <span style="color:#007020;font-weight:bold">return</span> total_ll</span></span></code></pre></div><p>在上述代码中，第2~4行用来判断输入样本的特征维度是否等于训练集中样本的特征维度。第5行是初始化每个样本的联合似然估计值。第6~7行是遍历测试数据中对应的每一列特征。第11行是取每个特征取值下对应类别的条件概率，并进行累乘（因为<code>self.feature_prob_[i][:, indices]</code>的形状为<code>[n_classes,n]</code>，而<code>jll</code>的初始形状为<code>[n,n_classes]</code>所以前者要进行转置）。第12行则是通过条件概率乘以先验概率来计算每个样本对应的后验概率估计。</p>
+<p>同时值得注意的一点是，在文本向量化中对于考虑词频的词袋模型来说，其向量表示并不能直接使用于这里实现的贝叶斯模型。因为此时训练集词表中每个词出现的次数并不是该特征维度对应的取值情况数，而是表示的频次。例如在训练集中“客栈”这个词出现的最大次数为10，那么模型在拟合过程中就会认为“客栈”这个维度的特征取值有10种情况，并以此进行建模；但是当测试集中的某个样本里“客栈”这个词出现的频次为11时，那么模型便会认为该维度多了一种取值情况，进而无法取到对应的条件概率。所以我们在上面第8~10行中加了对应的判断条件。</p>
+<p>在实现各样本后验概率的计算过程后，最后一步需要完成的便是极大化操作，即从所有后验概率中选择最大的概率值对应的类别作为该样本的预测类别即可。这部分示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">predict</span>(<span style="color:#007020">self</span>, X, with_prob<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">False</span>):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>         <span style="color:#007020;font-weight:bold">from</span> <span style="color:#0e84b5;font-weight:bold">scipy.special</span> <span style="color:#007020;font-weight:bold">import</span> softmax
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>         jll <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>_joint_likelihood(X)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span>         y_pred <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>classes_[np<span style="color:#666">.</span>argmax(jll, axis<span style="color:#666">=</span><span style="color:#40a070">1</span>)]
+</span></span><span style="display:flex;"><span><span style="color:#40a070">5</span>         <span style="color:#007020;font-weight:bold">if</span> with_prob:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">6</span>             prob <span style="color:#666">=</span> softmax(jll)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">7</span>             <span style="color:#007020;font-weight:bold">return</span> y_pred, prob
+</span></span><span style="display:flex;"><span><span style="color:#40a070">8</span>         <span style="color:#007020;font-weight:bold">return</span> y_pred</span></span></code></pre></div><p>在上述代码中，第4行便是极大化后验概率的操作。第5~8行则是根据对应的参数来返回预测后的结果是否包括概率值。</p>
+<h2 id="736-使用示例">7.3.6 使用示例<a class="anchor" href="#736-%e4%bd%bf%e7%94%a8%e7%a4%ba%e4%be%8b">#</a></h2>
+<p>下面，我们先以表7-1中的模拟数据来通过上述代码进行示例。首先需要构建表7-1中的模拟数据，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">load_simple_data</span>():
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>     x <span style="color:#666">=</span> np<span style="color:#666">.</span>array([[<span style="color:#40a070">0</span>, <span style="color:#40a070">0</span>, <span style="color:#40a070">0</span>, <span style="color:#40a070">0</span>, <span style="color:#40a070">0</span>, <span style="color:#40a070">0</span>, <span style="color:#40a070">0</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">1</span>],
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>                   [<span style="color:#40a070">1</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">0</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">0</span>, <span style="color:#40a070">0</span>, <span style="color:#40a070">0</span>, <span style="color:#40a070">0</span>, <span style="color:#40a070">0</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">0</span>, <span style="color:#40a070">0</span>],
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span>                   [<span style="color:#40a070">2</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">0</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">0</span>, <span style="color:#40a070">0</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">1</span>]])<span style="color:#666">.</span>transpose()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">5</span>     y <span style="color:#666">=</span> np<span style="color:#666">.</span>array([<span style="color:#40a070">1</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">0</span>, <span style="color:#40a070">0</span>, <span style="color:#40a070">0</span>, <span style="color:#40a070">0</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">0</span>, <span style="color:#40a070">1</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">6</span>     <span style="color:#007020;font-weight:bold">return</span> x, y</span></span></code></pre></div><p>其中特征$X^{(3)}$的取值这里使用了<code>0,1,2</code>来进行代替。</p>
+<p>接着来实现模型的构建部分，代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">test_naive_bayes</span>():
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     x, y <span style="color:#666">=</span> load_simple_data()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>     logging<span style="color:#666">.</span>info(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;My Bayes 运行结果：&#34;</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>     model <span style="color:#666">=</span> MyCategoricalNB(alpha<span style="color:#666">=</span><span style="color:#40a070">0</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>     model<span style="color:#666">.</span>fit(x, y)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>     logging<span style="color:#666">.</span>info(model<span style="color:#666">.</span>predict(np<span style="color:#666">.</span>array([[<span style="color:#40a070">0</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">0</span>]]), with_prob<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">True</span>))
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>     logging<span style="color:#666">.</span>info(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;CategoricalNB 运行结果：&#34;</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>     model <span style="color:#666">=</span> CategoricalNB(alpha<span style="color:#666">=</span><span style="color:#40a070">0</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>     model<span style="color:#666">.</span>fit(x, y)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>     logging<span style="color:#666">.</span>info(model<span style="color:#666">.</span>predict(np<span style="color:#666">.</span>array([[<span style="color:#40a070">0</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">0</span>]])))
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>     logging<span style="color:#666">.</span>info(model<span style="color:#666">.</span>predict_proba(np<span style="color:#666">.</span>array([[<span style="color:#40a070">0</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">0</span>]])))
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span> <span style="color:#007020;font-weight:bold">if</span> <span style="color:#bb60d5">__name__</span> <span style="color:#666">==</span> <span style="color:#4070a0">&#39;__main__&#39;</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>     test_naive_bayes()</span></span></code></pre></div><p>在上述代码中，分别使用了我们自己动手实现的贝叶斯模型和sklearn中的<code>CategoricalNB</code>模块进行对比，其中<code>logging</code>为日志打印模块。</p>
+<p>最终，上述代码运行以后将会输出类似如下结果：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> MyCategoricalNB 运行结果<span style="">：</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span> 每个类别下的样本数class_count_(n_classes,): [ <span style="color:#40a070">5.</span> <span style="color:#40a070">10.</span>]
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span> 每个特征的取值种数n_categories_:[<span style="color:#40a070">2</span> <span style="color:#40a070">2</span> <span style="color:#40a070">3</span>]
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span> 各个特征每个取值的数量分布<span style="">（</span>未平滑处理<span style="">）</span> category_count_:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>  [[[<span style="color:#40a070">4.</span>, <span style="color:#40a070">1.</span>],[<span style="color:#40a070">3.</span>, <span style="color:#40a070">7.</span>]], [[<span style="color:#40a070">4.</span>, <span style="color:#40a070">1.</span>],[<span style="color:#40a070">4.</span>, <span style="color:#40a070">6.</span>]], 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>   [[<span style="color:#40a070">1.</span>, <span style="color:#40a070">1.</span>, <span style="color:#40a070">3.</span>], [<span style="color:#40a070">2.</span>, <span style="color:#40a070">3.</span>, <span style="color:#40a070">5.</span>]]]
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span> n_classes:<span style="color:#40a070">2</span> class_count_:[ <span style="color:#40a070">5.</span> <span style="color:#40a070">10.</span>]
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span> 计算每个类别的先验概率class_prior_:[<span style="color:#40a070">0.333</span> <span style="color:#40a070">0.667</span>]
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span> 第0个特征在各类别下各特征取值的条件概率为: [[<span style="color:#40a070">0.8</span> <span style="color:#40a070">0.2</span>],[<span style="color:#40a070">0.3</span> <span style="color:#40a070">0.7</span>]]
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span> 第1个特征在各类别下各特征取值的条件概率为: [[<span style="color:#40a070">0.8</span> <span style="color:#40a070">0.2</span>],[<span style="color:#40a070">0.4</span> <span style="color:#40a070">0.6</span>]]
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span> 第2个特征在各类别下各特征取值的条件概率为: [[<span style="color:#40a070">0.2</span> <span style="color:#40a070">0.2</span> <span style="color:#40a070">0.6</span>],[<span style="color:#40a070">0.2</span> <span style="color:#40a070">0.3</span> <span style="color:#40a070">0.5</span>]]
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span> 样本预测原始概率为<span style="">：</span>[[<span style="color:#40a070">0.011</span> <span style="color:#40a070">0.024</span>]]
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span> [<span style="color:#40a070">1</span>]  [[<span style="color:#40a070">0.497</span>, <span style="color:#40a070">0.503</span>]]  
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span> CategoricalNB 运行结果<span style="">：</span>[<span style="color:#40a070">1</span>]  [[<span style="color:#40a070">0.307</span> <span style="color:#40a070">0.692</span>]]</span></span></code></pre></div><p>在上述结果中，第12行输出的便是样本<code>[0, 1, 0]</code>的原始预测概率，也就是7.1.3节中的计算结果。第13行则是最终的预测类别以及经过归一化后的概率输出。第14行则是sklearn中<code>CategoricalNB</code>模块输出的预测结果和概率值，其之所以与第13行中的概率值不一样是因为<code>CategoricalNB</code>在计算条件概率以及先验概率时都先取了$\log$对数，但是这并不影响最终的预测结果。不过从结果来看，取对数后两个类别预测的概率有更大的区分度。</p>
+<p>下面，还可以通过7.2.3节中的垃圾邮件数据集来对上述实现进行验证，整个示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">test_spam_classification</span>():
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     x_train, x_test, y_train, y_test <span style="color:#666">=</span> load_data()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>     model <span style="color:#666">=</span> MyCategoricalNB(alpha<span style="color:#666">=</span><span style="color:#40a070">1.0</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>     model<span style="color:#666">.</span>fit(x_train, y_train)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>     y_pred <span style="color:#666">=</span> model<span style="color:#666">.</span>predict(x_test)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>     logging<span style="color:#666">.</span>info(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;MyCategoricalNB 运行结果：&#34;</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>     logging<span style="color:#666">.</span>info(classification_report(y_test, y_pred))
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>     model <span style="color:#666">=</span> CategoricalNB()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>     model<span style="color:#666">.</span>fit(x_train, y_train)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>     y_pred <span style="color:#666">=</span> model<span style="color:#666">.</span>predict(x_test)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>     logging<span style="color:#666">.</span>info(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;CategoricalNB 运行结果：&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>     logging<span style="color:#666">.</span>info(classification_report(y_test, y_pred))</span></span></code></pre></div><p>上述代码便是一个基于朴素贝叶斯模型的垃圾邮件分类示例，代码运行结束后便可以看到类似如下结果：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> MyCategoricalNB 运行结果<span style="">：</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>                precision    recall  f1<span style="color:#666">-</span>score   support
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>            <span style="color:#40a070">0</span>       <span style="color:#40a070">0.97</span>      <span style="color:#40a070">0.96</span>      <span style="color:#40a070">0.97</span>      <span style="color:#40a070">1504</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>            <span style="color:#40a070">1</span>       <span style="color:#40a070">0.96</span>      <span style="color:#40a070">0.97</span>      <span style="color:#40a070">0.97</span>      <span style="color:#40a070">1497</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>     accuracy                           <span style="color:#40a070">0.97</span>      <span style="color:#40a070">3001</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>    macro avg       <span style="color:#40a070">0.97</span>      <span style="color:#40a070">0.97</span>      <span style="color:#40a070">0.97</span>      <span style="color:#40a070">3001</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span> weighted avg       <span style="color:#40a070">0.97</span>      <span style="color:#40a070">0.97</span>      <span style="color:#40a070">0.97</span>      <span style="color:#40a070">3001</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span> CategoricalNB 运行结果<span style="">：</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>               precision    recall  f1<span style="color:#666">-</span>score   support
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>            <span style="color:#40a070">0</span>       <span style="color:#40a070">0.97</span>      <span style="color:#40a070">0.96</span>      <span style="color:#40a070">0.97</span>      <span style="color:#40a070">1504</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>            <span style="color:#40a070">1</span>       <span style="color:#40a070">0.96</span>      <span style="color:#40a070">0.97</span>      <span style="color:#40a070">0.97</span>      <span style="color:#40a070">1497</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>     accuracy                           <span style="color:#40a070">0.97</span>      <span style="color:#40a070">3001</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>    macro avg       <span style="color:#40a070">0.97</span>      <span style="color:#40a070">0.97</span>      <span style="color:#40a070">0.97</span>      <span style="color:#40a070">3001</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span> weighted avg       <span style="color:#40a070">0.97</span>      <span style="color:#40a070">0.97</span>      <span style="color:#40a070">0.97</span>      <span style="color:#40a070">3001</span></span></span></code></pre></div><p>可以看到，本文实现的<code>MyCategoricalNB</code>和<code>CategoricalNB</code>在各项评估指标上并没有任何差异。</p>
+<h2 id="737-小结">7.3.7 小结<a class="anchor" href="#737-%e5%b0%8f%e7%bb%93">#</a></h2>
+<p>在这篇文章中，我们首先详细介绍了朴素贝叶斯中样本分布及特征取值的统计、先验概率和条件概率的计算、极大化后验概率的代码实现等；然后一步一步介绍了如何从零实现不考虑词频的词袋模型；最后，再次以垃圾邮件这一分类任务来测试了实现代码的正确性，以及同第6.2节中K近邻的分类结果进行了对比。</p>
+<div class="book-page-pv text-small" id="busuanzi_container_page_pv">
+      <span class="book-page-pv-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" focusable="false">
+          <path d="M1.5 12s3.9-6.5 10.5-6.5S22.5 12 22.5 12s-3.9 6.5-10.5 6.5S1.5 12 1.5 12Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7"/>
+          <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.7"/>
+        </svg>
+      </span>
+      <span class="book-page-pv-label">阅读</span>
+      <span class="book-page-pv-value" id="busuanzi_value_page_pv">--</span>
+    </div><section class="book-article-index book-related-articles" aria-labelledby="related-articles-title">
+    <h2 id="related-articles-title">相关阅读</h2>
+    <div class="book-article-grid"><article class="book-article-card book-related-article-card">
+              <h3 class="book-article-card-title">
+                <a href="/ml/chapter07/naive-bayes-basics/">7.1 朴素贝叶斯算法</a>
+              </h3><p class="book-article-card-desc">在本节中，我们首先介绍了朴素贝叶斯算法中的几个基本概念，然后详细介绍了朴素贝叶斯算法的原理，知道了“朴素”一词的含义及为什么可以通过贝叶斯算法来完成分类任务，最后对朴素贝叶斯算法的具体计算流程进行了总结。</p></article><article class="book-article-card book-related-article-card">
+              <h3 class="book-article-card-title">
+                <a href="/ml/chapter06/knn-spam-classification/">6 .2 基于K近邻算法的垃圾邮件分类</a>
+              </h3><p class="book-article-card-desc">在这节中，我们首先以一个真实的垃圾邮件数据集为例，详细介绍了如何通过sklearn中的K近邻模型来完成文本的分类任务，包括载入原始文本数据、制作数据集、划分数据集等；然后还介绍了如何通过joblib模块来完成模型的持久化和复用；</p></article></div>
+  </section></article>
+ 
+      
+
+
+      <footer class="book-footer">
+        
+  <div class="flex flex-wrap justify-between">
+
+<div>
+
+</div>
+
+<div>
+
+</div>
+
+</div>
+
+<div class="flex flex-wrap justify-between">
+    <span>
+    
+      <a href="/ml/chapter07/bayes-estimation/" class="flex align-center">
+        <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/backward.svg" class="book-icon" alt="Backward" />
+        <span>7.2 贝叶斯估计</span>
+      </a>
+    
+    </span>
+    <span>
+    
+      <a href="/ml/chapter07/multinomial-naive-bayes/" class="flex align-center">
+        <span>7.4 多项式朴素贝叶斯原理与实现</span>
+        <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/forward.svg" class="book-icon" alt="Forward" />
+      </a>
+    
+    </span>
+  </div>
+
+ 
+        
+  
+  <div class="book-comments"><div class="giscus"></div>
+<script src="https://giscus.app/client.js"
+        data-repo="mlwithme/mlwithme.github.io"
+        data-repo-id="R_kgDOTBt94Q"
+        data-category="Announcements"
+        data-category-id="DIC_kwDOTBt94c4C_21V"
+        data-mapping="pathname"
+        data-strict="1"
+        data-reactions-enabled="1"
+        data-emit-metadata="0"
+        data-input-position="top"
+        data-theme="preferred_color_scheme"
+        data-lang="zh-CN"
+        data-loading="lazy"
+        crossorigin="anonymous"
+        async>
+</script>
+</div>
+  
+ 
+        
+  <link rel="stylesheet" href="https://mlwithme.oss-cn-shanghai.aliyuncs.com/katex/katex.min.css" />
+  <script defer src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/katex/katex.min.js"></script>
+  <script defer src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/katex/auto-render.min.js"></script>
+  
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        if (window.renderMathInElement) {
+          renderMathInElement(
+            document.querySelector(".book-page"),
+            Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
+          );
+        }
+      });
+    </script>
+  
+
+        
+  
+ 
+        
+  
+    <script>(function(){document.querySelectorAll("pre:has(code)").forEach(e=>{e.addEventListener("click",e.focus),e.addEventListener("copy",function(t){if(t.preventDefault(),navigator.clipboard){const t=window.getSelection().toString()||e.textContent;navigator.clipboard.writeText(t)}})})})()</script>
+  
+
+      </footer>
+
+      <label for="menu-control" class="hidden book-menu-overlay"></label>
+    </div>
+
+    
+  
+  <aside class="book-toc">
+    <div class="book-toc-content">
+      
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#731-特征计数实现">7.3.1 特征计数实现</a></li>
+    <li><a href="#732-先验概率实现">7.3.2 先验概率实现</a></li>
+    <li><a href="#733-条件概率实现">7.3.3 条件概率实现</a></li>
+    <li><a href="#734-模型拟合实现">7.3.4 模型拟合实现</a></li>
+    <li><a href="#735-后验概率实现">7.3.5 后验概率实现</a></li>
+    <li><a href="#736-使用示例">7.3.6 使用示例</a></li>
+    <li><a href="#737-小结">7.3.7 小结</a></li>
+  </ul>
+</nav>
+
+  
+  <section class="book-page-qr-panel" aria-label="页面二维码与公众号二维码">
+    <section class="book-page-qr-block" aria-label="页面二维码">
+      <p class="book-page-qr-title">微信扫码查看</p>
+      <a
+        class="book-page-qr-image-link"
+        href="https://mlwithme.github.io/ml/chapter07/naive-bayes-implementation/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="打开当前页面链接"
+      >
+        <img
+          class="book-page-qr-image"
+          src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fml%2Fchapter07%2Fnaive-bayes-implementation%2F"
+          alt="当前页面链接二维码"
+          loading="lazy"
+          decoding="async"
+          referrerpolicy="no-referrer"
+        >
+      </a>
+    </section>
+
+    <div class="book-page-qr-divider" aria-hidden="true"></div>
+
+    <section class="book-page-qr-block" aria-label="公众号二维码">
+      <p class="book-page-qr-title">关注公众号</p>
+      <div class="book-page-qr-image-link book-page-qr-image-frame">
+        <img
+          class="book-page-qr-image"
+          src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/images/gzh.png"
+          alt="公众号二维码"
+          loading="lazy"
+          decoding="async"
+        >
+      </div>
+    </section>
+  </section>
+
+
+
+
+    </div>
+  </aside>
+  
+ 
+  </main>
+
+  <button
+  type="button"
+  class="book-back-to-top"
+  aria-label="回到顶部"
+  title="回到顶部"
+>
+  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <path
+      d="M12 5.5l-5.25 5.25 1.5 1.5 2.7-2.7V18.5h2.1V9.55l2.7 2.7 1.5-1.5L12 5.5z"
+      fill="currentColor"
+    ></path>
+  </svg>
+</button>
+
+<script>
+  (function () {
+    var button = document.querySelector(".book-back-to-top");
+    if (!button) {
+      return;
+    }
+
+    var toggleButton = function () {
+      if (window.scrollY > 360) {
+        button.classList.add("is-visible");
+      } else {
+        button.classList.remove("is-visible");
+      }
+    };
+
+    button.addEventListener("click", function () {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+
+    toggleButton();
+    window.addEventListener("scroll", toggleButton, { passive: true });
+  })();
+</script>
+
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

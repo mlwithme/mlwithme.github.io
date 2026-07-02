@@ -1,0 +1,4444 @@
+<!DOCTYPE html>
+<html lang="zh_CN" dir="ltr">
+<head>
+  <!--
+Made with Book Theme
+https://github.com/alex-shpak/hugo-book
+--><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="在上一节内容中，我们详细介绍了长期记忆的模式、管理和持久化，为了能够更加清晰地理解记忆的运行机制，接下来将会详细介绍如何基于本地持久化的长期记忆来从零构建一个类似 ChatGPT 一样具有用户隔离以及记忆功能的个人助手。">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="index,follow,max-image-preview:large">
+
+
+
+
+
+<meta property="og:url" content="https://mlwithme.github.io/agent/chapter05/mini-chatgpt-from-scratch/">
+<meta property="og:site_name" content="《从零学AI指南手册》">
+<meta property="og:title" content="5.6 从零实现Mini ChatGPT：Agent 记忆机制实战">
+<meta property="og:description" content="在上一节内容中，我们详细介绍了长期记忆的模式、管理和持久化，为了能够更加清晰地理解记忆的运行机制，接下来将会详细介绍如何基于本地持久化的长期记忆来从零构建一个类似 ChatGPT 一样具有用户隔离以及记忆功能的个人助手。">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:type" content="article">
+<meta property="og:image" content="https://mlwithme.oss-cn-shanghai.aliyuncs.com/share-cover.png">
+<meta property="og:image:url" content="https://mlwithme.oss-cn-shanghai.aliyuncs.com/share-cover.png">
+<meta property="og:image:secure_url" content="https://mlwithme.oss-cn-shanghai.aliyuncs.com/share-cover.png">
+<meta property="og:image:width" content="759">
+<meta property="og:image:height" content="759">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:alt" content="《从零学AI指南手册》 - 5.6 从零实现Mini ChatGPT：Agent 记忆机制实战">
+
+  <meta property="article:section" content="agent">
+  
+    <meta property="article:published_time" content="2026-06-27T10:32:33&#43;08:00">
+  
+  
+    <meta property="article:modified_time" content="2026-06-29T19:31:11&#43;08:00">
+  
+  
+
+
+<script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"WebSite","description":"面向机器学习、深度学习与 AI Agent 的中文系统化学习手册，包含原理讲解、代码示例与实战案例。","inLanguage":"zh_CN","name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
+  </script>
+  <script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.oss-cn-shanghai.aliyuncs.com/share-cover.png"},"name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
+  </script><script type="application/ld+json">
+      {"@context":"https://schema.org","@type":"Article","articleSection":"agent","author":{"@type":"Person","name":"WangCheng","url":"https://mlwithme.github.io/author/"},"dateModified":"2026-06-29T19:31:11+08:00","datePublished":"2026-06-27T10:32:33+08:00","description":"在上一节内容中，我们详细介绍了长期记忆的模式、管理和持久化，为了能够更加清晰地理解记忆的运行机制，接下来将会详细介绍如何基于本地持久化的长期记忆来从零构建一个类似 ChatGPT 一样具有用户隔离以及记忆功能的个人助手。","headline":"5.6 从零实现Mini ChatGPT：Agent 记忆机制实战","image":["https://mlwithme.oss-cn-shanghai.aliyuncs.com/share-cover.png"],"inLanguage":"zh_CN","mainEntityOfPage":"https://mlwithme.github.io/agent/chapter05/mini-chatgpt-from-scratch/","publisher":{"@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.oss-cn-shanghai.aliyuncs.com/share-cover.png"},"name":"《从零学AI指南手册》"},"url":"https://mlwithme.github.io/agent/chapter05/mini-chatgpt-from-scratch/"}
+    </script><script type="application/ld+json">
+        {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","item":"https://mlwithme.github.io/","name":"首页","position":1},{"@type":"ListItem","item":"https://mlwithme.github.io/agent/","name":"大模型Agent开发","position":2},{"@type":"ListItem","item":"https://mlwithme.github.io/agent/chapter05/","name":"第 5 章 Agent 记忆机制、pgvector 与 Mini ChatGPT 实战","position":3},{"@type":"ListItem","item":"https://mlwithme.github.io/agent/chapter05/mini-chatgpt-from-scratch/","name":"5.6 从零实现Mini ChatGPT：Agent 记忆机制实战","position":4}]}
+      </script>
+
+<title>5.6 从零实现Mini ChatGPT：Agent 记忆机制实战 • 《从零学AI指南手册》</title>
+<link rel="icon" href="https://mlwithme.oss-cn-shanghai.aliyuncs.com/favicon.png" type="image/png">
+<link rel="shortcut icon" href="https://mlwithme.oss-cn-shanghai.aliyuncs.com/favicon.png" type="image/png">
+<link rel="apple-touch-icon" href="https://mlwithme.oss-cn-shanghai.aliyuncs.com/favicon.png">
+
+<link rel="manifest" href="/manifest.json">
+<link rel="canonical" href="https://mlwithme.github.io/agent/chapter05/mini-chatgpt-from-scratch/">
+<link rel="stylesheet" href="/book.min.7bef1ddd28a19c9d3bf4a9b252146d7f9b5fe85be58199fd828dc2472e8725bd.css" integrity="sha256-e&#43;8d3SihnJ079KmyUhRtf5tf6FvlgZn9go3CRy6HJb0=" crossorigin="anonymous">
+  <script defer type="module" src="/en.search.min.1b85e304b4edf759bf60d76f5b68977a95300af39fb3246a0f98780446f7050e.js" integrity="sha256-G4XjBLTt91m/YNdvW2iXepUwCvOfsyRqD5h4BEb3BQ4=" crossorigin="anonymous"></script>
+
+  
+
+
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="5.6 从零实现Mini ChatGPT：Agent 记忆机制实战">
+<meta name="twitter:description" content="在上一节内容中，我们详细介绍了长期记忆的模式、管理和持久化，为了能够更加清晰地理解记忆的运行机制，接下来将会详细介绍如何基于本地持久化的长期记忆来从零构建一个类似 ChatGPT 一样具有用户隔离以及记忆功能的个人助手。">
+<meta name="twitter:url" content="https://mlwithme.github.io/agent/chapter05/mini-chatgpt-from-scratch/">
+<meta name="twitter:image" content="https://mlwithme.oss-cn-shanghai.aliyuncs.com/share-cover.png">
+<meta name="twitter:image:alt" content="《从零学AI指南手册》 - 5.6 从零实现Mini ChatGPT：Agent 记忆机制实战">
+<script>
+  var _hmt = _hmt || [];
+  (function() {
+    var hm = document.createElement("script");
+    hm.src = "https://hm.baidu.com/hm.js?74a336dd47fbbab3ceb99d4ad8afcb76";
+    var s = document.getElementsByTagName("script")[0];
+    s.parentNode.insertBefore(hm, s);
+  })();
+</script>
+<script async src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
+
+</head>
+<body dir="ltr" class="book-kind-page book-type-agent">
+  <input type="checkbox" class="hidden toggle" id="menu-control" />
+  <input type="checkbox" class="hidden toggle" id="toc-control" />
+  <main class="container flex">
+    
+<aside class="book-menu">
+  <div class="book-menu-content">
+    
+  <nav>
+<h2 class="book-brand">
+  <a class="flex align-center" href="/"><span>《从零学AI指南手册》</span>
+  </a>
+</h2>
+
+
+<div class="book-search hidden">
+  <input id="book-search-input" type="text" 
+    placeholder="Search"
+    aria-label="Search"
+    maxlength="64" />
+  <div class="book-search-spinner hidden"></div>
+  <ul id="book-search-results"></ul>
+</div>
+<script>document.querySelector(".book-search").classList.remove("hidden")</script>
+
+
+
+
+
+
+
+
+
+
+
+  
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/featured/" class="">
+      <span class="book-menu-link-title">精选文章</span>
+</a>
+  
+
+          
+  <ul>
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/" class="">
+      <span class="book-menu-link-title">大模型Agent开发</span>
+</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-279cf10e5100caa4f65ba3f7dd8888a4" class="toggle"  />
+    <label for="section-279cf10e5100caa4f65ba3f7dd8888a4" class="flex">
+      <a href="/agent/chapter01/" class="">
+        <span class="book-menu-link-title">第 1 章 RAG 基础概念</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/what-is-rag/" class="">
+      <span class="book-menu-link-title">1.1 RAG 提出背景</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/rag-pipeline-overview/" class="">
+      <span class="book-menu-link-title">1.2 RAG 流程概览</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-83c662c2764f1c19f8005eab77fee110" class="toggle"  />
+    <label for="section-83c662c2764f1c19f8005eab77fee110" class="flex">
+      <a href="/agent/chapter02/" class="">
+        <span class="book-menu-link-title">第 2 章 大模型接入与使用</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/intro-to-llm-sdk/" class="">
+      <span class="book-menu-link-title">2.1 SDK 介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/modern-llm-sdk/" class="">
+      <span class="book-menu-link-title">2.2 现代大模型中的 SDK</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/dashscope-api-overview/" class="">
+      <span class="book-menu-link-title">2.3 DashScope 接口体系</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/qwen-onboarding/" class="">
+      <span class="book-menu-link-title">2.4 千问大模型接入与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-1e583d7a26333453241d87c5c16592bd" class="toggle"  />
+    <label for="section-1e583d7a26333453241d87c5c16592bd" class="flex">
+      <a href="/agent/chapter03/" class="">
+        <span class="book-menu-link-title">第 3 章 文档标准化与语义检索</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/document-loading-and-preprocessing/" class="">
+      <span class="book-menu-link-title">3.1 文档加载与标准化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/text-splitting-strategies/" class="">
+      <span class="book-menu-link-title">3.2 常见文本切分策略</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/vector-database-selection/" class="">
+      <span class="book-menu-link-title">3.3 向量数据库选择</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/qwen-embedding-model/" class="">
+      <span class="book-menu-link-title">3.4 Qwen3 Embedding 模型介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/semantic-retrieval-pipeline/" class="">
+      <span class="book-menu-link-title">3.5 语义搜索引擎构建</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/milvus-tutorial/" class="">
+      <span class="book-menu-link-title">3.6  Milvus 模块解析</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="toggle"  />
+    <label for="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="flex">
+      <a href="/agent/chapter04/" class="">
+        <span class="book-menu-link-title">第 4 章 RAG 与 Agent</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/two-step-rag/" class="">
+      <span class="book-menu-link-title">4.1 两步式 RAG 搭建</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/function-calling-basics/" class="">
+      <span class="book-menu-link-title">4.2 Function Calling 概念介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/langchain-tool-decorator/" class="">
+      <span class="book-menu-link-title">4.3 LangChain 中的 Tool 修饰器</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/rag-agent-essentials/" class="">
+      <span class="book-menu-link-title">4.4 RAG Agent 原理与搭建</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/react-framework/" class="">
+      <span class="book-menu-link-title">4.5 复杂问题拆解与ReAct框架</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/two-stage-indexing/" class="">
+      <span class="book-menu-link-title">4.6 RAG 中的两阶段索引</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/qwen3-reranking/" class="">
+      <span class="book-menu-link-title">4.7 Qwen3 Reranking 原理与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/two-stage-rag-agent/" class="">
+      <span class="book-menu-link-title">4.8 基于两阶段索引的 RAG Agent</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/langgraph-basics/" class="">
+      <span class="book-menu-link-title">4.9 LangGraph 基本概念介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/langgraph-custom-rag-agent/" class="">
+      <span class="book-menu-link-title">4.10  基于 LangGraph 构建自定义 RAG Agent</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bf5130286ff0eee8f362b632167a5e6b" class="toggle" checked />
+    <label for="section-bf5130286ff0eee8f362b632167a5e6b" class="flex">
+      <a href="/agent/chapter05/" class="">
+        <span class="book-menu-link-title">第 5 章 Agent 记忆机制与管理</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/agent-memory-overview/" class="">
+      <span class="book-menu-link-title">5.1 Agent 记忆机制概览</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/langchain-short-term-memory/" class="">
+      <span class="book-menu-link-title">5.2 短期记忆持久化与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/short-term-memory-management/" class="">
+      <span class="book-menu-link-title">5.3 短期记忆管理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/short-term-memory-rag-agent/" class="">
+      <span class="book-menu-link-title">5.4 拥有短期记忆的 RAG Agent</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/long-term-memory-strategies/" class="">
+      <span class="book-menu-link-title">5.5 长期记忆管理与持久化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/mini-chatgpt-from-scratch/" class="active">
+      <span class="book-menu-link-title">5.6 从零实现 Mini ChatGPT 助手</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/pgvector-setup/" class="">
+      <span class="book-menu-link-title">5.7 pgvector 配置安装</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/long-term-memory-retrieval-and-forgetting/" class="">
+      <span class="book-menu-link-title">5.8 长期记忆检索与遗忘</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/langgraph-mini-chatgpt/" class="">
+      <span class="book-menu-link-title">5.9 基于 LangGraph 的Mini ChatGPT 助手</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/create-agent-mini-chatgpt/" class="">
+      <span class="book-menu-link-title">5.10 使用 create_agent 搭建 Mini ChatGPT</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/" class="">
+      <span class="book-menu-link-title">深度学习</span>
+</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/mindmap/" class="">
+      <span class="book-menu-link-title">目录思维导图</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-cf7621e8efb1f3153eaca44a113dcdb9" class="toggle"  />
+    <label for="section-cf7621e8efb1f3153eaca44a113dcdb9" class="flex">
+      <a href="/dl/chapter01/" class="">
+        <span class="book-menu-link-title">第 1 章 深度学习简介</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/dl-development-stages/" class="">
+      <span class="book-menu-link-title">1.1 深度学习的发展阶段</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/dl-key-figures/" class="">
+      <span class="book-menu-link-title">1.2 深度学习中的关键人物</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/mainstream-dl-frameworks/" class="">
+      <span class="book-menu-link-title">1.3 深度学习框架介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f9bf1a68c19405769f9c4a1495708a55" class="toggle"  />
+    <label for="section-f9bf1a68c19405769f9c4a1495708a55" class="flex">
+      <a href="/dl/chapter02/" class="">
+        <span class="book-menu-link-title">第 2 章 环境配置</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/dl-dev-environment-architecture/" class="">
+      <span class="book-menu-link-title">2.1 体系结构介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/dl-cuda-pytorch-install/" class="">
+      <span class="book-menu-link-title">2.2 深度学习环境安装</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/dl-cuda-training-env-setup/" class="">
+      <span class="book-menu-link-title">2.3 开发环境安装配置</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="toggle"  />
+    <label for="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="flex">
+      <a href="/dl/chapter03/" class="">
+        <span class="book-menu-link-title">第 3 章 深度学习基础</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/linear-regression-basics/" class="">
+      <span class="book-menu-link-title">3.1 线性回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/linear-regression-implementation/" class="">
+      <span class="book-menu-link-title">3.2 线性回归简洁实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/backpropagation-and-gradient-descent/" class="">
+      <span class="book-menu-link-title">3.3 梯度下降与反向传播</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/regression-from-scratch/" class="">
+      <span class="book-menu-link-title">3.4 从零实现回归模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/softmax-regression-basics/" class="">
+      <span class="book-menu-link-title">3.5 从逻辑回归到Softmax回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/softmax-regression-implementation/" class="">
+      <span class="book-menu-link-title">3.6 Softmax回归简洁实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/softmax-regression-from-scratch/" class="">
+      <span class="book-menu-link-title">3.7 从零实现分类模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/regression-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">3.8 回归模型评估指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/classification-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">3.9 分类模型评估指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/overfitting-and-regularization/" class="">
+      <span class="book-menu-link-title">3.10 过拟合与正则化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/hyperparameters-and-cross-validation/" class="">
+      <span class="book-menu-link-title">3.11 超参数与交叉验证</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/activation-functions/" class="">
+      <span class="book-menu-link-title">3.12 激活函数</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/multi-label-classification/" class="">
+      <span class="book-menu-link-title">3.13 多标签分类</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-7a12cee83820a928df00362d70804a97" class="toggle"  />
+    <label for="section-7a12cee83820a928df00362d70804a97" class="flex">
+      <a href="/dl/chapter04/" class="">
+        <span class="book-menu-link-title">第 4 章 卷积神经网络</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/cnn-basics/" class="">
+      <span class="book-menu-link-title">4.1 卷积的概念</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/convolution-operation/" class="">
+      <span class="book-menu-link-title">4.2 卷积的计算过程</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/convolution-and-pooling/" class="">
+      <span class="book-menu-link-title">4.3 填充和池化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/lenet5/" class="">
+      <span class="book-menu-link-title">4.4 LeNet5网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/alexnet/" class="">
+      <span class="book-menu-link-title">4.5 AlexNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/vgg/" class="">
+      <span class="book-menu-link-title">4.6 VGG网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/nin/" class="">
+      <span class="book-menu-link-title">4.7 NIN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/googlenet/" class="">
+      <span class="book-menu-link-title">4.8 GoogLeNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/resnet/" class="">
+      <span class="book-menu-link-title">4.9 ResNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/densenet/" class="">
+      <span class="book-menu-link-title">4.10 DenseNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-be9addfd3a15c372d609d09cabb94159" class="toggle"  />
+    <label for="section-be9addfd3a15c372d609d09cabb94159" class="flex">
+      <a href="/dl/chapter05/" class="">
+        <span class="book-menu-link-title">第 5 章 模型训练与复用</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/training-logs-management/" class="">
+      <span class="book-menu-link-title">5.1 参数及日志管理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/tensorboard-tutorial/" class="">
+      <span class="book-menu-link-title">5.2 Tensorboard可视化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/pytorch-model-save-load/" class="">
+      <span class="book-menu-link-title">5.3 模型的保存与复用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/transfer-learning-tutorial/" class="">
+      <span class="book-menu-link-title">5.4 模型的迁移学习</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/pretrained-model-reuse/" class="">
+      <span class="book-menu-link-title">5.5 开源模型复用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/multi-gpu-training/" class="">
+      <span class="book-menu-link-title">5.6 多GPU训练</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/training-data-preprocessing-cache/" class="">
+      <span class="book-menu-link-title">5.7 数据预处理与缓存</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="toggle"  />
+    <label for="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="flex">
+      <a href="/dl/chapter06/" class="">
+        <span class="book-menu-link-title">第 6 章 模型优化方法</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/learning-rate-scheduler/" class="">
+      <span class="book-menu-link-title">6.1 学习率调度器</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/gradient-clipping/" class="">
+      <span class="book-menu-link-title">6.2 梯度裁剪</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/batch-norm/" class="">
+      <span class="book-menu-link-title">6.3 批归一化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/layer-norm/" class="">
+      <span class="book-menu-link-title">6.4 层归一化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/group-norm/" class="">
+      <span class="book-menu-link-title">6.5 组归一化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/momentum/" class="">
+      <span class="book-menu-link-title">6.6 动量法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/ada-grad/" class="">
+      <span class="book-menu-link-title">6.7 AdaGrad算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/ada-delta/" class="">
+      <span class="book-menu-link-title">6.8 AdaDelta算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/adam/" class="">
+      <span class="book-menu-link-title">6.9 Adam算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/weight-initialization/" class="">
+      <span class="book-menu-link-title">6.10 初始化方法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-517b751d7c44a7ac77d25d295ed44271" class="toggle"  />
+    <label for="section-517b751d7c44a7ac77d25d295ed44271" class="flex">
+      <a href="/dl/chapter07/" class="">
+        <span class="book-menu-link-title">第 7 章 循环神经网络</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/rnn-basics/" class="">
+      <span class="book-menu-link-title">7.1 RNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/time-series-modeling/" class="">
+      <span class="book-menu-link-title">7.2 时序数据</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/lstm/" class="">
+      <span class="book-menu-link-title">7.3 LSTM网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/gru/" class="">
+      <span class="book-menu-link-title">7.4 GRU网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/bi-rnn/" class="">
+      <span class="book-menu-link-title">7.5 BiRNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/char-rnn/" class="">
+      <span class="book-menu-link-title">7.6 CharRNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-b9b861f64ba32bc68dfb977497de37d9" class="toggle"  />
+    <label for="section-b9b861f64ba32bc68dfb977497de37d9" class="flex">
+      <a href="/dl/chapter08/" class="">
+        <span class="book-menu-link-title">第 8 章 时序与模型融合</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/textcnn/" class="">
+      <span class="book-menu-link-title">8.1 TextCNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/textrnn/" class="">
+      <span class="book-menu-link-title">8.2 TextRNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/cnn-rnn/" class="">
+      <span class="book-menu-link-title">8.3 CNN-RNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/convlstm/" class="">
+      <span class="book-menu-link-title">8.4 ConvLSTM网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/3dcnn/" class="">
+      <span class="book-menu-link-title">8.5 3DCNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/stresnet/" class="">
+      <span class="book-menu-link-title">8.6 STResNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-e54a1e28b1438b8266637bcb8dac1a44" class="toggle"  />
+    <label for="section-e54a1e28b1438b8266637bcb8dac1a44" class="flex">
+      <a href="/dl/chapter09/" class="">
+        <span class="book-menu-link-title">第 9 章 自然语言处理</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/nlp-basics/" class="">
+      <span class="book-menu-link-title">9.1 自然语言处理介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/word2vec-principle/" class="">
+      <span class="book-menu-link-title">9.2 Word2Vec词向量</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/word2vec-training-and-usage/" class="">
+      <span class="book-menu-link-title">9.3 Word2Vec训练与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/glove/" class="">
+      <span class="book-menu-link-title">9.4 GloVe词向量</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/word-vector-finetuning/" class="">
+      <span class="book-menu-link-title">9.5 词向量的微调使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/fasttext/" class="">
+      <span class="book-menu-link-title">9.6 fastText网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/seq2seq-tutorial/" class="">
+      <span class="book-menu-link-title">9.7 Seq2Seq网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/seq-model-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">9.8 序列模型评价指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/nmt-seq2seq/" class="">
+      <span class="book-menu-link-title">9.9 NMT网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/attention-mechanism/" class="">
+      <span class="book-menu-link-title">9.10 注意力机制</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/nmt-with-attention/" class="">
+      <span class="book-menu-link-title">9.11 含注意力的NMT网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/rnn-with-attention/" class="">
+      <span class="book-menu-link-title">9.12 含注意力的RNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f6636b2f9dc1df93b9fa64dd201716d9" class="toggle"  />
+    <label for="section-f6636b2f9dc1df93b9fa64dd201716d9" class="flex">
+      <a href="/dl/chapter10/" class="">
+        <span class="book-menu-link-title">第 10 章 现代神经网络</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/elmo/" class="">
+      <span class="book-menu-link-title">10.1 ELMo网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-principle/" class="">
+      <span class="book-menu-link-title">10.2 Transformer网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-architecture/" class="">
+      <span class="book-menu-link-title">10.3 Transformer结构</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-implementation/" class="">
+      <span class="book-menu-link-title">10.4 Transformer实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-couplet-model/" class="">
+      <span class="book-menu-link-title">10.5 Transformer对联模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-principle/" class="">
+      <span class="book-menu-link-title">10.6 BERT网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-from-scratch/" class="">
+      <span class="book-menu-link-title">10.7 从零实现BERT</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-text-classification/" class="">
+      <span class="book-menu-link-title">10.8 BERT文本分类模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-sentence-pair-matching/" class="">
+      <span class="book-menu-link-title">10.9 BERT问题选择模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-question-answering/" class="">
+      <span class="book-menu-link-title">10.10 BERT问题回答模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-ner/" class="">
+      <span class="book-menu-link-title">10.11 BERT命名体识别模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-pretraining/" class="">
+      <span class="book-menu-link-title">10.12 BERT从零训练</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-1/" class="">
+      <span class="book-menu-link-title">10.13 GPT-1模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-2-and-gpt-3/" class="">
+      <span class="book-menu-link-title">10.14 GPT-2与GPT-3模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-2-chinese-pretraining/" class="">
+      <span class="book-menu-link-title">10.15 基于GPT-2的中文预训练模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/instructgpt-and-chatgpt/" class="">
+      <span class="book-menu-link-title">10.16 InstructGPT与ChatGPT</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/chatgpt-prompt-engineering/" class="">
+      <span class="book-menu-link-title">10.17 ChatGPT与提示词工程</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/baichuan-usage/" class="">
+      <span class="book-menu-link-title">10.18 百川大模型使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/baichuan-implementation/" class="">
+      <span class="book-menu-link-title">10.19 百川大模型实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-4-and-gpts/" class="">
+      <span class="book-menu-link-title">10.20 GPT-4与GPTs使用</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/" class="">
+      <span class="book-menu-link-title">机器学习</span>
+</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/mindmap/" class="">
+      <span class="book-menu-link-title">目录思维导图</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-48f56957e94e3cf66f3022103a7dd0ff" class="toggle"  />
+    <label for="section-48f56957e94e3cf66f3022103a7dd0ff" class="flex">
+      <a href="/ml/chapter01/" class="">
+        <span class="book-menu-link-title">第 1 章 环境配置</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/conda-install-tutorial/" class="">
+      <span class="book-menu-link-title">1.1 安装使用Conda</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/ml-conda-env-setup/" class="">
+      <span class="book-menu-link-title">1.2 开发环境安装配置</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-56a896338a1c41249d22a3efa0e0063c" class="toggle"  />
+    <label for="section-56a896338a1c41249d22a3efa0e0063c" class="flex">
+      <a href="/ml/chapter02/" class="">
+        <span class="book-menu-link-title">第 2 章 线性回归</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/linear-regression-basics/" class="">
+      <span class="book-menu-link-title">2.1 模型的建立与求解</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/multivariate-linear-regression/" class="">
+      <span class="book-menu-link-title">2.2 多变量线性回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/polynomial-regression/" class="">
+      <span class="book-menu-link-title">2.3 多项式回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/regression-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">2.4 回归模型评估</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/gradient-descent-derivation/" class="">
+      <span class="book-menu-link-title">2.5 梯度下降</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/normal-distribution/" class="">
+      <span class="book-menu-link-title">2.6 正态分布</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/linear-regression-loss-derivation/" class="">
+      <span class="book-menu-link-title">2.7 目标函数推导</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ccd0dc9386ea80613d4cedf91b30058d" class="toggle"  />
+    <label for="section-ccd0dc9386ea80613d4cedf91b30058d" class="flex">
+      <a href="/ml/chapter03/" class="">
+        <span class="book-menu-link-title">第 3 章 逻辑回归</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/logistic-regression-basics/" class="">
+      <span class="book-menu-link-title">3.1 模型的建立与求解</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/logistic-regression-multiclass/" class="">
+      <span class="book-menu-link-title">3.2 多分类任务</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/classification-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">3.3 常见的分类评估指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/logistic-regression-loss-derivation/" class="">
+      <span class="book-menu-link-title">3.4 目标函数推导</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="toggle"  />
+    <label for="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="flex">
+      <a href="/ml/chapter04/" class="">
+        <span class="book-menu-link-title">第 4 章 模型的改善与泛化</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/generalization-basics/" class="">
+      <span class="book-menu-link-title">4.1 基本概念</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/feature-scaling/" class="">
+      <span class="book-menu-link-title">4.2 特征标准化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/overfitting-solutions/" class="">
+      <span class="book-menu-link-title">4.3过拟合</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/l1-l2-regularization/" class="">
+      <span class="book-menu-link-title">4.4 正则化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/bias-and-variance/" class="">
+      <span class="book-menu-link-title">4.5 偏差、方差与交叉验证</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/handwritten-digit-recognition-case/" class="">
+      <span class="book-menu-link-title">4.6 实例分析手写体识别</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-40f463d9d502d24b86ea6120b7030123" class="toggle"  />
+    <label for="section-40f463d9d502d24b86ea6120b7030123" class="flex">
+      <a href="/ml/chapter05/" class="">
+        <span class="book-menu-link-title">第 5 章 K近邻</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/knn-principle/" class="">
+      <span class="book-menu-link-title">5.1 K近邻思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/knn-algorithm-details/" class="">
+      <span class="book-menu-link-title">5.2 K近邻原理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/sklearn-knn-example/" class="">
+      <span class="book-menu-link-title">5.3 sklearn接口与示例代码</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/kd-tree-knn/" class="">
+      <span class="book-menu-link-title">5.4 kd树构建与搜索</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/knn-from-scratch/" class="">
+      <span class="book-menu-link-title">5.5 从零实现K近邻</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-5a460dc18f1e79253296cf2cd0498446" class="toggle"  />
+    <label for="section-5a460dc18f1e79253296cf2cd0498446" class="flex">
+      <a href="/ml/chapter06/" class="">
+        <span class="book-menu-link-title">第 6 章 文本特征与模型复用</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/bag-of-words/" class="">
+      <span class="book-menu-link-title">6.1 词袋模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/knn-spam-classification/" class="">
+      <span class="book-menu-link-title">6 .2 基于K近邻算法的垃圾邮件分类</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/tf-idf/" class="">
+      <span class="book-menu-link-title">6.3 考虑权重的词袋模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/wordcloud-generation/" class="">
+      <span class="book-menu-link-title">6.4 词云图</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-96f45a8b8c8b75adc70c78026d93dbf6" class="toggle"  />
+    <label for="section-96f45a8b8c8b75adc70c78026d93dbf6" class="flex">
+      <a href="/ml/chapter07/" class="">
+        <span class="book-menu-link-title">第 7 章 朴素贝叶斯</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/naive-bayes-basics/" class="">
+      <span class="book-menu-link-title">7.1 朴素贝叶斯算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/bayes-estimation/" class="">
+      <span class="book-menu-link-title">7.2 贝叶斯估计</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/naive-bayes-implementation/" class="">
+      <span class="book-menu-link-title">7.3 朴素贝叶斯实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/multinomial-naive-bayes/" class="">
+      <span class="book-menu-link-title">7.4 多项式朴素贝叶斯原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/gaussian-naive-bayes/" class="">
+      <span class="book-menu-link-title">7.5 高斯朴素贝叶斯原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-22476e49d5058c3e5e7e7366b7ab676f" class="toggle"  />
+    <label for="section-22476e49d5058c3e5e7e7366b7ab676f" class="flex">
+      <a href="/ml/chapter08/" class="">
+        <span class="book-menu-link-title">第 8 章 决策树</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-principle/" class="">
+      <span class="book-menu-link-title">8.1 决策树的基本思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-sklearn/" class="">
+      <span class="book-menu-link-title">8.2 决策树建模与可视化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/id3-vs-c45/" class="">
+      <span class="book-menu-link-title">8.3 决策树生成之ID3与C4.5</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-pruning/" class="">
+      <span class="book-menu-link-title">8.4 决策树剪枝过程</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-from-scratch/" class="">
+      <span class="book-menu-link-title">8.5 从零实现ID3与C4.5算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-continuous-features/" class="">
+      <span class="book-menu-link-title">8.6 连续型特征变量下决策树实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/cart-algorithm/" class="">
+      <span class="book-menu-link-title">8.7 CART生成与剪枝算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/cart-from-scratch/" class="">
+      <span class="book-menu-link-title">8.8 从零实现CART算法及剪枝示例</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-2feb6a51cabb61dba860f45c1881386b" class="toggle"  />
+    <label for="section-2feb6a51cabb61dba860f45c1881386b" class="flex">
+      <a href="/ml/chapter09/" class="">
+        <span class="book-menu-link-title">第 9 章 集成学习与提升算法</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/ensemble-learning-basics/" class="">
+      <span class="book-menu-link-title">9.1 集成学习算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/random-forest-principle/" class="">
+      <span class="book-menu-link-title">9.2 随机森林</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/random-forest-titanic/" class="">
+      <span class="book-menu-link-title">9.3 泰坦尼克号生还预测</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/adaboost/" class="">
+      <span class="book-menu-link-title">9.4 AdaBoost原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/multi-adaboost/" class="">
+      <span class="book-menu-link-title">9.5 MultiAdaBoost原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/gradient-boost/" class="">
+      <span class="book-menu-link-title">9.6 Gradient Boost 原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-938ae119c3849b03ccb6f91cef4243dd" class="toggle"  />
+    <label for="section-938ae119c3849b03ccb6f91cef4243dd" class="flex">
+      <a href="/ml/chapter10/" class="">
+        <span class="book-menu-link-title">第 10 章 支持向量机</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-principle/" class="">
+      <span class="book-menu-link-title">10.1 SVM思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-nonlinear-kernel/" class="">
+      <span class="book-menu-link-title">10.2 SVM线性不可分</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-max-margin/" class="">
+      <span class="book-menu-link-title">10.3 SVM原理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-soft-margin/" class="">
+      <span class="book-menu-link-title">10.4 SVM中的软间隔</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/lagrange-multipliers/" class="">
+      <span class="book-menu-link-title">10.5 拉格朗日乘数法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/kkt-conditions/" class="">
+      <span class="book-menu-link-title">10.6 对偶性与KKT条件</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-optimization/" class="">
+      <span class="book-menu-link-title">10.7 SVM优化问题</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-kernel-functions/" class="">
+      <span class="book-menu-link-title">10.8 SVM核函数原理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/smo-algorithm/" class="">
+      <span class="book-menu-link-title">10.9 SMO算法求解SVM</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-from-scratch/" class="">
+      <span class="book-menu-link-title">10.10 从零实现SVM分类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-9f4d9786d4ab755fde42c64d09b0d026" class="toggle"  />
+    <label for="section-9f4d9786d4ab755fde42c64d09b0d026" class="flex">
+      <a href="/ml/chapter11/" class="">
+        <span class="book-menu-link-title">第 11 章 聚类分析</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/clustering-basics/" class="">
+      <span class="book-menu-link-title">11.1 聚类算法的思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-principle/" class="">
+      <span class="book-menu-link-title">11.2 Kmeans聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-iteration/" class="">
+      <span class="book-menu-link-title">11.3 Kmeans算法求解</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-from-scratch/" class="">
+      <span class="book-menu-link-title">11.4 从零实现Kmeans聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-plus-plus/" class="">
+      <span class="book-menu-link-title">11.5 Kmeans&#43;&#43;聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/clustering-external-metrics/" class="">
+      <span class="book-menu-link-title">11.6 聚类外部评价指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/weighted-kmeans/" class="">
+      <span class="book-menu-link-title">11.7 加权Kmeans聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/clustering-internal-metrics/" class="">
+      <span class="book-menu-link-title">11.8 聚类内部评价指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-k-selection/" class="">
+      <span class="book-menu-link-title">11.9 聚类K值选取与分析</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/dbscan/" class="">
+      <span class="book-menu-link-title">11.10 基于密度的聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/hierarchical-clustering/" class="">
+      <span class="book-menu-link-title">11.11 基于层次的聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-d5e78c45312818bb3abd5c19c858f7e5" class="toggle"  />
+    <label for="section-d5e78c45312818bb3abd5c19c858f7e5" class="flex">
+      <a href="/ml/chapter12/" class="">
+        <span class="book-menu-link-title">第 12 章 降维算法</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/pca-principle/" class="">
+      <span class="book-menu-link-title">12.1 主成分分析</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/kpca/" class="">
+      <span class="book-menu-link-title">12.2 基于核函数的主成分分析</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-a82b41bb7eb95af72bc11e8a3d668acd" class="toggle"  />
+    <label for="section-a82b41bb7eb95af72bc11e8a3d668acd" class="flex">
+      <a href="/ml/chapter13/" class="">
+        <span class="book-menu-link-title">第 13 章 自训练与标签传播</span>
+</a>
+      <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/self-training/" class="">
+      <span class="book-menu-link-title">13.1 Self-Training 自训练算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/label-propagation/" class="">
+      <span class="book-menu-link-title">13.2 Label Propagation算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/label-spreading/" class="">
+      <span class="book-menu-link-title">13.3 Label Spreading 算法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</nav>
+
+
+
+
+  <script>(function(){var e=document.querySelector("aside .book-menu-content");addEventListener("beforeunload",function(){localStorage.setItem("menu.scrollTop",e.scrollTop)}),e.scrollTop=localStorage.getItem("menu.scrollTop")})()</script>
+
+
+
+  </div>
+</aside>
+ 
+
+    <div class="book-page">
+      <header class="book-header hidden">
+        
+  <div class="flex align-center justify-between">
+  <label for="menu-control">
+    <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/menu.svg" class="book-icon" alt="Menu" />
+  </label>
+
+  <h3>5.6 从零实现Mini ChatGPT：Agent 记忆机制实战</h3>
+
+  <label for="toc-control">
+    
+    <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/toc.svg" class="book-icon" alt="Table of Contents" />
+    
+  </label>
+</div>
+
+
+  
+  <aside class="hidden">
+    
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#561-mini-chatgpt-结构设计">5.6.1 Mini ChatGPT 结构设计</a></li>
+    <li><a href="#562-工程目录介绍">5.6.2 工程目录介绍</a></li>
+    <li><a href="#563-记忆存储结构实现">5.6.3 记忆存储结构实现</a></li>
+    <li><a href="#564-记忆持久化实现">5.6.4 记忆持久化实现</a></li>
+    <li><a href="#565-记忆插入工具实现">5.6.5 记忆插入工具实现</a></li>
+    <li><a href="#566-agent-智能体构建">5.6.6 Agent 智能体构建</a></li>
+    <li><a href="#567-命令行交互实现">5.6.7 命令行交互实现</a></li>
+  </ul>
+</nav>
+
+  
+  <section class="book-page-qr-panel" aria-label="页面二维码与公众号二维码">
+    <section class="book-page-qr-block" aria-label="页面二维码">
+      <p class="book-page-qr-title">微信扫码查看</p>
+      <a
+        class="book-page-qr-image-link"
+        href="https://mlwithme.github.io/agent/chapter05/mini-chatgpt-from-scratch/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="打开当前页面链接"
+      >
+        <img
+          class="book-page-qr-image"
+          src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fagent%2Fchapter05%2Fmini-chatgpt-from-scratch%2F"
+          alt="当前页面链接二维码"
+          loading="lazy"
+          decoding="async"
+          referrerpolicy="no-referrer"
+        >
+      </a>
+    </section>
+
+    <div class="book-page-qr-divider" aria-hidden="true"></div>
+
+    <section class="book-page-qr-block" aria-label="公众号二维码">
+      <p class="book-page-qr-title">关注公众号</p>
+      <div class="book-page-qr-image-link book-page-qr-image-frame">
+        <img
+          class="book-page-qr-image"
+          src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/images/gzh.png"
+          alt="公众号二维码"
+          loading="lazy"
+          decoding="async"
+        >
+      </div>
+    </section>
+  </section>
+
+
+
+
+  </aside>
+  
+ 
+      </header>
+
+      
+      
+  <article class="markdown book-article"><nav class="book-breadcrumbs text-small book-breadcrumbs--page" aria-label="面包屑导航">
+    <ol class="book-breadcrumbs__list"><li class="book-breadcrumbs__item"><a class="book-breadcrumbs__link" href="https://mlwithme.github.io/">首页</a></li><li class="book-breadcrumbs__item"><a class="book-breadcrumbs__link" href="https://mlwithme.github.io/agent/">大模型Agent开发</a></li><li class="book-breadcrumbs__item"><a class="book-breadcrumbs__link" href="https://mlwithme.github.io/agent/chapter05/">第 5 章 Agent 记忆机制与管理</a></li><li class="book-breadcrumbs__item"><span class="book-breadcrumbs__current" aria-current="page">5.6 从零实现 Mini ChatGPT 助手</span></li></ol>
+  </nav><div class="book-article-lastmod text-small">
+        <span class="book-article-lastmod-label">更新于</span>
+        <span class="book-article-lastmod-value">2026年6月29日</span>
+      </div><h1 id="56-从零实现-mini-chatgpt-助手">5.6 从零实现 Mini ChatGPT 助手<a class="anchor" href="#56-%e4%bb%8e%e9%9b%b6%e5%ae%9e%e7%8e%b0-mini-chatgpt-%e5%8a%a9%e6%89%8b">#</a></h1>
+<p>在上一节内容中，我们详细介绍了长期记忆的模式、管理和持久化，为了能够更加清晰地理解记忆的运行机制，接下来将会详细介绍如何基于本地持久化的长期记忆来从零构建一个类似 ChatGPT 一样具有用户隔离以及记忆功能的个人助手。</p>
+<h2 id="561-mini-chatgpt-结构设计">5.6.1 Mini ChatGPT 结构设计<a class="anchor" href="#561-mini-chatgpt-%e7%bb%93%e6%9e%84%e8%ae%be%e8%ae%a1">#</a></h2>
+<p>为了实现和 ChatGPT 类似的效果，我们需要设计长期记忆以实现同一用户的跨会话使用；其次需要加入短期记忆来保证同一会话中的用户上下文不会丢失；最后需要构造一个工具来插入或更新记忆内容。对于整个状态扭转过程中的详细情况，我们可以通过图5-11表示。</p>
+<div align=center><img width="700" src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/images/agent/202606081345.jpg" alt="图 5-11 Mini ChatGPT 状态扭转示意图"/> </div><center>图 5-11 Mini ChatGPT 状态扭转示意图</center>
+<p>如图5-11所示，左上角和右下角分别对应的是长期记忆和短期记忆，分别作用于不同用户间和同一会话内。当用户发起一个请求后，系统将会判断长期记忆中是否存在该用户的相关记忆，如果存在则根据相似度搜索并返回前 Top-K 的相关记忆，如果不存在则直接进入下一步。进一步，系统会将检索到的用户长期记忆、短期记忆（如果有）以及用户请求内容拼接形成上下问内容，并连同工具信息一起输入到大模型中。最后，系统会根据大模型的返回结果判断是否需要调用工具。如果不需要则直接根据大模型返回内容生成回答并将用户问题和回答追加到短期记忆中；如果需要调用工具则根据大模型提取的参数运行工具，同步更新旧记忆或插入新记忆，再将大模型返回内容和工具运行结果追加到旧的上下文内容中形成新的上下文内容，然后再次发起大模型调用。</p>
+<h2 id="562-工程目录介绍">5.6.2 工程目录介绍<a class="anchor" href="#562-%e5%b7%a5%e7%a8%8b%e7%9b%ae%e5%bd%95%e4%bb%8b%e7%bb%8d">#</a></h2>
+<p>下面，根据图5-11所示的过程，来逐一实现。为了使下面的介绍更为清晰，先来简单介绍一个整个工程目录结构，以下完整示例代码可参见 <code>Code/Chapter05/mini-chatgpt</code> 工程。</p>
+<div align=center><img width="150" src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/images/agent/202606140923.jpg" alt="图 5-12 mini-chatgpt 工程目录结构"/> </div><center>图 5-12 mini-chatgpt 工程目录结构</center>
+<p>在图5-12中，<code>main.py</code> 是整个项目的主函数入口，通过 <code>python main.py</code> 启动；<code>cli.py</code> 中定义了整个命令行与用户之间的交互逻辑；<code>agent.py</code> 中定义了用户请求与大模型之间的交互逻辑，即图5-11中间部分；<code>store.py</code> 中定义的记忆的存储结构；<code>tools.py</code> 中定义了工具的逻辑；<code>context.py</code> 和 <code>qwen.py</code> 中分别定义了上下文的字段结构和大模型的加载模块。</p>
+<h2 id="563-记忆存储结构实现">5.6.3 记忆存储结构实现<a class="anchor" href="#563-%e8%ae%b0%e5%bf%86%e5%ad%98%e5%82%a8%e7%bb%93%e6%9e%84%e5%ae%9e%e7%8e%b0">#</a></h2>
+<p>首先需要定义长期记忆的存储结构以及不同处理情况下的组织结构，这里通过2个类来实现，即 <code>MemoryRecord</code>和<code>MemorySearchResult</code> 分别用来表示一条记忆以及记忆的搜索结果，对应模块为 <code>store.py</code>。</p>
+<p>（1）记忆存储结构</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> MemoryType <span style="color:#666">=</span> Literal[<span style="color:#4070a0">&#34;episodic&#34;</span>, <span style="color:#4070a0">&#34;semantic&#34;</span>, <span style="color:#4070a0">&#34;procedural&#34;</span>]
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span> <span style="color:#555;font-weight:bold">@dataclass</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">MemoryRecord</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>     memory_id: <span style="color:#007020">str</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>     content: <span style="color:#007020">str</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>     context: <span style="color:#007020">str</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>     created_at: <span style="color:#007020">str</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>     updated_at: <span style="color:#007020">str</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>     memory_type: MemoryType <span style="color:#666">=</span> <span style="color:#4070a0">&#34;semantic&#34;</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>     embedding: <span style="color:#007020">list</span>[<span style="color:#007020">float</span>] <span style="color:#666">|</span> <span style="color:#007020;font-weight:bold">None</span> <span style="color:#666">=</span> <span style="color:#007020;font-weight:bold">None</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>     <span style="color:#555;font-weight:bold">@property</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">text</span>(<span style="color:#007020">self</span>) <span style="color:#666">-&gt;</span> <span style="color:#007020">str</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>         <span style="color:#007020;font-weight:bold">return</span> <span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;</span><span style="color:#70a0d0">{</span><span style="color:#007020">self</span><span style="color:#666">.</span>memory_type<span style="color:#70a0d0">}</span><span style="color:#4070a0;font-weight:bold">\n</span><span style="color:#70a0d0">{</span><span style="color:#007020">self</span><span style="color:#666">.</span>content<span style="color:#70a0d0">}</span><span style="color:#4070a0;font-weight:bold">\n</span><span style="color:#70a0d0">{</span><span style="color:#007020">self</span><span style="color:#666">.</span>context<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span><span style="color:#666">.</span>strip()</span></span></code></pre></div><p>在上述代码中，第4行 <code>memory_id</code> 表示每一条记忆对应的唯一 ID。第6～7行分别用来记录这条记忆的核心内容以及对应的补充上下文说明。第7～8行分别用来记录这条记忆的创建时间以及后续的更新时间。第9行用来标识长期记忆的类型。第10行用来记录这条记录的词嵌入表示，便于后续对记忆进行检索。第12～14行定义了一个 <code>text</code> 属性，便于后续直接取记忆对应文本内容。</p>
+<p>值得一提的是，记忆通常会使用 <code>content</code> 和 <code>context</code> 这两个字段描述，这意味着系统并不是只根据记忆正文做召回，也会综合考虑“这条记忆为什么被记录下来、它的使用背景是什么。这种做法的优点在于，长期记忆的可检索性不再只依赖一句孤立文本，而是让记忆同时带有一定的语境信息。</p>
+<p>如下所示，便是一条记忆内容的示例结果：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-json" data-lang="json"><span style="display:flex;"><span>{<span style="color:#062873;font-weight:bold">&#34;memory_id&#34;</span>: <span style="color:#4070a0">&#34;65864dd6-cc5f-4804-8b4d-11f3b3b35548&#34;</span>,
+</span></span><span style="display:flex;"><span><span style="color:#062873;font-weight:bold">&#34;content&#34;</span>: <span style="color:#4070a0">&#34;用户住在上海&#34;</span>,
+</span></span><span style="display:flex;"><span><span style="color:#062873;font-weight:bold">&#34;context&#34;</span>: <span style="color:#4070a0">&#34;地理位置信息，可能影响后续示例的本地化（如时区、日期格式、生活场景举例等）&#34;</span>,
+</span></span><span style="display:flex;"><span><span style="color:#062873;font-weight:bold">&#34;created_at&#34;</span>: <span style="color:#4070a0">&#34;2026-05-31T16:18:04&#34;</span>,
+</span></span><span style="display:flex;"><span><span style="color:#062873;font-weight:bold">&#34;updated_at&#34;</span>: <span style="color:#4070a0">&#34;2026-05-31T16:18:04&#34;</span>,
+</span></span><span style="display:flex;"><span><span style="color:#062873;font-weight:bold">&#34;memory_type&#34;</span>: <span style="color:#4070a0">&#34;semantic&#34;</span>,
+</span></span><span style="display:flex;"><span><span style="color:#062873;font-weight:bold">&#34;embedding&#34;</span>: [<span style="color:#40a070">-0.0667203739285469</span>, <span style="color:#40a070">0.025669077411293983</span><span style="">....</span>]}</span></span></code></pre></div><p>（2）记忆搜索结果结构</p>
+<p>进一步，实现搜索记忆时的结果返回类，需包含记忆本身以及与用户请求的相似度值，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#555;font-weight:bold">@dataclass</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">MemorySearchResult</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>     record: MemoryRecord
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span>     score: <span style="color:#007020">float</span></span></span></code></pre></div><p>在上述代码中，第3行对应一条用户记忆。第4行表示用户请求内容与当前这条用户数据的相似度值。</p>
+<h2 id="564-记忆持久化实现">5.6.4 记忆持久化实现<a class="anchor" href="#564-%e8%ae%b0%e5%bf%86%e6%8c%81%e4%b9%85%e5%8c%96%e5%ae%9e%e7%8e%b0">#</a></h2>
+<p>在完成单条记忆的结构化实现以后，还需要再实现一个 <code>Json</code> 对象来持久化保存每一个用户的所有长期记忆，以及实现插入记忆、更新记忆、保存记忆以及相似度值计算等功能，对应模块为 <code>store.py</code>。这里主要介绍其中核心的3个方法， <code>list_memories</code>、<code>upsert</code>  和<code>search</code> ，分别用来返回当前用户的所有记忆、插入或更新记忆以及根据当前用户请求搜索与之相关的记忆内容，其它功能实现可直接阅读工程代码注释。同时，为了方便处理短期记忆本示例暂不做本地持久化。</p>
+<p>（1）列出当前所有记忆</p>
+<p>这里通过定义一个 <code>JsonMemoryStore</code> 类以及对应的成员方法来完成上述功能。首先定义初始化方法和读取现存所有记忆的方法，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">JsonMemoryStore</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">__init__</span>(<span style="color:#007020">self</span>, base_dir: <span style="color:#007020">str</span> <span style="color:#666">|</span> Path, embeddings_model: Any <span style="color:#666">|</span> <span style="color:#007020;font-weight:bold">None</span> <span style="color:#666">=</span> <span style="color:#007020;font-weight:bold">None</span>):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>base_dir <span style="color:#666">=</span> Path(base_dir)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>base_dir<span style="color:#666">.</span>mkdir(parents<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">True</span>, exist_ok<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">True</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>embeddings_model <span style="color:#666">=</span> embeddings_model
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>     
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">list_memories</span>(<span style="color:#007020">self</span>, user_id: <span style="color:#007020">str</span>) <span style="color:#666">-&gt;</span> <span style="color:#007020">list</span>[MemoryRecord]:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>         path <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>_memory_file(user_id)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>         <span style="color:#007020;font-weight:bold">if</span> <span style="color:#007020;font-weight:bold">not</span> path<span style="color:#666">.</span>exists():
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>             <span style="color:#007020;font-weight:bold">return</span> []
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>         raw <span style="color:#666">=</span> json<span style="color:#666">.</span>loads(path<span style="color:#666">.</span>read_text(encoding<span style="color:#666">=</span><span style="color:#4070a0">&#34;utf-8&#34;</span>))
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>         records <span style="color:#666">=</span> []
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>         <span style="color:#007020;font-weight:bold">for</span> item <span style="color:#007020;font-weight:bold">in</span> raw:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>             item<span style="color:#666">.</span>setdefault(<span style="color:#4070a0">&#34;memory_type&#34;</span>, <span style="color:#4070a0">&#34;semantic&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>             item[<span style="color:#4070a0">&#34;memory_type&#34;</span>] <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>_normalize_memory_type(item[<span style="color:#4070a0">&#34;memory_type&#34;</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>             records<span style="color:#666">.</span>append(MemoryRecord(<span style="color:#666">**</span>item))
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>         <span style="color:#007020;font-weight:bold">return</span> records</span></span></code></pre></div><p>在上述代码，第2～3行是指定记忆的存储目录，如果不存在则根据传入的路径 <code>base_dir</code> 创建该目录。第5行是指定后续用到的词嵌入模型。第7行方法 <code>list_memories</code> 便是用来根据传入的 <code>user_id</code> 载入当前用户保存在本地的所有记忆内容。第8行是根据用户ID拼接得到记忆文件的路径。第11～17行是载入当前用户对应的记忆文件（每个用户对应一个），并返回一个列表，其中每个元素则是一条 <code>MemoryRecord</code> 结构的记忆内容。</p>
+<p>（2）更新或插入新记忆</p>
+<p>进一步，定义记忆的更新或插入方法，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">upsert</span>(<span style="color:#007020">self</span>, user_id: <span style="color:#007020">str</span>, content: <span style="color:#007020">str</span>, context: <span style="color:#007020">str</span>, <span style="color:#666">*</span>, memory_type: MemoryType, 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>                memory_id: <span style="color:#007020">str</span> <span style="color:#666">|</span> <span style="color:#007020;font-weight:bold">None</span> <span style="color:#666">=</span> <span style="color:#007020;font-weight:bold">None</span>) <span style="color:#666">-&gt;</span> MemoryRecord:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>         records <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>list_memories(user_id)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>         now <span style="color:#666">=</span> datetime<span style="color:#666">.</span>now()<span style="color:#666">.</span>isoformat(timespec<span style="color:#666">=</span><span style="color:#4070a0">&#34;seconds&#34;</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>         record_id <span style="color:#666">=</span> memory_id <span style="color:#007020;font-weight:bold">or</span> <span style="color:#007020">str</span>(uuid<span style="color:#666">.</span>uuid4()) 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>         normalized_memory_type <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>_normalize_memory_type(memory_type)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>         embedding <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>_embed(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;</span><span style="color:#70a0d0">{</span>content<span style="color:#70a0d0">}</span><span style="color:#4070a0;font-weight:bold">\n</span><span style="color:#70a0d0">{</span>context<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>         updated_record <span style="color:#666">=</span> <span style="color:#007020;font-weight:bold">None</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>         <span style="color:#007020;font-weight:bold">for</span> index, record <span style="color:#007020;font-weight:bold">in</span> <span style="color:#007020">enumerate</span>(records):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>             <span style="color:#007020;font-weight:bold">if</span> record<span style="color:#666">.</span>memory_id <span style="color:#666">!=</span> record_id:  
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>                 <span style="color:#007020;font-weight:bold">continue</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>             updated_record <span style="color:#666">=</span> MemoryRecord(memory_id<span style="color:#666">=</span>record<span style="color:#666">.</span>memory_id, content<span style="color:#666">=</span>content, 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>                 context<span style="color:#666">=</span>context, created_at<span style="color:#666">=</span>record<span style="color:#666">.</span>created_at, updated_at<span style="color:#666">=</span>now, 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>                 memory_type<span style="color:#666">=</span>normalized_memory_type, embedding<span style="color:#666">=</span>embedding)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>             records[index] <span style="color:#666">=</span> updated_record
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>             <span style="color:#007020;font-weight:bold">break</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>         <span style="color:#007020;font-weight:bold">if</span> updated_record <span style="color:#007020;font-weight:bold">is</span> <span style="color:#007020;font-weight:bold">None</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>             updated_record <span style="color:#666">=</span> MemoryRecord(memory_id<span style="color:#666">=</span>record_id,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span>                 content<span style="color:#666">=</span>content, context<span style="color:#666">=</span>context, created_at<span style="color:#666">=</span>now, updated_at<span style="color:#666">=</span>now,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span>                 memory_type<span style="color:#666">=</span>normalized_memory_type, embedding<span style="color:#666">=</span>embedding)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">21</span>             records<span style="color:#666">.</span>append(updated_record)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">22</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>_save(user_id, records)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">23</span>         <span style="color:#007020;font-weight:bold">return</span> updated_record</span></span></code></pre></div><p>在上述代码中，第1行 <code>upsert</code> 方法时根据 <code>user_id</code> 及记忆内容来更新已有记忆或者插入一条新的记忆。第3行是根据 <code>user_id</code> 获取当前用户的所有本地记忆。第5行判断 <code>memory_id</code> 是否为 <code>None</code>，如果为 <code>None</code> 则接下来直接将传入记忆内容作为新的记忆插入；如果不为 <code>None</code> 则表示对以后记忆内容进行更新。第6行是校验得到记忆类型，因为这个记忆类型是模型返回的所以需要校验。第7行得到记忆内容对应的词嵌入表示，需要注意的是这里是将 <code>content</code> 和 <code>context</code> 拼接起来转换成向量的，在后续使用 <code>PostgresStore</code> 时其默认是将两个字段分开处理的。</p>
+<p>第9～16行是遍历当前用户所有记忆内容，如果传入的 <code>memory_id</code> 命中已有记忆的 <code>record.memory_id</code> 则通过第12～14行对已有记忆进行更新，并保持 <code>record.memory_id</code> 和 <code>record.created_at</code> 不变。第17～21行判断是否有记忆更新操作，如果没有则作为新记忆插入。第22行是将整个记忆重新保存到本地，最终在 <code>memory-agent</code> 目录下将会生成一个 <code>.memory</code> 的文件夹来保存每个用户的记忆文件。</p>
+<p>例如对于 <code>demo-user</code> 用户来说，当与大模型交互多次以后，便会在 <code>.memory</code> 文件夹中生成一个名为 <code>demo-user.json</code> 的记忆文件，内容形式为：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-json" data-lang="json"><span style="display:flex;"><span>[
+</span></span><span style="display:flex;"><span>  {
+</span></span><span style="display:flex;"><span>    <span style="color:#062873;font-weight:bold">&#34;memory_id&#34;</span>: <span style="color:#4070a0">&#34;65864dd6-cc5f-4804-8b4d-11f3b3b35548&#34;</span>,
+</span></span><span style="display:flex;"><span>    <span style="color:#062873;font-weight:bold">&#34;content&#34;</span>: <span style="color:#4070a0">&#34;用户住在上海&#34;</span>,
+</span></span><span style="display:flex;"><span>    <span style="color:#062873;font-weight:bold">&#34;context&#34;</span>: <span style="color:#4070a0">&#34;地理位置信息，可能影响后续示例的本地化（如时区、日期格式、生活场景举例等）&#34;</span>,
+</span></span><span style="display:flex;"><span>    <span style="color:#062873;font-weight:bold">&#34;created_at&#34;</span>: <span style="color:#4070a0">&#34;2026-05-31T16:18:04&#34;</span>,
+</span></span><span style="display:flex;"><span>    <span style="color:#062873;font-weight:bold">&#34;updated_at&#34;</span>: <span style="color:#4070a0">&#34;2026-05-31T16:18:04&#34;</span>,
+</span></span><span style="display:flex;"><span>    <span style="color:#062873;font-weight:bold">&#34;memory_type&#34;</span>: <span style="color:#4070a0">&#34;semantic&#34;</span>,
+</span></span><span style="display:flex;"><span>    <span style="color:#062873;font-weight:bold">&#34;embedding&#34;</span>: [
+</span></span><span style="display:flex;"><span>      <span style="color:#40a070">-0.0667203739285469</span>,
+</span></span><span style="display:flex;"><span>      <span style="color:#40a070">0.025669077411293983</span><span style="">...</span>
+</span></span><span style="display:flex;"><span>  <span style="">}</span>,
+</span></span><span style="display:flex;"><span>  {
+</span></span><span style="display:flex;"><span>    <span style="color:#062873;font-weight:bold">&#34;memory_id&#34;</span>: <span style="color:#4070a0">&#34;13903326-25f3-4724-b21e-35b8a143352e&#34;</span>,
+</span></span><span style="display:flex;"><span>    <span style="color:#062873;font-weight:bold">&#34;content&#34;</span>: <span style="color:#4070a0">&#34;有一个好朋友叫张三&#34;</span>,
+</span></span><span style="display:flex;"><span>    <span style="color:#062873;font-weight:bold">&#34;context&#34;</span>: <span style="color:#4070a0">&#34;人际关系信息，可能用于后续个性化举例、故事化解释或社交场景模拟（如协作开发、技术分享、职业建议等）&#34;</span>,
+</span></span><span style="display:flex;"><span>    <span style="color:#062873;font-weight:bold">&#34;created_at&#34;</span>: <span style="color:#4070a0">&#34;2026-05-31T16:26:19&#34;</span>,
+</span></span><span style="display:flex;"><span>    <span style="color:#062873;font-weight:bold">&#34;updated_at&#34;</span>: <span style="color:#4070a0">&#34;2026-05-31T16:26:19&#34;</span>,
+</span></span><span style="display:flex;"><span>    <span style="color:#062873;font-weight:bold">&#34;memory_type&#34;</span>: <span style="color:#4070a0">&#34;semantic&#34;</span>,
+</span></span><span style="display:flex;"><span>    <span style="color:#062873;font-weight:bold">&#34;embedding&#34;</span>: [
+</span></span><span style="display:flex;"><span>      <span style="color:#40a070">-0.05820561200380325</span>,
+</span></span><span style="display:flex;"><span>      <span style="color:#40a070">0.003316354937851429</span>,
+</span></span><span style="display:flex;"><span>  <span style="">}</span>
+</span></span><span style="display:flex;"><span>]</span></span></code></pre></div><p>（3）检索已有记忆</p>
+<p>对于本地已有的记忆，我们希望模型在回答用户问题时能够参考，因此实现一个 <code>search</code> 方法来根据用户请求返回与之相关的记忆内容，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">search</span>(<span style="color:#007020">self</span>, user_id: <span style="color:#007020">str</span>, query: <span style="color:#007020">str</span>, limit: <span style="color:#007020">int</span> <span style="color:#666">=</span> <span style="color:#40a070">5</span>) <span style="color:#666">-&gt;</span> <span style="color:#007020">list</span>[MemorySearchResult]:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>         records <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>list_memories(user_id)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>         <span style="color:#007020;font-weight:bold">if</span> <span style="color:#007020;font-weight:bold">not</span> records:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>             <span style="color:#007020;font-weight:bold">return</span> []
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>         query_embedding <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>_embed(query)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>         scored <span style="color:#666">=</span> [MemorySearchResult(record<span style="color:#666">=</span>record,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>                 score<span style="color:#666">=</span><span style="color:#007020">self</span><span style="color:#666">.</span>_score(record, query, query_embedding))
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>                 <span style="color:#007020;font-weight:bold">for</span> record <span style="color:#007020;font-weight:bold">in</span> records]
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>         scored<span style="color:#666">.</span>sort(key<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">lambda</span> item: item<span style="color:#666">.</span>score, reverse<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">True</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>         <span style="color:#007020;font-weight:bold">return</span> scored[:limit]</span></span></code></pre></div><p>在上述代码中，第5行是将用户请求 <code>query</code> 转换为词向量。第6～8行是遍历每一条本地记忆，然后分别计算其与 <code>query_embedding</code> 之间的相似度，其中第7行 <code>_score</code> 方法便是用来计算相似度而之所以还要传入原 <code>query</code> 是当无词嵌入模型使用时则通过比较两段文本之间重复的词元来计算相似度，是一种保底方案。第9～10行则是将记忆内容按相似度由高到低排序并返回前 <code>limit</code> 条记忆内容。</p>
+<h2 id="565-记忆插入工具实现">5.6.5 记忆插入工具实现<a class="anchor" href="#565-%e8%ae%b0%e5%bf%86%e6%8f%92%e5%85%a5%e5%b7%a5%e5%85%b7%e5%ae%9e%e7%8e%b0">#</a></h2>
+<p>在 <code>JsonMemoryStore</code> 中我们实现了记忆的更新或插入方法 <code>upsert</code>，进一步需要将其封装成一个工具来供大模型使用，后续大模型将自动判断是否有新记忆插入或对已存在的记忆更新，对应模块为 <code>tools.py</code>。具体地，示例代码如下所示：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">build_upsert_memory_tool</span>(store: JsonMemoryStore, 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>                              user_id: <span style="color:#007020">str</span>) <span style="color:#666">-&gt;</span> StructuredTool:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">_upsert_memory</span>(content: <span style="color:#007020">str</span>, context: <span style="color:#007020">str</span>,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>             memory_type: MemoryType, memory_id: <span style="color:#007020">str</span> <span style="color:#666">|</span> <span style="color:#007020;font-weight:bold">None</span>) <span style="color:#666">-&gt;</span> <span style="color:#007020">str</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>         record <span style="color:#666">=</span> store<span style="color:#666">.</span>upsert(user_id<span style="color:#666">=</span>user_id, content<span style="color:#666">=</span>content,context<span style="color:#666">=</span>context,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>                               memory_type<span style="color:#666">=</span>memory_type,memory_id<span style="color:#666">=</span>memory_id)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>         <span style="color:#007020;font-weight:bold">return</span> <span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;记忆已经完成存储 </span><span style="color:#70a0d0">{</span>record<span style="color:#666">.</span>memory_id<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>     
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>     <span style="color:#007020;font-weight:bold">return</span> StructuredTool<span style="color:#666">.</span>from_function(func<span style="color:#666">=</span>_upsert_memory,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>         name<span style="color:#666">=</span><span style="color:#4070a0">&#34;upsert_memory&#34;</span>,description<span style="color:#666">=</span>MEMORY_TOOL_DESCRIPTION,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>         args_schema<span style="color:#666">=</span>UpsertMemoryInput)</span></span></code></pre></div><p>在上述代码中，<code>build_upsert_memory_tool</code> 便是最后封装得到的工具，其中第10行 <code>MEMORY_TOOL_DESCRIPTION</code> 为工具的描述内容，第11行 <code>UpsertMemoryInput</code> 为工具参数的描述内容。不过上述定义与<a href="/agent/chapter04/88ff352fc22e4cd6/">「第4.3节 LangChain Tool修饰器：工具定义与调用方法」</a>中介绍的方法有很大差异，如果使用 <code>@tool</code> 修饰器来实现，则示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#555;font-weight:bold">@tool</span>(args_schema<span style="color:#666">=</span>UpsertMemoryInput)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">upsert_memory</span>(content: <span style="color:#007020">str</span>, context: <span style="color:#007020">str</span>, memory_type: MemoryType,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>         memory_id: <span style="color:#007020">str</span> <span style="color:#666">|</span> <span style="color:#007020;font-weight:bold">None</span>,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>         config: Annotated[RunnableConfig] <span style="color:#666">=</span> <span style="color:#007020;font-weight:bold">None</span>) <span style="color:#666">-&gt;</span> <span style="color:#007020">str</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>     <span style="color:#4070a0">&#34;&#34;&#34;保存或更新用户的长期记忆。仅保存未来仍具有价值的信息，不……&#34;&#34;&#34;</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>     user_id <span style="color:#666">=</span> config[<span style="color:#4070a0">&#39;configurable&#39;</span>]<span style="color:#666">.</span>get(<span style="color:#4070a0">&#34;user_id&#34;</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>     store <span style="color:#666">=</span> config[<span style="color:#4070a0">&#39;configurable&#39;</span>]<span style="color:#666">.</span>get(<span style="color:#4070a0">&#34;store&#34;</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>     record <span style="color:#666">=</span> store<span style="color:#666">.</span>upsert(user_id<span style="color:#666">=</span>user_id, content<span style="color:#666">=</span>content, context<span style="color:#666">=</span>context, 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>              memory_type<span style="color:#666">=</span>memory_type, memory_id<span style="color:#666">=</span>memory_id)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>     <span style="color:#007020;font-weight:bold">return</span> <span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;已存储记忆 </span><span style="color:#70a0d0">{</span>record<span style="color:#666">.</span>memory_id<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span></span></span></code></pre></div><p>在上述代码中，由于 <code>store</code> 和 <code>user_id</code> 不是工具参数，所以第7～8行分别通过 <code>config</code> 来进行获取，即第1行的 <code>content</code>、<code>context</code>和 <code>memory_id</code> 才是大模型会解析并传入的3个参数。这种写法也类似于第4.4.3节中定义检索工具 <code>retrieve_context(query: str, config: RunnableConfig)</code> 时的写法。</p>
+<p>虽然通过 <code>@tool</code> 也能实现记忆插入工具的封装，但是对于这种运行时才会注入不应该暴露给模型的参数或上下文，更推荐使用上面 <code>build_upsert_memory_tool</code> 这样的封装方式。在使用时，通过 <code>memory_tool = build_upsert_memory_tool(store, context.user_id)</code> 这样的方式来获得工具，然后再绑定到大模型上。</p>
+<p>当然，上述两种方式本质上是一样的均可使用，其输出的 <code>tool_schema</code> 并无差异，可运行代码 <code>Code/Chapter05/memory-agent/tests/test_tool.py</code> 进行验证。</p>
+<h2 id="566-agent-智能体构建">5.6.6 Agent 智能体构建<a class="anchor" href="#566-agent-%e6%99%ba%e8%83%bd%e4%bd%93%e6%9e%84%e5%bb%ba">#</a></h2>
+<p>到此为止我们已经把图5-11中所要用到的核心模块实现完成了，接下来开始构建 Agent 智能体，包括 Agent 响应消息体构建、Agent 响应实现以及 Agent 的创建，对应模块为 <code>agent.py</code>。</p>
+<p>（1）响应消息体构建</p>
+<p>首先定义一个消息体，它表示每一轮对话的最终产物，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#555;font-weight:bold">@dataclass</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">AgentReply</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>     text: <span style="color:#007020">str</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span>     history: <span style="color:#007020">list</span>[BaseMessage]
+</span></span><span style="display:flex;"><span><span style="color:#40a070">5</span>     used_memories: <span style="color:#007020">list</span>[MemorySearchResult]</span></span></code></pre></div><p>在上述代码，第3行 <code>text</code> 表示最终返回给用户的文本，即回答内容。第4行 <code>history</code> 表示更新后的历史消息（短期记忆），下一轮还会继续用到。第5行 <code>used_memories</code> 表示本轮参与检索并注入给模型的记忆列表（长期记忆）。</p>
+<p>（2）Agent 响应实现</p>
+<p>进一步，定义类 <code>MemoryAgent</code> 来处理每一轮对话的内部处理流程，包括记忆检索、上下文拼接、多轮交互等。首先定义初始化方法，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">MemoryAgent</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">__init__</span>(<span style="color:#007020">self</span>, context: Context, store: JsonMemoryStore):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>context <span style="color:#666">=</span> context
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>store <span style="color:#666">=</span> store
+</span></span><span style="display:flex;"><span><span style="color:#40a070">5</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>llm <span style="color:#666">=</span> load_chat_model(context<span style="color:#666">.</span>model)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">6</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>memory_tool <span style="color:#666">=</span> build_upsert_memory_tool(store, context<span style="color:#666">.</span>user_id)</span></span></code></pre></div><p>在上述代码中，第3行 <code>context</code> 为一个配置类对象，包括 <code>user_id</code>、<code>model</code>、<code>memory_dir</code> 和 <code>system_prompt</code>。第4行 <code>store</code> 为上文定义实现的 <code>JsonMemoryStore</code> 类对象。第5行时载入的大模型。第6行是返回的记忆处理工具。</p>
+<p>接着，实现 Agent 最核心的交互部分，核心代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">respond</span>(<span style="color:#007020">self</span>, user_message: <span style="color:#007020">str</span>, <span style="color:#666">*</span>, history: <span style="color:#007020">list</span>[BaseMessage] <span style="color:#666">=</span> <span style="color:#007020;font-weight:bold">None</span>,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>             memory_limit: <span style="color:#007020">int</span> <span style="color:#666">=</span> <span style="color:#40a070">5</span>, max_loops: <span style="color:#007020">int</span> <span style="color:#666">=</span> <span style="color:#40a070">5</span>) <span style="color:#666">-&gt;</span> AgentReply:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>         dialogue_history <span style="color:#666">=</span> <span style="color:#007020">list</span>(history <span style="color:#007020;font-weight:bold">or</span> [])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>         memory_hits <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>store<span style="color:#666">.</span>search(<span style="color:#007020">self</span><span style="color:#666">.</span>context<span style="color:#666">.</span>user_id,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>                                         query<span style="color:#666">=</span>user_message, limit<span style="color:#666">=</span>memory_limit)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>         system_prompt <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>context<span style="color:#666">.</span>system_prompt<span style="color:#666">.</span>format(
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>                                user_info<span style="color:#666">=</span><span style="color:#007020">self</span><span style="color:#666">.</span>_format_memories(memory_hits),
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>                                time<span style="color:#666">=</span>datetime<span style="color:#666">.</span>now()<span style="color:#666">.</span>isoformat(timespec<span style="color:#666">=</span><span style="color:#4070a0">&#34;seconds&#34;</span>))
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>         messages: <span style="color:#007020">list</span>[BaseMessage] <span style="color:#666">=</span> [SystemMessage(content<span style="color:#666">=</span>system_prompt),  
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>                          <span style="color:#666">*</span>dialogue_history, HumanMessage(content<span style="color:#666">=</span>user_message)]
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>         runnable <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>llm<span style="color:#666">.</span>bind_tools([<span style="color:#007020">self</span><span style="color:#666">.</span>memory_tool])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>         <span style="color:#007020;font-weight:bold">for</span> i <span style="color:#007020;font-weight:bold">in</span> <span style="color:#007020">range</span>(max_loops):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>             ai_message <span style="color:#666">=</span> runnable<span style="color:#666">.</span>invoke(messages)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>             messages<span style="color:#666">.</span>append(ai_message)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>             tool_calls <span style="color:#666">=</span> <span style="color:#007020">getattr</span>(ai_message, <span style="color:#4070a0">&#34;tool_calls&#34;</span>, []) <span style="color:#007020;font-weight:bold">or</span> []
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>             <span style="color:#007020;font-weight:bold">if</span> <span style="color:#007020;font-weight:bold">not</span> tool_calls:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>                 updated_history <span style="color:#666">=</span> [<span style="color:#666">*</span>dialogue_history,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>                     HumanMessage(content<span style="color:#666">=</span>user_message),
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span>                     AIMessage(content<span style="color:#666">=</span><span style="color:#007020">self</span><span style="color:#666">.</span>_message_text(ai_message))]
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span>                 <span style="color:#007020;font-weight:bold">return</span> AgentReply(text<span style="color:#666">=</span><span style="color:#007020">self</span><span style="color:#666">.</span>_message_text(ai_message),
+</span></span><span style="display:flex;"><span><span style="color:#40a070">21</span>                     history<span style="color:#666">=</span>updated_history, used_memories<span style="color:#666">=</span>memory_hits)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">22</span>             <span style="color:#007020;font-weight:bold">for</span> tool_call <span style="color:#007020;font-weight:bold">in</span> tool_calls:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">23</span>                 result <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>memory_tool<span style="color:#666">.</span>invoke(tool_call[<span style="color:#4070a0">&#34;args&#34;</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">24</span>                 messages<span style="color:#666">.</span>append(ToolMessage(content<span style="color:#666">=</span>result, tool_call_id<span style="color:#666">=</span>tool_call[<span style="color:#4070a0">&#34;id&#34;</span>]))
+</span></span><span style="display:flex;"><span><span style="color:#40a070">25</span>         <span style="color:#007020;font-weight:bold">raise</span> <span style="color:#007020">RuntimeError</span>(<span style="color:#4070a0">&#34;已达到本轮交互最大次数&#34;</span>)</span></span></code></pre></div><p>在上述代码，第1行 <code>user_message</code> 表示用户当前的输入内容，<code>history</code> 表示交互过程中的会话（短期）记忆初始时为空列表， <code>memory_limit</code> 表示检索用户长期记忆时的最大返回条数，<code>max_loops</code> 表示每一轮对话中与大模型的最大交互次数。第4～8行是根据用户提问检索与之相关的长期记忆，并将其注入到系统提示词中，对应图5-11的右上部分。第9～10行是将系统提示词、短期记忆内容和用户提问拼接在一起形成初始的上下文内容，对应图5-11中间部分。第11行是将记忆检索更新工具绑定到大模型上。</p>
+<p>第12行则是开始本轮响应的大模型内部交互过程，因为有些情况下可能需要与大模型交互多次才会得到结果，例如现在大模型对应的思考模式便是这里每一次交互的输出。第13～14行是先根据已有上下文内容发起一次大模型调用，然后将得到的回复追加到上下文中。第15～21行是判断上一次大模型调用是否有触发工具，如果没有则表示本轮响应结束，第17～19行更新得到本轮用户交互后的短期记忆内容，第20～21行是返回本次响应结果。第22～24行是当触发工具时，依次遍历每一个工具取对应参数并运行工具得到结果，并同时将其追加到上下文内容中进入下一次内部交互。整个过程也正是我们在<a href="/agent/chapter04/0def4564f3aa455d/">「第4.10节 LangGraph教程：基于 LangGraph 构建自定义 RAG Agent」</a>介绍的 ReAct 范式的实际体现。</p>
+<p>（3）创建 Agent</p>
+<p>最后，根据以上实现内容创建 Agent ，示例代码人如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">create_agent</span>(context: Context) <span style="color:#666">-&gt;</span> MemoryAgent:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">from</span> <span style="color:#0e84b5;font-weight:bold">.qwen</span> <span style="color:#007020;font-weight:bold">import</span> get_embeddings_model
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>     store <span style="color:#666">=</span> JsonMemoryStore(context<span style="color:#666">.</span>memory_dir, 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span>                             embeddings_model<span style="color:#666">=</span>get_embeddings_model())
+</span></span><span style="display:flex;"><span><span style="color:#40a070">5</span>     <span style="color:#007020;font-weight:bold">return</span> MemoryAgent(context<span style="color:#666">=</span>context, store<span style="color:#666">=</span>store)</span></span></code></pre></div><p>在上述代码中，第4行是载入保存长期记忆时的词嵌入模型。第5行是返回 <code>MemoryAgent</code> 实例化类对象。</p>
+<h2 id="567-命令行交互实现">5.6.7 命令行交互实现<a class="anchor" href="#567-%e5%91%bd%e4%bb%a4%e8%a1%8c%e4%ba%a4%e4%ba%92%e5%ae%9e%e7%8e%b0">#</a></h2>
+<p>在完成所有功能模块实现以后，最后再实现一个命令行交互界面通过不同命令完成不同功能，对应模块为 <code>cli.py</code>，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">run_cli</span>() <span style="color:#666">-&gt;</span> <span style="color:#007020;font-weight:bold">None</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     args <span style="color:#666">=</span> build_parser()<span style="color:#666">.</span>parse_args()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>     configure_logging(args<span style="color:#666">.</span>log_level, args<span style="color:#666">.</span>log_file)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>     context <span style="color:#666">=</span> Context(user_id<span style="color:#666">=</span>args<span style="color:#666">.</span>user_id, model<span style="color:#666">=</span>args<span style="color:#666">.</span>model,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>         							 memory_dir<span style="color:#666">=</span>args<span style="color:#666">.</span>memory_dir)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>     agent <span style="color:#666">=</span> create_agent(context)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>     store <span style="color:#666">=</span> agent<span style="color:#666">.</span>store
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>     _print_welcome(context, store)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>     history <span style="color:#666">=</span> []
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>     <span style="color:#007020;font-weight:bold">while</span> <span style="color:#007020;font-weight:bold">True</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>         user_text <span style="color:#666">=</span> <span style="color:#007020">input</span>(<span style="color:#4070a0">&#34;</span><span style="color:#4070a0;font-weight:bold">\n</span><span style="color:#4070a0">[You]: &#34;</span>)<span style="color:#666">.</span>strip()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>         <span style="color:#007020;font-weight:bold">if</span> <span style="color:#007020;font-weight:bold">not</span> user_text:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>             <span style="color:#007020;font-weight:bold">continue</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>         <span style="color:#007020;font-weight:bold">if</span> user_text <span style="color:#666">==</span> <span style="color:#4070a0">&#34;/exit&#34;</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>             <span style="color:#007020;font-weight:bold">break</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>         <span style="color:#007020;font-weight:bold">if</span> user_text <span style="color:#666">==</span> <span style="color:#4070a0">&#34;/help&#34;</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>             _print_help()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>             <span style="color:#007020;font-weight:bold">continue</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span>         <span style="color:#007020;font-weight:bold">if</span> user_text <span style="color:#666">==</span> <span style="color:#4070a0">&#34;/memories&#34;</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span>             _print_memories(store, context<span style="color:#666">.</span>user_id)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">21</span>             <span style="color:#007020;font-weight:bold">continue</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">22</span>         <span style="color:#007020;font-weight:bold">if</span> user_text <span style="color:#666">==</span> <span style="color:#4070a0">&#34;/clear&#34;</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">23</span>             store<span style="color:#666">.</span>clear(context<span style="color:#666">.</span>user_id)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">24</span>             <span style="color:#007020;font-weight:bold">continue</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">25</span>         reply <span style="color:#666">=</span> agent<span style="color:#666">.</span>respond(user_text, history<span style="color:#666">=</span>history)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">26</span>         history <span style="color:#666">=</span> reply<span style="color:#666">.</span>history
+</span></span><span style="display:flex;"><span><span style="color:#40a070">27</span>         logger<span style="color:#666">.</span>info(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;[Assistant]:</span><span style="color:#4070a0;font-weight:bold">\n</span><span style="color:#4070a0"> </span><span style="color:#70a0d0">{</span>reply<span style="color:#666">.</span>text<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)</span></span></code></pre></div><p>在上述代码，第2行是解析从命令行传入的参数。第3行是配置日志打印模块，如果需要查看每一步的详细信息可将 <code>log_level</code> 设置为 <code>DEBUGE</code> 模式。第4～6行则是根据参数创建一个 Agent 智能体。第10～27行则是循环与用户输入进行交互。</p>
+<p>最后，通过命令行进入到目录 <code>Code/Chapter05/mini-chatgpt</code>中，然后通过如下命令启动整个服务：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-shell" data-lang="shell"><span style="display:flex;"><span><span style="color:#666">(</span>rag<span style="color:#666">)</span> wangcheng@Cheng mini-chatgpt % python main.py
+</span></span><span style="display:flex;"><span><span style="color:#666">==========</span> Mini ChatGPT<span style="color:#666">(</span>本地存储长期记忆<span style="color:#666">)==========</span>
+</span></span><span style="display:flex;"><span><span style="color:#bb60d5">用户ID</span> <span style="color:#666">=</span> demo-user
+</span></span><span style="display:flex;"><span><span style="color:#bb60d5">模型</span> <span style="color:#666">=</span> qwen-plus
+</span></span><span style="display:flex;"><span><span style="color:#bb60d5">记忆目录</span> <span style="color:#666">=</span> .memory
+</span></span><span style="display:flex;"><span><span style="color:#bb60d5">已存储记忆数量</span> <span style="color:#666">=</span> <span style="color:#40a070">2</span>
+</span></span><span style="display:flex;"><span>Commands: /help: 查看帮助  /memories: 查看当前用户所有长期记忆  /clear: 清楚当前用户所有长期记忆 /exit: 退出
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#666">[</span>You<span style="color:#666">]</span>: </span></span></code></pre></div><p>从当前提示可以看到，本地已经储存有两条记忆信息，并且可以通过命令 <code>/memories</code> 查看：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-shell" data-lang="shell"><span style="display:flex;"><span><span style="color:#666">[</span>You<span style="color:#666">]</span>: /memories
+</span></span><span style="display:flex;"><span>已保存记忆:
+</span></span><span style="display:flex;"><span>1. <span style="color:#666">[</span>semantic / 语义记忆<span style="color:#666">]</span> 用户籍贯为四川，当前常居地为上海 | 用户的地理背景信息，可能影响后续对地域相关话题（如饮食、方言、政策等）的交流
+</span></span><span style="display:flex;"><span>2. <span style="color:#666">[</span>episodic / 情景记忆<span style="color:#666">]</span> 用户曾用5天完成聊天机器人搭建，流程包括：梳理逻辑→绘制结构图→编码实现→调试/注释/修bug→发布 | 体现用户的项目执行能力、结构化思维和工程实践习惯，属于具体的一次性项目经历
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#666">[</span>You<span style="color:#666">]</span>: </span></span></code></pre></div><p>进一步，可直接输入相关内容与其进行交互，如果识别到新的记忆内容，也会进行保存：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-shell" data-lang="shell"><span style="display:flex;"><span><span style="color:#666">[</span>You<span style="color:#666">]</span>: 我有一个朋友叫张三，他是北京人，我们是大学同学。对了，今天北京天气怎么样？
+</span></span><span style="display:flex;"><span>有 <span style="color:#40a070">1</span> 条记忆插入
+</span></span><span style="display:flex;"><span><span style="color:#666">[</span>Assistant<span style="color:#666">]</span>:
+</span></span><span style="display:flex;"><span> 已为你保存这条语义记忆：  
+</span></span><span style="display:flex;"><span>✅ 朋友张三，北京人，与你是大学同学。
+</span></span><span style="display:flex;"><span>这有助于我未来更自然地理解你们之间的关系背景（比如聊到母校、北京生活、学生时代等话题时）😊
+</span></span><span style="display:flex;"><span>至于**今天北京的天气**——虽然我无法实时联网查询......
+</span></span><span style="display:flex;"><span>欢迎告诉我你的偏好～ 🌤️
+</span></span><span style="display:flex;"><span>----------------------------------------------------------------------
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#666">[</span>You<span style="color:#666">]</span>: </span></span></code></pre></div><p>根据上述内容可以看出，用户的输入包含有记忆相关内容，智能体对其进行了保存，同时也输出了与北京天气相关的内容。此时，可以再次查看当前保存的记忆内容：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-shell" data-lang="shell"><span style="display:flex;"><span><span style="color:#666">[</span>You<span style="color:#666">]</span>: /memories
+</span></span><span style="display:flex;"><span>已保存记忆:
+</span></span><span style="display:flex;"><span>1. <span style="color:#666">[</span>semantic / 语义记忆<span style="color:#666">]</span> 用户籍贯为四川，当前常居地为上海 | 用户的地理背景信息，可能影响后续对地域相关话题（如饮食、方言、政策等）的交流
+</span></span><span style="display:flex;"><span>2. <span style="color:#666">[</span>episodic / 情景记忆<span style="color:#666">]</span> 用户曾用5天完成聊天机器人搭建，流程包括：梳理逻辑→绘制结构图→编码实现→调试/注释/修bug→发布 | 体现用户的项目执行能力、结构化思维和工程实践习惯，属于具体的一次性项目经历
+</span></span><span style="display:flex;"><span>3. <span style="color:#666">[</span>semantic / 语义记忆<span style="color:#666">]</span> 朋友张三，北京人，与用户是大学同学 | 属于用户长期人际关系信息，可能影响后续对话中对共同经历、地域背景或社交场景的理解</span></span></code></pre></div><p>到此，对于整个 Mini ChatGPT  的实现及使用方法就介绍完了，后续我们将再介绍如何基于 LangGraph 和 Postgres 数据库来实现整个过程。</p>
+<div class="book-page-pv text-small" id="busuanzi_container_page_pv">
+      <span class="book-page-pv-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" focusable="false">
+          <path d="M1.5 12s3.9-6.5 10.5-6.5S22.5 12 22.5 12s-3.9 6.5-10.5 6.5S1.5 12 1.5 12Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7"/>
+          <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.7"/>
+        </svg>
+      </span>
+      <span class="book-page-pv-label">阅读</span>
+      <span class="book-page-pv-value" id="busuanzi_value_page_pv">--</span>
+    </div><section class="book-article-index book-related-articles" aria-labelledby="related-articles-title">
+    <h2 id="related-articles-title">相关阅读</h2>
+    <div class="book-article-grid"><article class="book-article-card book-related-article-card">
+              <h3 class="book-article-card-title">
+                <a href="/agent/chapter04/langchain-tool-decorator/">4.3 LangChain 中的 Tool 修饰器</a>
+              </h3><p class="book-article-card-desc">本节围绕LangChain 中的 Tool 修饰器展开，重点介绍工具自动化生成、输出 Schema 及测试和编排自动化等内容。</p></article><article class="book-article-card book-related-article-card">
+              <h3 class="book-article-card-title">
+                <a href="/agent/chapter04/rag-agent-essentials/">4.4 RAG Agent 原理与搭建</a>
+              </h3><p class="book-article-card-desc">RAG Agent 教程，讲清检索增强、工具调用和语义检索工具封装，理解完整的 Agent 搭建流程。</p></article><article class="book-article-card book-related-article-card">
+              <h3 class="book-article-card-title">
+                <a href="/agent/chapter04/langgraph-custom-rag-agent/">4.10  基于 LangGraph 构建自定义 RAG Agent</a>
+              </h3><p class="book-article-card-desc">LangGraph 教程，讲解如何基于 LangGraph 构建自定义 RAG Agent，包括流程编排、节点设计和状态控制。</p></article></div>
+  </section></article>
+ 
+      
+
+
+      <footer class="book-footer">
+        
+  <div class="flex flex-wrap justify-between">
+
+<div>
+
+</div>
+
+<div>
+
+</div>
+
+</div>
+
+<div class="flex flex-wrap justify-between">
+    <span>
+    
+      <a href="/agent/chapter05/long-term-memory-strategies/" class="flex align-center">
+        <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/backward.svg" class="book-icon" alt="Backward" />
+        <span>5.5 长期记忆管理与持久化</span>
+      </a>
+    
+    </span>
+    <span>
+    
+      <a href="/agent/chapter05/pgvector-setup/" class="flex align-center">
+        <span>5.7 pgvector 配置安装</span>
+        <img src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/icons/forward.svg" class="book-icon" alt="Forward" />
+      </a>
+    
+    </span>
+  </div>
+
+ 
+        
+  
+  <div class="book-comments"><div class="giscus"></div>
+<script src="https://giscus.app/client.js"
+        data-repo="mlwithme/mlwithme.github.io"
+        data-repo-id="R_kgDOTBt94Q"
+        data-category="Announcements"
+        data-category-id="DIC_kwDOTBt94c4C_21V"
+        data-mapping="pathname"
+        data-strict="1"
+        data-reactions-enabled="1"
+        data-emit-metadata="0"
+        data-input-position="top"
+        data-theme="preferred_color_scheme"
+        data-lang="zh-CN"
+        data-loading="lazy"
+        crossorigin="anonymous"
+        async>
+</script>
+</div>
+  
+ 
+        
+  <link rel="stylesheet" href="https://mlwithme.oss-cn-shanghai.aliyuncs.com/katex/katex.min.css" />
+  <script defer src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/katex/katex.min.js"></script>
+  <script defer src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/katex/auto-render.min.js"></script>
+  
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        if (window.renderMathInElement) {
+          renderMathInElement(
+            document.querySelector(".book-page"),
+            Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
+          );
+        }
+      });
+    </script>
+  
+
+        
+  
+ 
+        
+  
+    <script>(function(){document.querySelectorAll("pre:has(code)").forEach(e=>{e.addEventListener("click",e.focus),e.addEventListener("copy",function(t){if(t.preventDefault(),navigator.clipboard){const t=window.getSelection().toString()||e.textContent;navigator.clipboard.writeText(t)}})})})()</script>
+  
+
+      </footer>
+
+      <label for="menu-control" class="hidden book-menu-overlay"></label>
+    </div>
+
+    
+  
+  <aside class="book-toc">
+    <div class="book-toc-content">
+      
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#561-mini-chatgpt-结构设计">5.6.1 Mini ChatGPT 结构设计</a></li>
+    <li><a href="#562-工程目录介绍">5.6.2 工程目录介绍</a></li>
+    <li><a href="#563-记忆存储结构实现">5.6.3 记忆存储结构实现</a></li>
+    <li><a href="#564-记忆持久化实现">5.6.4 记忆持久化实现</a></li>
+    <li><a href="#565-记忆插入工具实现">5.6.5 记忆插入工具实现</a></li>
+    <li><a href="#566-agent-智能体构建">5.6.6 Agent 智能体构建</a></li>
+    <li><a href="#567-命令行交互实现">5.6.7 命令行交互实现</a></li>
+  </ul>
+</nav>
+
+  
+  <section class="book-page-qr-panel" aria-label="页面二维码与公众号二维码">
+    <section class="book-page-qr-block" aria-label="页面二维码">
+      <p class="book-page-qr-title">微信扫码查看</p>
+      <a
+        class="book-page-qr-image-link"
+        href="https://mlwithme.github.io/agent/chapter05/mini-chatgpt-from-scratch/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="打开当前页面链接"
+      >
+        <img
+          class="book-page-qr-image"
+          src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=https%3A%2F%2Fmlwithme.github.io%2Fagent%2Fchapter05%2Fmini-chatgpt-from-scratch%2F"
+          alt="当前页面链接二维码"
+          loading="lazy"
+          decoding="async"
+          referrerpolicy="no-referrer"
+        >
+      </a>
+    </section>
+
+    <div class="book-page-qr-divider" aria-hidden="true"></div>
+
+    <section class="book-page-qr-block" aria-label="公众号二维码">
+      <p class="book-page-qr-title">关注公众号</p>
+      <div class="book-page-qr-image-link book-page-qr-image-frame">
+        <img
+          class="book-page-qr-image"
+          src="https://mlwithme.oss-cn-shanghai.aliyuncs.com/images/gzh.png"
+          alt="公众号二维码"
+          loading="lazy"
+          decoding="async"
+        >
+      </div>
+    </section>
+  </section>
+
+
+
+
+    </div>
+  </aside>
+  
+ 
+  </main>
+
+  <button
+  type="button"
+  class="book-back-to-top"
+  aria-label="回到顶部"
+  title="回到顶部"
+>
+  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <path
+      d="M12 5.5l-5.25 5.25 1.5 1.5 2.7-2.7V18.5h2.1V9.55l2.7 2.7 1.5-1.5L12 5.5z"
+      fill="currentColor"
+    ></path>
+  </svg>
+</button>
+
+<script>
+  (function () {
+    var button = document.querySelector(".book-back-to-top");
+    if (!button) {
+      return;
+    }
+
+    var toggleButton = function () {
+      if (window.scrollY > 360) {
+        button.classList.add("is-visible");
+      } else {
+        button.classList.remove("is-visible");
+      }
+    };
+
+    button.addEventListener("click", function () {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+
+    toggleButton();
+    window.addEventListener("scroll", toggleButton, { passive: true });
+  })();
+</script>
+
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
