@@ -3945,7 +3945,7 @@ https://github.com/alex-shpak/hugo-book
       </div><h1 id="108-bert文本分类模型">10.8 BERT文本分类模型<a class="anchor" href="#108-bert%e6%96%87%e6%9c%ac%e5%88%86%e7%b1%bb%e6%a8%a1%e5%9e%8b">#</a></h1>
 <p>经过前面两节内容的介绍，我们对于BERT模型的原理及其实现过程已经有了比较清晰的理解。同时，由于BERT是一个强大的预训练模型，因此我们可以直接基于谷歌发布的预训练参数将模型迁移到各个下游任务中进行微调学习。在这节内容中，我们将开始介绍第1个基于BERT预训练模型的下游任务文本分类。</p>
 <h2 id="1081-任务构造原理">10.8.1 任务构造原理<a class="anchor" href="#1081-%e4%bb%bb%e5%8a%a1%e6%9e%84%e9%80%a0%e5%8e%9f%e7%90%86">#</a></h2>
-<p>整体来看基于BERT的文本分类模型就是在原始BERT模型的基础之上添加了一个新的分类层。 同时，对于分类层的输入，即原始BERT模型的输出，默认情况下可以取BERT输出结果中[CLS]位置对应的向量，当然也可以修改为其它方式，例如取所有位置向量的均值等，详见<a href="/dl/chapter10/82a1cd0def084620">「第10.7.3节 从零实现BERT：预训练模型代码与训练流程」</a>内容。</p>
+<p>整体来看基于BERT的文本分类模型就是在原始BERT模型的基础之上添加了一个新的分类层。 同时，对于分类层的输入，即原始BERT模型的输出，默认情况下可以取BERT输出结果中[CLS]位置对应的向量，当然也可以修改为其它方式，例如取所有位置向量的均值等，详见<a href="/dl/chapter10/bert-from-scratch">「第10.7.3节 从零实现BERT：预训练模型代码与训练流程」</a>内容。</p>
 <p>因此，对于基于BERT的文本分类模型来说其输入为一个单句，输出则是每个类别对应的概率值。接下来，我们首先来介绍如何构造文本分类任务中所使用到的数据集。以下完整示例代码可参见<code>Code/Chapter10/C04_BERT</code>文件。</p>
 <h2 id="1082-数据预处理">10.8.2 数据预处理<a class="anchor" href="#1082-%e6%95%b0%e6%8d%ae%e9%a2%84%e5%a4%84%e7%90%86">#</a></h2>
 <p>在构建数据集之前，我们首先需要知道模型应该接收什么样的输入，然后才能构建得到正确的样本形式。由于在文本分类这个任务场景中输入模型的只有一个序列，所以在构建数据集时并不需要构造句子编码这一层，直接默认使用全为0即可。同时，对于位置编码来说在任何场景下都不需要显示地指定输入，因为我们在代码实现时已经做了相应的默认处理逻辑。因此，对于文本分类来说只需要构造原始文本对应的索引序列， 并在首尾分别再加上一个[CLS]符和[SEP]符作为输入即可。</p>
@@ -4031,7 +4031,7 @@ https://github.com/alex-shpak/hugo-book
 </span></span><span style="display:flex;"><span><span style="color:#40a070">5</span>             batch_label<span style="color:#666">.</span>append(label)
 </span></span><span style="display:flex;"><span><span style="color:#40a070">6</span>         batch_sens <span style="color:#666">=</span> pad_sequence(batch_sens, <span style="color:#007020;font-weight:bold">False</span>, <span style="color:#007020">self</span><span style="color:#666">.</span>max_sen_len, <span style="color:#007020">self</span><span style="color:#666">.</span>PAD_IDX)
 </span></span><span style="display:flex;"><span><span style="color:#40a070">7</span>         batch_label <span style="color:#666">=</span> torch<span style="color:#666">.</span>tensor(batch_label, dtype<span style="color:#666">=</span>torch<span style="color:#666">.</span>long)
-</span></span><span style="display:flex;"><span><span style="color:#40a070">8</span>         <span style="color:#007020;font-weight:bold">return</span> batch_sens, batch_label</span></span></code></pre></div><p>在上述代码中，第3~5行是取小批量中的每个样本和标签。第6行是对小批量中的样本进行填充或截断处理，关于<code>pad_sequence</code>可参见<a href="/dl/chapter07/ec8ff069aadc49b9">「第7.2.4节 时序数据建模：RNN 适合处理什么样的序列任务」</a>内容。</p>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">8</span>         <span style="color:#007020;font-weight:bold">return</span> batch_sens, batch_label</span></span></code></pre></div><p>在上述代码中，第3~5行是取小批量中的每个样本和标签。第6行是对小批量中的样本进行填充或截断处理，关于<code>pad_sequence</code>可参见<a href="/dl/chapter07/time-series-modeling">「第7.2.4节 时序数据建模：RNN 适合处理什么样的序列任务」</a>内容。</p>
 <p>最后，构建数据集迭代器，示例代码如下所示：</p>
 <div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">load_train_val_test_data</span>(<span style="color:#007020">self</span>, train_file_path<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>,val_file_path<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>,
 </span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>                                  test_file_path<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>,only_test<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">False</span>):
@@ -4067,9 +4067,9 @@ https://github.com/alex-shpak/hugo-book
 </span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>         <span style="color:#007020">print</span>(padding_mask)</span></span></code></pre></div><p>在上述代码中，第2行是实例化一个配置类对象。第3~8行是根据传入参数实例化一个数据集构建类对象。第9~11行则是根据原始数据路径分别返回训练集、验证集和测试集对应的迭代器。第13行构造每个小批量样本对应的掩码向量。</p>
 <p>到此，对于整个数据集构建部分的内容就介绍完了，接下来我们再来看如何加载预训练模型进行微调。</p>
 <h2 id="1083-加载预训练模型">10.8.3 加载预训练模型<a class="anchor" href="#1083-%e5%8a%a0%e8%bd%bd%e9%a2%84%e8%ae%ad%e7%bb%83%e6%a8%a1%e5%9e%8b">#</a></h2>
-<p>尽管在<a href="/dl/chapter05/27387966672c45ed">「第5.3节 PyTorch模型保存与加载：模型复用与权重管理」</a>内容中我们已经详细介绍了如何查看和分析本地的模型参数文件，但是由于BERT模型的参数结构更为复杂，所以我们这里将以bert-base-chinese模型参数为例进行一个简单的介绍。</p>
+<p>尽管在<a href="/dl/chapter05/pytorch-model-save-load">「第5.3节 PyTorch模型保存与加载：模型复用与权重管理」</a>内容中我们已经详细介绍了如何查看和分析本地的模型参数文件，但是由于BERT模型的参数结构更为复杂，所以我们这里将以bert-base-chinese模型参数为例进行一个简单的介绍。</p>
 <p><strong>1. 分析预训练模型参数</strong></p>
-<p>根据<a href="/dl/chapter05/27387966672c45ed">第5.3节</a>内容的介绍可知，我们可以通过如下方式来查看本地模型中的参数情况：</p>
+<p>根据<a href="/dl/chapter05/pytorch-model-save-load">第5.3节</a>内容的介绍可知，我们可以通过如下方式来查看本地模型中的参数情况：</p>
 <div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> loaded_paras <span style="color:#666">=</span> torch<span style="color:#666">.</span>load(<span style="color:#4070a0">&#39;./pytorch_model.bin&#39;</span>) 
 </span></span><span style="display:flex;"><span><span style="color:#40a070">2</span> <span style="color:#007020">print</span>(<span style="color:#007020">type</span>(loaded_paras))
 </span></span><span style="display:flex;"><span><span style="color:#40a070">3</span> <span style="color:#007020">print</span>(<span style="color:#007020">len</span>(<span style="color:#007020">list</span>(loaded_paras<span style="color:#666">.</span>keys())))
@@ -4191,7 +4191,7 @@ https://github.com/alex-shpak/hugo-book
         <p class="book-promo-banner__identity" id="book-promo-identity">您当前阅读的内容现已出版，点击右侧了解</p>
         <p class="book-promo-banner__selling-point">10章教学课件，400余幅示意插图、40个示例源代码，助力读者轻松迈入深度学习的大门！</p>
       </div>
-      <a class="book-promo-banner__cta" href="/goods/1fdfc29bab9c4a62" target="_blank" rel="noopener noreferrer">
+      <a class="book-promo-banner__cta" href="/goods/deep-learning-with-me" target="_blank" rel="noopener noreferrer">
         查看详情
       </a>
     </section><div class="book-page-pv text-small" id="busuanzi_container_page_pv">
