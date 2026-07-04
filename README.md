@@ -4,9 +4,7 @@
 
 浏览器输入如下地址可在线阅读：
 
-阅读地址1（推荐）：https://machinelearningwithme.com/ （Machine Learning with Me）
-
-阅读地址2：https://mlwithme.pages.dev/
+阅读地址：https://machinelearningwithme.com/ （Machine Learning with Me）
 
 仓库备份地址：https://mlwithme.github.io/
 
