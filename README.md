@@ -6,7 +6,7 @@
 
 阅读地址：https://machinelearningwithme.com/ （Machine Learning With Me）
 
-仓库备份地址：https://mlwithme.github.io/
+仓库备份地址：https://mlwithme.github.io/ (周频)
 
 这里不是一个简单的 AI 博客，也不是一个 AI 工具导航站，而是一个围绕 **AI 知识学习** 构建的学习中心（Learning Hub）。
 
