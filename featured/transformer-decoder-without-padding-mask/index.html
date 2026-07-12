@@ -6,7 +6,7 @@ Made with Book Theme
 https://github.com/alex-shpak/hugo-book
 --><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="description" content="本文详细介绍了为什么 Transformer 中 Decoder 对应的 self-attention 并不需要进行 Padding Mask的原理。">
+<meta name="description" content="本文从读者实际提问出发，逐行推导 Transformer Decoder 中 self-attention 的 Q/K/V 计算流程与 Attention Mask 矩阵结构，详细分析 key padding mask 是否真的可以省略，并通过 PyTorch …">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
 <meta name="color-scheme" content="light dark">
@@ -18,8 +18,8 @@ https://github.com/alex-shpak/hugo-book
 
 <meta property="og:url" content="https://mlwithme.github.io/featured/transformer-decoder-without-padding-mask/">
 <meta property="og:site_name" content="《从零学AI指南手册》">
-<meta property="og:title" content="Transformer中Decoder真不需要key padding mask？multi-head attention掩码原理详解">
-<meta property="og:description" content="本文详细介绍了为什么 Transformer 中 Decoder 对应的 self-attention 并不需要进行 Padding Mask的原理。">
+<meta property="og:title" content="Transformer Decoder 真不需要 Key Padding Mask？逐行图解 multi-head attention 掩码原理">
+<meta property="og:description" content="本文从读者实际提问出发，逐行推导 Transformer Decoder 中 self-attention 的 Q/K/V 计算流程与 Attention Mask 矩阵结构，详细分析 key padding mask 是否真的可以省略，并通过 PyTorch …">
 <meta property="og:locale" content="zh_CN">
 <meta property="og:type" content="article">
 <meta property="og:image" content="https://mlwithme.github.io/share-cover.png">
@@ -28,14 +28,14 @@ https://github.com/alex-shpak/hugo-book
 <meta property="og:image:width" content="759">
 <meta property="og:image:height" content="759">
 <meta property="og:image:type" content="image/png">
-<meta property="og:image:alt" content="《从零学AI指南手册》 - Transformer中Decoder真不需要key padding mask？multi-head attention掩码原理详解">
+<meta property="og:image:alt" content="《从零学AI指南手册》 - Transformer Decoder 真不需要 Key Padding Mask？逐行图解 multi-head attention 掩码原理">
 
   <meta property="article:section" content="featured">
   
     <meta property="article:published_time" content="2026-07-04T18:16:22&#43;08:00">
   
   
-    <meta property="article:modified_time" content="2026-07-07T21:46:14&#43;08:00">
+    <meta property="article:modified_time" content="2026-07-12T13:55:31&#43;08:00">
   
   
 
@@ -46,31 +46,31 @@ https://github.com/alex-shpak/hugo-book
   <script type="application/ld+json">
     {"@context":"https://schema.org","@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.github.io/share-cover.png"},"name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
   </script><script type="application/ld+json">
-      {"@context":"https://schema.org","@type":"Article","articleSection":"featured","author":{"@type":"Person","name":"WangCheng","url":"https://mlwithme.github.io/author/"},"dateModified":"2026-07-07T21:46:14+08:00","datePublished":"2026-07-04T18:16:22+08:00","description":"本文详细介绍了为什么 Transformer 中 Decoder 对应的 self-attention 并不需要进行 Padding Mask的原理。","headline":"Transformer中Decoder真不需要key padding mask？multi-head attention掩码原理详解","image":["https://mlwithme.github.io/share-cover.png"],"inLanguage":"zh_CN","mainEntityOfPage":"https://mlwithme.github.io/featured/transformer-decoder-without-padding-mask/","publisher":{"@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.github.io/share-cover.png"},"name":"《从零学AI指南手册》"},"url":"https://mlwithme.github.io/featured/transformer-decoder-without-padding-mask/"}
+      {"@context":"https://schema.org","@type":"Article","articleSection":"featured","author":{"@type":"Person","name":"WangCheng","url":"https://mlwithme.github.ioauthor/"},"dateModified":"2026-07-12T13:55:31+08:00","datePublished":"2026-07-04T18:16:22+08:00","description":"本文从读者实际提问出发，逐行推导 Transformer Decoder 中 self-attention 的 Q/K/V 计算流程与 Attention Mask 矩阵结构，详细分析 key padding mask 是否真的可以省略，并通过 PyTorch …","headline":"Transformer Decoder 真不需要 Key Padding Mask？逐行图解 multi-head attention 掩码原理","image":["https://mlwithme.github.io/share-cover.png"],"inLanguage":"zh_CN","mainEntityOfPage":"https://mlwithme.github.io/featured/transformer-decoder-without-padding-mask/","publisher":{"@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.github.io/share-cover.png"},"name":"《从零学AI指南手册》"},"url":"https://mlwithme.github.io/featured/transformer-decoder-without-padding-mask/"}
     </script><script type="application/ld+json">
-        {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","item":"https://mlwithme.github.io/","name":"首页","position":1},{"@type":"ListItem","item":"https://mlwithme.github.io/featured/","name":"精选文章","position":2},{"@type":"ListItem","item":"https://mlwithme.github.io/featured/transformer-decoder-without-padding-mask/","name":"Transformer中Decoder真不需要key padding mask？multi-head attention掩码原理详解","position":3}]}
+        {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","item":"https://mlwithme.github.io/","name":"首页","position":1},{"@type":"ListItem","item":"https://mlwithme.github.io/featured/","name":"精选文章","position":2},{"@type":"ListItem","item":"https://mlwithme.github.io/featured/transformer-decoder-without-padding-mask/","name":"Transformer Decoder 真不需要 Key Padding Mask？逐行图解 multi-head attention 掩码原理","position":3}]}
       </script>
 
-<title>Transformer中Decoder真不需要key padding mask？multi-head attention掩码原理详解 • 《从零学AI指南手册》</title>
+<title>Transformer Decoder 真不需要 Key Padding Mask？逐行图解 multi-head attention 掩码原理 • 《从零学AI指南手册》</title>
 <link rel="icon" href="https://mlwithme.github.io/favicon.png" type="image/png">
 <link rel="shortcut icon" href="https://mlwithme.github.io/favicon.png" type="image/png">
 <link rel="apple-touch-icon" href="https://mlwithme.github.io/favicon.png">
 
 <link rel="manifest" href="/manifest.json">
 <link rel="canonical" href="https://mlwithme.github.io/featured/transformer-decoder-without-padding-mask/">
-<link rel="stylesheet" href="/book.min.2fd817d1622490f072effe4b46bd4c6435a31d063020815ffa28399938aa1e64.css" integrity="sha256-L9gX0WIkkPBy7/5LRr1MZDWjHQYwIIFf&#43;ig5mTiqHmQ=" crossorigin="anonymous">
-  <script defer type="module" src="/zh-cn.search.min.3cbf32778763a063b9631ffd1bd39d172a121967d4e39a19c6f24fa30fb18ce1.js" integrity="sha256-PL8yd4djoGO5Yx/9G9OdFyoSGWfU45oZxvJPow&#43;xjOE=" crossorigin="anonymous"></script>
+<link rel="stylesheet" href="/book.min.f6a0d10e1ebfedb446c42559024d340c2bf535391c02340b45233f7f70d21212.css" integrity="sha256-9qDRDh6/7bRGxCVZAk00DCv1NTkcAjQLRSM/f3DSEhI=" crossorigin="anonymous">
+  <script defer type="module" src="/zh-cn.search.min.dfd1fe31bc2a2e217cb690a6a708cf8dd323737c55fe0f592d70a19806537dc4.js" integrity="sha256-39H&#43;MbwqLiF8tpCmpwjPjdMjc3xV/g9ZLXChmAZTfcQ=" crossorigin="anonymous"></script>
 
   
 
 
 
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Transformer中Decoder真不需要key padding mask？multi-head attention掩码原理详解">
-<meta name="twitter:description" content="本文详细介绍了为什么 Transformer 中 Decoder 对应的 self-attention 并不需要进行 Padding Mask的原理。">
+<meta name="twitter:title" content="Transformer Decoder 真不需要 Key Padding Mask？逐行图解 multi-head attention 掩码原理">
+<meta name="twitter:description" content="本文从读者实际提问出发，逐行推导 Transformer Decoder 中 self-attention 的 Q/K/V 计算流程与 Attention Mask 矩阵结构，详细分析 key padding mask 是否真的可以省略，并通过 PyTorch …">
 <meta name="twitter:url" content="https://mlwithme.github.io/featured/transformer-decoder-without-padding-mask/">
 <meta name="twitter:image" content="https://mlwithme.github.io/share-cover.png">
-<meta name="twitter:image:alt" content="《从零学AI指南手册》 - Transformer中Decoder真不需要key padding mask？multi-head attention掩码原理详解">
+<meta name="twitter:image:alt" content="《从零学AI指南手册》 - Transformer Decoder 真不需要 Key Padding Mask？逐行图解 multi-head attention 掩码原理">
 <script>
   var _hmt = _hmt || [];
   (function() {
@@ -173,7 +173,27 @@ https://github.com/alex-shpak/hugo-book
 
   
     <a href="/tutorials/transformer/" class="">
-      <span class="book-menu-link-title">Transformer 入门指南</span>
+      <span class="book-menu-link-title">图解 Transformer 入门指南教程</span>
+</a>
+  
+
+          
+  <ul>
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/tutorials/bert/" class="">
+      <span class="book-menu-link-title">从零玩转 Bert 详解6大下游任务</span>
 </a>
   
 
@@ -3914,7 +3934,7 @@ https://github.com/alex-shpak/hugo-book
     <img src="/icons/menu.svg" class="book-icon" alt="Menu" />
   </label>
 
-  <h3>Transformer中Decoder真不需要key padding mask？multi-head attention掩码原理详解</h3>
+  <h3>Transformer Decoder 真不需要 Key Padding Mask？逐行图解 multi-head attention 掩码原理</h3>
 
   <label for="toc-control">
     
@@ -3951,7 +3971,7 @@ https://github.com/alex-shpak/hugo-book
     <ol class="book-breadcrumbs__list"><li class="book-breadcrumbs__item"><a class="book-breadcrumbs__link" href="https://mlwithme.github.io/">首页</a></li><li class="book-breadcrumbs__item"><a class="book-breadcrumbs__link" href="https://mlwithme.github.io/featured/">精选文章</a></li><li class="book-breadcrumbs__item"><span class="book-breadcrumbs__current" aria-current="page">确定！Transformer 中 Decoder 真不需要 Padding Mask！</span></li></ol>
   </nav><div class="book-article-lastmod text-small">
         <span class="book-article-lastmod-label">更新于</span>
-        <span class="book-article-lastmod-value">2026年7月7日</span>
+        <span class="book-article-lastmod-value">2026年7月12日</span>
       </div><p>说起《This post is all you need——层层拨开Transformer》这份文档我想大家一定不会陌生，不止是你们常读常新，我自己读也是常读常新，好多读者甚至还把它说成是本人的成名作（不过好像也没啥名），毕竟当时花了半年多时间来写这篇文章。</p>
 <p>但是成不成名那是后话，把这件事做好才是最重要的！</p>
 <p><strong>关键字：Transformer、注意力掩码、Attention Mask、Key Padding Mask</strong></p>
@@ -4159,7 +4179,7 @@ $$<p>
       });
     </script>
   
-<link rel="stylesheet" href="/sections/featured-pagination.min.4a86ddcca792a0e5f2cf5be523f61e29bac98d76c4136686b7c1ab9eda0c1ef5.css" integrity="sha256-SobdzKeSoOXyz1vlI/YeKbrJjXbEE2aGt8GrntoMHvU=" crossorigin="anonymous">
+
         
   
  
@@ -4243,7 +4263,7 @@ $$<p>
     aria-label="工具箱"
     hidden
   >
-    <li class="book-floating-toolbox__item" role="none" style="--book-toolbox-index: 0; --book-toolbox-count: 2;">
+    <li class="book-floating-toolbox__item" role="none" style="--book-toolbox-index: 0; --book-toolbox-count: 3;">
       <a
         class="book-floating-toolbox__action"
         role="menuitem"
@@ -4273,7 +4293,31 @@ $$<p>
       </a>
       <span class="book-floating-toolbox__tip" aria-hidden="true">术语百科</span>
     </li>
-    <li class="book-floating-toolbox__item" role="none" style="--book-toolbox-index: 1; --book-toolbox-count: 2;">
+    <li class="book-floating-toolbox__item" role="none" style="--book-toolbox-index: 1; --book-toolbox-count: 3;">
+      <a
+        class="book-floating-toolbox__action"
+        role="menuitem"
+        href="/code-templates/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="代码模板"
+      >
+        <span class="book-floating-toolbox__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path
+              d="M8.5 7.5 4 12l4.5 4.5M15.5 7.5 20 12l-4.5 4.5M13.5 5l-3 14"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            ></path>
+          </svg>
+        </span>
+      </a>
+      <span class="book-floating-toolbox__tip" aria-hidden="true">代码模板</span>
+    </li>
+    <li class="book-floating-toolbox__item" role="none" style="--book-toolbox-index: 2; --book-toolbox-count: 3;">
       <a
         class="book-floating-toolbox__action"
         role="menuitem"

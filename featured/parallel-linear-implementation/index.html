@@ -1,0 +1,4839 @@
+<!DOCTYPE html>
+<html lang="zh_CN" dir="ltr">
+<head>
+  <!--
+Made with Book Theme
+https://github.com/alex-shpak/hugo-book
+--><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="本文从工程实战角度讲清 LLaMA 等大语言模型中的张量并行原理，并用 PyTorch &#43; FairScale 库从零实现 ColumnParallelLinear 与 RowParallelLinear。配套在 CPU 上即可运行的完整示例代码，帮助读者理解切分策略 …">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="index,follow,max-image-preview:large">
+
+
+
+
+
+<meta property="og:url" content="https://mlwithme.github.io/featured/parallel-linear-implementation/">
+<meta property="og:site_name" content="《从零学AI指南手册》">
+<meta property="og:title" content="LLaMA 张量并行 PyTorch 实现：基于 FairScale 的 ColumnParallel/RowParallel 教程">
+<meta property="og:description" content="本文从工程实战角度讲清 LLaMA 等大语言模型中的张量并行原理，并用 PyTorch &#43; FairScale 库从零实现 ColumnParallelLinear 与 RowParallelLinear。配套在 CPU 上即可运行的完整示例代码，帮助读者理解切分策略 …">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:type" content="article">
+<meta property="og:image" content="https://mlwithme.github.io/share-cover.png">
+<meta property="og:image:url" content="https://mlwithme.github.io/share-cover.png">
+<meta property="og:image:secure_url" content="https://mlwithme.github.io/share-cover.png">
+<meta property="og:image:width" content="759">
+<meta property="og:image:height" content="759">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:alt" content="《从零学AI指南手册》 - LLaMA 张量并行 PyTorch 实现：基于 FairScale 的 ColumnParallel/RowParallel 教程">
+
+  <meta property="article:section" content="featured">
+  
+    <meta property="article:published_time" content="2026-07-12T10:54:12&#43;08:00">
+  
+  
+    <meta property="article:modified_time" content="2026-07-12T13:55:31&#43;08:00">
+  
+  
+
+
+<script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"WebSite","description":"面向机器学习、深度学习与 AI Agent 的中文系统化学习手册，包含原理讲解、代码示例与实战案例。","inLanguage":"zh_CN","name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
+  </script>
+  <script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.github.io/share-cover.png"},"name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
+  </script><script type="application/ld+json">
+      {"@context":"https://schema.org","@type":"Article","articleSection":"featured","author":{"@type":"Person","name":"WangCheng","url":"https://mlwithme.github.ioauthor/"},"dateModified":"2026-07-12T13:55:31+08:00","datePublished":"2026-07-12T10:54:12+08:00","description":"本文从工程实战角度讲清 LLaMA 等大语言模型中的张量并行原理，并用 PyTorch + FairScale 库从零实现 ColumnParallelLinear 与 RowParallelLinear。配套在 CPU 上即可运行的完整示例代码，帮助读者理解切分策略 …","headline":"LLaMA 张量并行 PyTorch 实现：基于 FairScale 的 ColumnParallel/RowParallel 教程","image":["https://mlwithme.github.io/share-cover.png"],"inLanguage":"zh_CN","mainEntityOfPage":"https://mlwithme.github.io/featured/parallel-linear-implementation/","publisher":{"@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.github.io/share-cover.png"},"name":"《从零学AI指南手册》"},"url":"https://mlwithme.github.io/featured/parallel-linear-implementation/"}
+    </script><script type="application/ld+json">
+        {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","item":"https://mlwithme.github.io/","name":"首页","position":1},{"@type":"ListItem","item":"https://mlwithme.github.io/featured/","name":"精选文章","position":2},{"@type":"ListItem","item":"https://mlwithme.github.io/featured/parallel-linear-implementation/","name":"LLaMA 张量并行 PyTorch 实现：基于 FairScale 的 ColumnParallel/RowParallel 教程","position":3}]}
+      </script>
+
+<title>LLaMA 张量并行 PyTorch 实现：基于 FairScale 的 ColumnParallel/RowParallel 教程 • 《从零学AI指南手册》</title>
+<link rel="icon" href="https://mlwithme.github.io/favicon.png" type="image/png">
+<link rel="shortcut icon" href="https://mlwithme.github.io/favicon.png" type="image/png">
+<link rel="apple-touch-icon" href="https://mlwithme.github.io/favicon.png">
+
+<link rel="manifest" href="/manifest.json">
+<link rel="canonical" href="https://mlwithme.github.io/featured/parallel-linear-implementation/">
+<link rel="stylesheet" href="/book.min.f6a0d10e1ebfedb446c42559024d340c2bf535391c02340b45233f7f70d21212.css" integrity="sha256-9qDRDh6/7bRGxCVZAk00DCv1NTkcAjQLRSM/f3DSEhI=" crossorigin="anonymous">
+  <script defer type="module" src="/zh-cn.search.min.dfd1fe31bc2a2e217cb690a6a708cf8dd323737c55fe0f592d70a19806537dc4.js" integrity="sha256-39H&#43;MbwqLiF8tpCmpwjPjdMjc3xV/g9ZLXChmAZTfcQ=" crossorigin="anonymous"></script>
+
+  
+
+
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="LLaMA 张量并行 PyTorch 实现：基于 FairScale 的 ColumnParallel/RowParallel 教程">
+<meta name="twitter:description" content="本文从工程实战角度讲清 LLaMA 等大语言模型中的张量并行原理，并用 PyTorch &#43; FairScale 库从零实现 ColumnParallelLinear 与 RowParallelLinear。配套在 CPU 上即可运行的完整示例代码，帮助读者理解切分策略 …">
+<meta name="twitter:url" content="https://mlwithme.github.io/featured/parallel-linear-implementation/">
+<meta name="twitter:image" content="https://mlwithme.github.io/share-cover.png">
+<meta name="twitter:image:alt" content="《从零学AI指南手册》 - LLaMA 张量并行 PyTorch 实现：基于 FairScale 的 ColumnParallel/RowParallel 教程">
+<script>
+  var _hmt = _hmt || [];
+  (function() {
+    var hm = document.createElement("script");
+    hm.src = "https://hm.baidu.com/hm.js?74a336dd47fbbab3ceb99d4ad8afcb76";
+    var s = document.getElementsByTagName("script")[0];
+    s.parentNode.insertBefore(hm, s);
+  })();
+</script>
+<script async src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
+
+</head>
+<body dir="ltr" class="book-kind-page book-type-featured">
+  <input type="checkbox" class="hidden toggle" id="menu-control" />
+  <input type="checkbox" class="hidden toggle" id="toc-control" />
+  <main class="container flex">
+    
+<aside class="book-menu">
+  <div class="book-menu-content">
+    
+  <nav>
+<h2 class="book-brand">
+  <a class="flex align-center" href="/"><svg xmlns="http://www.w3.org/2000/svg" height="20" width="20" viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true" class="book-brand-icon" style="margin-right:.35em;flex:none">
+      <path d="M240-200h120v-240h240v240h120v-360L480-740 240-560v360Zm-80 80q-33 0-56.5-23.5T80-200v-360q0-27 11-49t31-39l280-220q21-17 47-25t51-8q25 0 51 8t47 25l280 220q20 17 31 39t11 49v360q0 33-23.5 56.5T840-120H600q-17 0-28.5-11.5T560-160v-200H400v200q0 17-11.5 28.5T360-120H160Zm320-280Z"/>
+    </svg>
+
+    <span>返回主页</span>
+
+  </a>
+</h2>
+
+
+<div class="book-search hidden">
+  <input id="book-search-input" type="text" 
+    placeholder="Search"
+    aria-label="Search"
+    maxlength="64" />
+  <div class="book-search-spinner hidden"></div>
+  <ul id="book-search-results"></ul>
+</div>
+<script>document.querySelector(".book-search").classList.remove("hidden")</script>
+
+
+
+
+
+
+
+
+
+
+
+  
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/featured/" class="">
+      <span class="book-menu-link-title">精选文章</span>
+</a>
+  
+
+          
+  <ul>
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bb7497cb5e222579131ad9ad959011cb" class="toggle"  />
+    <label for="section-bb7497cb5e222579131ad9ad959011cb" class="flex">
+      <a href="/tutorials/" class="">
+        <span class="book-menu-link-title">专栏文章</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/tutorials/transformer/" class="">
+      <span class="book-menu-link-title">图解 Transformer 入门指南教程</span>
+</a>
+  
+
+          
+  <ul>
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/tutorials/bert/" class="">
+      <span class="book-menu-link-title">从零玩转 Bert 详解6大下游任务</span>
+</a>
+  
+
+          
+  <ul>
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/" class="">
+      <span class="book-menu-link-title">大模型Agent开发（更新中……）</span>
+</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-279cf10e5100caa4f65ba3f7dd8888a4" class="toggle"  />
+    <label for="section-279cf10e5100caa4f65ba3f7dd8888a4" class="flex">
+      <a href="/agent/chapter01/" class="">
+        <span class="book-menu-link-title">第 1 章 RAG 基础概念</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/what-is-rag/" class="">
+      <span class="book-menu-link-title">1.1 RAG 提出背景</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/rag-pipeline-overview/" class="">
+      <span class="book-menu-link-title">1.2 RAG 流程概览</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-83c662c2764f1c19f8005eab77fee110" class="toggle"  />
+    <label for="section-83c662c2764f1c19f8005eab77fee110" class="flex">
+      <a href="/agent/chapter02/" class="">
+        <span class="book-menu-link-title">第 2 章 大模型接入与使用</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/intro-to-llm-sdk/" class="">
+      <span class="book-menu-link-title">2.1 SDK 介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/modern-llm-sdk/" class="">
+      <span class="book-menu-link-title">2.2 现代大模型中的 SDK</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/dashscope-api-overview/" class="">
+      <span class="book-menu-link-title">2.3 DashScope 接口体系</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/qwen-onboarding/" class="">
+      <span class="book-menu-link-title">2.4 千问大模型接入与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-1e583d7a26333453241d87c5c16592bd" class="toggle"  />
+    <label for="section-1e583d7a26333453241d87c5c16592bd" class="flex">
+      <a href="/agent/chapter03/" class="">
+        <span class="book-menu-link-title">第 3 章 文档标准化与语义检索</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/document-loading-and-preprocessing/" class="">
+      <span class="book-menu-link-title">3.1 文档加载与标准化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/text-splitting-strategies/" class="">
+      <span class="book-menu-link-title">3.2 常见文本切分策略</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/vector-database-selection/" class="">
+      <span class="book-menu-link-title">3.3 向量数据库选择</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/qwen-embedding-model/" class="">
+      <span class="book-menu-link-title">3.4 Qwen3 Embedding 模型介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/semantic-retrieval-pipeline/" class="">
+      <span class="book-menu-link-title">3.5 语义搜索引擎构建</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/milvus-tutorial/" class="">
+      <span class="book-menu-link-title">3.6  Milvus 模块解析</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="toggle"  />
+    <label for="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="flex">
+      <a href="/agent/chapter04/" class="">
+        <span class="book-menu-link-title">第 4 章 RAG 与 Agent</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/two-step-rag/" class="">
+      <span class="book-menu-link-title">4.1 两步式 RAG 搭建</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/function-calling-basics/" class="">
+      <span class="book-menu-link-title">4.2 Function Calling 概念介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/langchain-tool-decorator/" class="">
+      <span class="book-menu-link-title">4.3 LangChain 中的 Tool 修饰器</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/rag-agent-essentials/" class="">
+      <span class="book-menu-link-title">4.4 RAG Agent 原理与搭建</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/react-framework/" class="">
+      <span class="book-menu-link-title">4.5 复杂问题拆解与ReAct框架</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/two-stage-indexing/" class="">
+      <span class="book-menu-link-title">4.6 RAG 中的两阶段索引</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/qwen3-reranking/" class="">
+      <span class="book-menu-link-title">4.7 Qwen3 Reranking 原理与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/two-stage-rag-agent/" class="">
+      <span class="book-menu-link-title">4.8 基于两阶段索引的 RAG Agent</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/langgraph-basics/" class="">
+      <span class="book-menu-link-title">4.9 LangGraph 基本概念介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/langgraph-custom-rag-agent/" class="">
+      <span class="book-menu-link-title">4.10  基于 LangGraph 构建自定义 RAG Agent</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bf5130286ff0eee8f362b632167a5e6b" class="toggle"  />
+    <label for="section-bf5130286ff0eee8f362b632167a5e6b" class="flex">
+      <a href="/agent/chapter05/" class="">
+        <span class="book-menu-link-title">第 5 章 Agent 记忆机制与管理</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/agent-memory-overview/" class="">
+      <span class="book-menu-link-title">5.1 Agent 记忆机制概览</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/langchain-short-term-memory/" class="">
+      <span class="book-menu-link-title">5.2 短期记忆持久化与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/short-term-memory-management/" class="">
+      <span class="book-menu-link-title">5.3 短期记忆管理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/short-term-memory-rag-agent/" class="">
+      <span class="book-menu-link-title">5.4 拥有短期记忆的 RAG Agent</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/long-term-memory-strategies/" class="">
+      <span class="book-menu-link-title">5.5 长期记忆管理与持久化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/mini-chatgpt-from-scratch/" class="">
+      <span class="book-menu-link-title">5.6 从零实现 Mini ChatGPT 助手</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/pgvector-setup/" class="">
+      <span class="book-menu-link-title">5.7 pgvector 配置安装</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/long-term-memory-retrieval-and-forgetting/" class="">
+      <span class="book-menu-link-title">5.8 长期记忆检索与遗忘</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/langgraph-mini-chatgpt/" class="">
+      <span class="book-menu-link-title">5.9 基于 LangGraph 的Mini ChatGPT 助手</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/create-agent-mini-chatgpt/" class="">
+      <span class="book-menu-link-title">5.10 使用 create_agent 搭建 Mini ChatGPT</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/" class="">
+      <span class="book-menu-link-title">深度学习</span>
+</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/mindmap/" class="">
+      <span class="book-menu-link-title">目录思维导图</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-cf7621e8efb1f3153eaca44a113dcdb9" class="toggle"  />
+    <label for="section-cf7621e8efb1f3153eaca44a113dcdb9" class="flex">
+      <a href="/dl/chapter01/" class="">
+        <span class="book-menu-link-title">第 1 章 深度学习简介</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/dl-development-stages/" class="">
+      <span class="book-menu-link-title">1.1 深度学习的发展阶段</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/dl-key-figures/" class="">
+      <span class="book-menu-link-title">1.2 深度学习中的关键人物</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/mainstream-dl-frameworks/" class="">
+      <span class="book-menu-link-title">1.3 深度学习框架介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f9bf1a68c19405769f9c4a1495708a55" class="toggle"  />
+    <label for="section-f9bf1a68c19405769f9c4a1495708a55" class="flex">
+      <a href="/dl/chapter02/" class="">
+        <span class="book-menu-link-title">第 2 章 环境配置</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/dl-dev-environment-architecture/" class="">
+      <span class="book-menu-link-title">2.1 体系结构介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/dl-cuda-pytorch-install/" class="">
+      <span class="book-menu-link-title">2.2 深度学习环境安装</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/dl-cuda-training-env-setup/" class="">
+      <span class="book-menu-link-title">2.3 开发环境安装配置</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="toggle"  />
+    <label for="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="flex">
+      <a href="/dl/chapter03/" class="">
+        <span class="book-menu-link-title">第 3 章 深度学习基础</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/linear-regression-basics/" class="">
+      <span class="book-menu-link-title">3.1 线性回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/linear-regression-implementation/" class="">
+      <span class="book-menu-link-title">3.2 线性回归简洁实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/backpropagation-and-gradient-descent/" class="">
+      <span class="book-menu-link-title">3.3 梯度下降与反向传播</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/regression-from-scratch/" class="">
+      <span class="book-menu-link-title">3.4 从零实现回归模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/softmax-regression-basics/" class="">
+      <span class="book-menu-link-title">3.5 从逻辑回归到Softmax回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/softmax-regression-implementation/" class="">
+      <span class="book-menu-link-title">3.6 Softmax回归简洁实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/softmax-regression-from-scratch/" class="">
+      <span class="book-menu-link-title">3.7 从零实现分类模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/regression-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">3.8 回归模型评估指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/classification-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">3.9 分类模型评估指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/overfitting-and-regularization/" class="">
+      <span class="book-menu-link-title">3.10 过拟合与正则化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/hyperparameters-and-cross-validation/" class="">
+      <span class="book-menu-link-title">3.11 超参数与交叉验证</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/activation-functions/" class="">
+      <span class="book-menu-link-title">3.12 激活函数</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/multi-label-classification/" class="">
+      <span class="book-menu-link-title">3.13 多标签分类</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-7a12cee83820a928df00362d70804a97" class="toggle"  />
+    <label for="section-7a12cee83820a928df00362d70804a97" class="flex">
+      <a href="/dl/chapter04/" class="">
+        <span class="book-menu-link-title">第 4 章 卷积神经网络</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/cnn-basics/" class="">
+      <span class="book-menu-link-title">4.1 卷积的概念</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/convolution-operation/" class="">
+      <span class="book-menu-link-title">4.2 卷积的计算过程</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/convolution-and-pooling/" class="">
+      <span class="book-menu-link-title">4.3 填充和池化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/lenet5/" class="">
+      <span class="book-menu-link-title">4.4 LeNet5网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/alexnet/" class="">
+      <span class="book-menu-link-title">4.5 AlexNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/vgg/" class="">
+      <span class="book-menu-link-title">4.6 VGG网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/nin/" class="">
+      <span class="book-menu-link-title">4.7 NIN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/googlenet/" class="">
+      <span class="book-menu-link-title">4.8 GoogLeNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/resnet/" class="">
+      <span class="book-menu-link-title">4.9 ResNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/densenet/" class="">
+      <span class="book-menu-link-title">4.10 DenseNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-be9addfd3a15c372d609d09cabb94159" class="toggle"  />
+    <label for="section-be9addfd3a15c372d609d09cabb94159" class="flex">
+      <a href="/dl/chapter05/" class="">
+        <span class="book-menu-link-title">第 5 章 模型训练与复用</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/training-logs-management/" class="">
+      <span class="book-menu-link-title">5.1 参数及日志管理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/tensorboard-tutorial/" class="">
+      <span class="book-menu-link-title">5.2 Tensorboard可视化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/pytorch-model-save-load/" class="">
+      <span class="book-menu-link-title">5.3 模型的保存与复用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/transfer-learning-tutorial/" class="">
+      <span class="book-menu-link-title">5.4 模型的迁移学习</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/pretrained-model-reuse/" class="">
+      <span class="book-menu-link-title">5.5 开源模型复用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/multi-gpu-training/" class="">
+      <span class="book-menu-link-title">5.6 多GPU训练</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/training-data-preprocessing-cache/" class="">
+      <span class="book-menu-link-title">5.7 数据预处理与缓存</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="toggle"  />
+    <label for="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="flex">
+      <a href="/dl/chapter06/" class="">
+        <span class="book-menu-link-title">第 6 章 模型优化方法</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/learning-rate-scheduler/" class="">
+      <span class="book-menu-link-title">6.1 学习率调度器</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/gradient-clipping/" class="">
+      <span class="book-menu-link-title">6.2 梯度裁剪</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/batch-norm/" class="">
+      <span class="book-menu-link-title">6.3 批归一化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/layer-norm/" class="">
+      <span class="book-menu-link-title">6.4 层归一化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/group-norm/" class="">
+      <span class="book-menu-link-title">6.5 组归一化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/momentum/" class="">
+      <span class="book-menu-link-title">6.6 动量法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/ada-grad/" class="">
+      <span class="book-menu-link-title">6.7 AdaGrad算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/ada-delta/" class="">
+      <span class="book-menu-link-title">6.8 AdaDelta算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/adam/" class="">
+      <span class="book-menu-link-title">6.9 Adam算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/weight-initialization/" class="">
+      <span class="book-menu-link-title">6.10 初始化方法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-517b751d7c44a7ac77d25d295ed44271" class="toggle"  />
+    <label for="section-517b751d7c44a7ac77d25d295ed44271" class="flex">
+      <a href="/dl/chapter07/" class="">
+        <span class="book-menu-link-title">第 7 章 循环神经网络</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/rnn-basics/" class="">
+      <span class="book-menu-link-title">7.1 RNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/time-series-modeling/" class="">
+      <span class="book-menu-link-title">7.2 时序数据</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/lstm/" class="">
+      <span class="book-menu-link-title">7.3 LSTM网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/gru/" class="">
+      <span class="book-menu-link-title">7.4 GRU网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/bi-rnn/" class="">
+      <span class="book-menu-link-title">7.5 BiRNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/char-rnn/" class="">
+      <span class="book-menu-link-title">7.6 CharRNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-b9b861f64ba32bc68dfb977497de37d9" class="toggle"  />
+    <label for="section-b9b861f64ba32bc68dfb977497de37d9" class="flex">
+      <a href="/dl/chapter08/" class="">
+        <span class="book-menu-link-title">第 8 章 时序与模型融合</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/textcnn/" class="">
+      <span class="book-menu-link-title">8.1 TextCNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/textrnn/" class="">
+      <span class="book-menu-link-title">8.2 TextRNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/cnn-rnn/" class="">
+      <span class="book-menu-link-title">8.3 CNN-RNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/convlstm/" class="">
+      <span class="book-menu-link-title">8.4 ConvLSTM网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/3dcnn/" class="">
+      <span class="book-menu-link-title">8.5 3DCNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/stresnet/" class="">
+      <span class="book-menu-link-title">8.6 STResNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-e54a1e28b1438b8266637bcb8dac1a44" class="toggle"  />
+    <label for="section-e54a1e28b1438b8266637bcb8dac1a44" class="flex">
+      <a href="/dl/chapter09/" class="">
+        <span class="book-menu-link-title">第 9 章 自然语言处理</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/nlp-basics/" class="">
+      <span class="book-menu-link-title">9.1 自然语言处理介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/word2vec-principle/" class="">
+      <span class="book-menu-link-title">9.2 Word2Vec词向量</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/word2vec-training-and-usage/" class="">
+      <span class="book-menu-link-title">9.3 Word2Vec训练与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/glove/" class="">
+      <span class="book-menu-link-title">9.4 GloVe词向量</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/word-vector-finetuning/" class="">
+      <span class="book-menu-link-title">9.5 词向量的微调使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/fasttext/" class="">
+      <span class="book-menu-link-title">9.6 fastText网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/seq2seq-tutorial/" class="">
+      <span class="book-menu-link-title">9.7 Seq2Seq网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/seq-model-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">9.8 序列模型评价指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/nmt-seq2seq/" class="">
+      <span class="book-menu-link-title">9.9 NMT网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/attention-mechanism/" class="">
+      <span class="book-menu-link-title">9.10 注意力机制</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/nmt-with-attention/" class="">
+      <span class="book-menu-link-title">9.11 含注意力的NMT网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/rnn-with-attention/" class="">
+      <span class="book-menu-link-title">9.12 含注意力的RNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f6636b2f9dc1df93b9fa64dd201716d9" class="toggle"  />
+    <label for="section-f6636b2f9dc1df93b9fa64dd201716d9" class="flex">
+      <a href="/dl/chapter10/" class="">
+        <span class="book-menu-link-title">第 10 章 现代神经网络</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/elmo/" class="">
+      <span class="book-menu-link-title">10.1 ELMo网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-principle/" class="">
+      <span class="book-menu-link-title">10.2 Transformer网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-architecture/" class="">
+      <span class="book-menu-link-title">10.3 Transformer结构</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-implementation/" class="">
+      <span class="book-menu-link-title">10.4 Transformer实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-couplet-model/" class="">
+      <span class="book-menu-link-title">10.5 Transformer对联模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-principle/" class="">
+      <span class="book-menu-link-title">10.6 BERT网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-from-scratch/" class="">
+      <span class="book-menu-link-title">10.7 从零实现BERT</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-text-classification/" class="">
+      <span class="book-menu-link-title">10.8 BERT文本分类模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-sentence-pair-matching/" class="">
+      <span class="book-menu-link-title">10.9 BERT问题选择模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-question-answering/" class="">
+      <span class="book-menu-link-title">10.10 BERT问题回答模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-ner/" class="">
+      <span class="book-menu-link-title">10.11 BERT命名体识别模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-pretraining/" class="">
+      <span class="book-menu-link-title">10.12 BERT从零训练</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-1/" class="">
+      <span class="book-menu-link-title">10.13 GPT-1模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-2-and-gpt-3/" class="">
+      <span class="book-menu-link-title">10.14 GPT-2与GPT-3模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-2-chinese-pretraining/" class="">
+      <span class="book-menu-link-title">10.15 基于GPT-2的中文预训练模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/instructgpt-and-chatgpt/" class="">
+      <span class="book-menu-link-title">10.16 InstructGPT与ChatGPT</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/chatgpt-prompt-engineering/" class="">
+      <span class="book-menu-link-title">10.17 ChatGPT与提示词工程</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/baichuan-usage/" class="">
+      <span class="book-menu-link-title">10.18 百川大模型使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/baichuan-implementation/" class="">
+      <span class="book-menu-link-title">10.19 百川大模型实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-4-and-gpts/" class="">
+      <span class="book-menu-link-title">10.20 GPT-4与GPTs使用</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/" class="">
+      <span class="book-menu-link-title">机器学习</span>
+</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/mindmap/" class="">
+      <span class="book-menu-link-title">目录思维导图</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-48f56957e94e3cf66f3022103a7dd0ff" class="toggle"  />
+    <label for="section-48f56957e94e3cf66f3022103a7dd0ff" class="flex">
+      <a href="/ml/chapter01/" class="">
+        <span class="book-menu-link-title">第 1 章 环境配置</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/conda-install-tutorial/" class="">
+      <span class="book-menu-link-title">1.1 安装使用Conda</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/ml-conda-env-setup/" class="">
+      <span class="book-menu-link-title">1.2 开发环境安装配置</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-56a896338a1c41249d22a3efa0e0063c" class="toggle"  />
+    <label for="section-56a896338a1c41249d22a3efa0e0063c" class="flex">
+      <a href="/ml/chapter02/" class="">
+        <span class="book-menu-link-title">第 2 章 线性回归</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/linear-regression-basics/" class="">
+      <span class="book-menu-link-title">2.1 模型的建立与求解</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/multivariate-linear-regression/" class="">
+      <span class="book-menu-link-title">2.2 多变量线性回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/polynomial-regression/" class="">
+      <span class="book-menu-link-title">2.3 多项式回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/regression-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">2.4 回归模型评估</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/gradient-descent-derivation/" class="">
+      <span class="book-menu-link-title">2.5 梯度下降</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/normal-distribution/" class="">
+      <span class="book-menu-link-title">2.6 正态分布</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/linear-regression-loss-derivation/" class="">
+      <span class="book-menu-link-title">2.7 目标函数推导</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ccd0dc9386ea80613d4cedf91b30058d" class="toggle"  />
+    <label for="section-ccd0dc9386ea80613d4cedf91b30058d" class="flex">
+      <a href="/ml/chapter03/" class="">
+        <span class="book-menu-link-title">第 3 章 逻辑回归</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/logistic-regression-basics/" class="">
+      <span class="book-menu-link-title">3.1 模型的建立与求解</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/logistic-regression-multiclass/" class="">
+      <span class="book-menu-link-title">3.2 多分类任务</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/classification-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">3.3 常见的分类评估指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/logistic-regression-loss-derivation/" class="">
+      <span class="book-menu-link-title">3.4 目标函数推导</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="toggle"  />
+    <label for="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="flex">
+      <a href="/ml/chapter04/" class="">
+        <span class="book-menu-link-title">第 4 章 模型的改善与泛化</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/generalization-basics/" class="">
+      <span class="book-menu-link-title">4.1 基本概念</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/feature-scaling/" class="">
+      <span class="book-menu-link-title">4.2 特征标准化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/overfitting-solutions/" class="">
+      <span class="book-menu-link-title">4.3过拟合</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/l1-l2-regularization/" class="">
+      <span class="book-menu-link-title">4.4 正则化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/bias-and-variance/" class="">
+      <span class="book-menu-link-title">4.5 偏差、方差与交叉验证</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/handwritten-digit-recognition-case/" class="">
+      <span class="book-menu-link-title">4.6 实例分析手写体识别</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-40f463d9d502d24b86ea6120b7030123" class="toggle"  />
+    <label for="section-40f463d9d502d24b86ea6120b7030123" class="flex">
+      <a href="/ml/chapter05/" class="">
+        <span class="book-menu-link-title">第 5 章 K近邻</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/knn-principle/" class="">
+      <span class="book-menu-link-title">5.1 K近邻思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/knn-algorithm-details/" class="">
+      <span class="book-menu-link-title">5.2 K近邻原理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/sklearn-knn-example/" class="">
+      <span class="book-menu-link-title">5.3 sklearn接口与示例代码</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/kd-tree-knn/" class="">
+      <span class="book-menu-link-title">5.4 kd树构建与搜索</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/knn-from-scratch/" class="">
+      <span class="book-menu-link-title">5.5 从零实现K近邻</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-5a460dc18f1e79253296cf2cd0498446" class="toggle"  />
+    <label for="section-5a460dc18f1e79253296cf2cd0498446" class="flex">
+      <a href="/ml/chapter06/" class="">
+        <span class="book-menu-link-title">第 6 章 文本特征与模型复用</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/bag-of-words/" class="">
+      <span class="book-menu-link-title">6.1 词袋模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/knn-spam-classification/" class="">
+      <span class="book-menu-link-title">6 .2 基于K近邻算法的垃圾邮件分类</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/tf-idf/" class="">
+      <span class="book-menu-link-title">6.3 考虑权重的词袋模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/wordcloud-generation/" class="">
+      <span class="book-menu-link-title">6.4 词云图</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-96f45a8b8c8b75adc70c78026d93dbf6" class="toggle"  />
+    <label for="section-96f45a8b8c8b75adc70c78026d93dbf6" class="flex">
+      <a href="/ml/chapter07/" class="">
+        <span class="book-menu-link-title">第 7 章 朴素贝叶斯</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/naive-bayes-basics/" class="">
+      <span class="book-menu-link-title">7.1 朴素贝叶斯算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/bayes-estimation/" class="">
+      <span class="book-menu-link-title">7.2 贝叶斯估计</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/naive-bayes-implementation/" class="">
+      <span class="book-menu-link-title">7.3 朴素贝叶斯实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/multinomial-naive-bayes/" class="">
+      <span class="book-menu-link-title">7.4 多项式朴素贝叶斯原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/gaussian-naive-bayes/" class="">
+      <span class="book-menu-link-title">7.5 高斯朴素贝叶斯原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-22476e49d5058c3e5e7e7366b7ab676f" class="toggle"  />
+    <label for="section-22476e49d5058c3e5e7e7366b7ab676f" class="flex">
+      <a href="/ml/chapter08/" class="">
+        <span class="book-menu-link-title">第 8 章 决策树</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-principle/" class="">
+      <span class="book-menu-link-title">8.1 决策树的基本思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-sklearn/" class="">
+      <span class="book-menu-link-title">8.2 决策树建模与可视化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/id3-vs-c45/" class="">
+      <span class="book-menu-link-title">8.3 决策树生成之ID3与C4.5</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-pruning/" class="">
+      <span class="book-menu-link-title">8.4 决策树剪枝过程</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-from-scratch/" class="">
+      <span class="book-menu-link-title">8.5 从零实现ID3与C4.5算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-continuous-features/" class="">
+      <span class="book-menu-link-title">8.6 连续型特征变量下决策树实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/cart-algorithm/" class="">
+      <span class="book-menu-link-title">8.7 CART生成与剪枝算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/cart-from-scratch/" class="">
+      <span class="book-menu-link-title">8.8 从零实现CART算法及剪枝示例</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-2feb6a51cabb61dba860f45c1881386b" class="toggle"  />
+    <label for="section-2feb6a51cabb61dba860f45c1881386b" class="flex">
+      <a href="/ml/chapter09/" class="">
+        <span class="book-menu-link-title">第 9 章 集成学习与提升算法</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/ensemble-learning-basics/" class="">
+      <span class="book-menu-link-title">9.1 集成学习算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/random-forest-principle/" class="">
+      <span class="book-menu-link-title">9.2 随机森林</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/random-forest-titanic/" class="">
+      <span class="book-menu-link-title">9.3 泰坦尼克号生还预测</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/adaboost/" class="">
+      <span class="book-menu-link-title">9.4 AdaBoost原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/multi-adaboost/" class="">
+      <span class="book-menu-link-title">9.5 MultiAdaBoost原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/gradient-boost/" class="">
+      <span class="book-menu-link-title">9.6 Gradient Boost 原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-938ae119c3849b03ccb6f91cef4243dd" class="toggle"  />
+    <label for="section-938ae119c3849b03ccb6f91cef4243dd" class="flex">
+      <a href="/ml/chapter10/" class="">
+        <span class="book-menu-link-title">第 10 章 支持向量机</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-principle/" class="">
+      <span class="book-menu-link-title">10.1 SVM思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-nonlinear-kernel/" class="">
+      <span class="book-menu-link-title">10.2 SVM线性不可分</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-max-margin/" class="">
+      <span class="book-menu-link-title">10.3 SVM原理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-soft-margin/" class="">
+      <span class="book-menu-link-title">10.4 SVM中的软间隔</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/lagrange-multipliers/" class="">
+      <span class="book-menu-link-title">10.5 拉格朗日乘数法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/kkt-conditions/" class="">
+      <span class="book-menu-link-title">10.6 对偶性与KKT条件</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-optimization/" class="">
+      <span class="book-menu-link-title">10.7 SVM优化问题</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-kernel-functions/" class="">
+      <span class="book-menu-link-title">10.8 SVM核函数原理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/smo-algorithm/" class="">
+      <span class="book-menu-link-title">10.9 SMO算法求解SVM</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-from-scratch/" class="">
+      <span class="book-menu-link-title">10.10 从零实现SVM分类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-9f4d9786d4ab755fde42c64d09b0d026" class="toggle"  />
+    <label for="section-9f4d9786d4ab755fde42c64d09b0d026" class="flex">
+      <a href="/ml/chapter11/" class="">
+        <span class="book-menu-link-title">第 11 章 聚类分析</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/clustering-basics/" class="">
+      <span class="book-menu-link-title">11.1 聚类算法的思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-principle/" class="">
+      <span class="book-menu-link-title">11.2 Kmeans聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-iteration/" class="">
+      <span class="book-menu-link-title">11.3 Kmeans算法求解</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-from-scratch/" class="">
+      <span class="book-menu-link-title">11.4 从零实现Kmeans聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-plus-plus/" class="">
+      <span class="book-menu-link-title">11.5 Kmeans&#43;&#43;聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/clustering-external-metrics/" class="">
+      <span class="book-menu-link-title">11.6 聚类外部评价指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/weighted-kmeans/" class="">
+      <span class="book-menu-link-title">11.7 加权Kmeans聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/clustering-internal-metrics/" class="">
+      <span class="book-menu-link-title">11.8 聚类内部评价指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-k-selection/" class="">
+      <span class="book-menu-link-title">11.9 聚类K值选取与分析</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/dbscan/" class="">
+      <span class="book-menu-link-title">11.10 基于密度的聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/hierarchical-clustering/" class="">
+      <span class="book-menu-link-title">11.11 基于层次的聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-d5e78c45312818bb3abd5c19c858f7e5" class="toggle"  />
+    <label for="section-d5e78c45312818bb3abd5c19c858f7e5" class="flex">
+      <a href="/ml/chapter12/" class="">
+        <span class="book-menu-link-title">第 12 章 降维算法</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/pca-principle/" class="">
+      <span class="book-menu-link-title">12.1 主成分分析</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/kpca/" class="">
+      <span class="book-menu-link-title">12.2 基于核函数的主成分分析</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-a82b41bb7eb95af72bc11e8a3d668acd" class="toggle"  />
+    <label for="section-a82b41bb7eb95af72bc11e8a3d668acd" class="flex">
+      <a href="/ml/chapter13/" class="">
+        <span class="book-menu-link-title">第 13 章 自训练与标签传播</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/self-training/" class="">
+      <span class="book-menu-link-title">13.1 Self-Training 自训练算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/label-propagation/" class="">
+      <span class="book-menu-link-title">13.2 Label Propagation算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/label-spreading/" class="">
+      <span class="book-menu-link-title">13.3 Label Spreading 算法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</nav>
+
+
+
+
+  <script>(function(){var e=document.querySelector("aside .book-menu-content");addEventListener("beforeunload",function(){localStorage.setItem("menu.scrollTop",e.scrollTop)}),e.scrollTop=localStorage.getItem("menu.scrollTop")})()</script>
+
+
+
+  </div>
+</aside>
+ 
+
+    <div class="book-page">
+      <header class="book-header hidden">
+        
+  <div class="flex align-center justify-between">
+  <label for="menu-control">
+    <img src="/icons/menu.svg" class="book-icon" alt="Menu" />
+  </label>
+
+  <h3>LLaMA 张量并行 PyTorch 实现：基于 FairScale 的 ColumnParallel/RowParallel 教程</h3>
+
+  <label for="toc-control">
+    
+    <img src="/icons/toc.svg" class="book-icon" alt="Table of Contents" />
+    
+  </label>
+</div>
+
+
+  
+  <aside class="hidden">
+    
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#1-fairscale-并行计算库">1. <code>fairscale</code> 并行计算库</a>
+      <ul>
+        <li><a href="#11-fairscale-库介绍">1.1 <code>fairscale</code> 库介绍</a></li>
+        <li><a href="#12-安装-fairscale-库">1.2 安装 <code>fairscale</code> 库</a></li>
+        <li><a href="#13-cpu-上模拟运行">1.3 CPU 上模拟运行</a></li>
+        <li><a href="#14-gpu-上真实运行">1.4 GPU 上真实运行</a></li>
+      </ul>
+    </li>
+    <li><a href="#2-从零实现-columnparallellinear">2. 从零实现 ColumnParallelLinear</a>
+      <ul>
+        <li><a href="#21-stride-概念介绍">2.1 stride 概念介绍</a></li>
+        <li><a href="#22-columnparallellinear-代码实现">2.2 ColumnParallelLinear 代码实现</a></li>
+        <li><a href="#23-图解-columnparallellinear-并行过程">2.3 图解 ColumnParallelLinear 并行过程</a></li>
+        <li><a href="#24-全局-master_weight-作用">2.4 全局 <code>master_weight</code> 作用</a></li>
+      </ul>
+    </li>
+    <li><a href="#3-从零实现-rowparallellinear">3. 从零实现 RowParallelLinear</a>
+      <ul>
+        <li><a href="#31-rowparallellinear-代码实现">3.1 RowParallelLinear 代码实现</a></li>
+        <li><a href="#32-图解-rowparallellinear-并行过程">3.2 图解 RowParallelLinear 并行过程</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+
+
+
+
+  </aside>
+  
+ 
+      </header>
+
+      
+      
+  <article class="markdown book-article"><nav class="book-breadcrumbs text-small book-breadcrumbs--page" aria-label="面包屑导航">
+    <ol class="book-breadcrumbs__list"><li class="book-breadcrumbs__item"><a class="book-breadcrumbs__link" href="https://mlwithme.github.io/">首页</a></li><li class="book-breadcrumbs__item"><a class="book-breadcrumbs__link" href="https://mlwithme.github.io/featured/">精选文章</a></li><li class="book-breadcrumbs__item"><span class="book-breadcrumbs__current" aria-current="page">从零实现张量并行 ParallelLinear</span></li></ol>
+  </nav><div class="book-article-lastmod text-small">
+        <span class="book-article-lastmod-label">更新于</span>
+        <span class="book-article-lastmod-value">2026年7月12日</span>
+      </div><p>在上一篇文章<a href="/featured/parallel-linear">「LLaMA 大模型并行计算原理图解：从数据并行到张量并行的演进与对比」</a>中我们详细介绍了张量平行计算的原理，并通过图示展示了其计算过程。在接下来的这篇文章当中，我们将详细给大家介绍张量平行在 <code>fairscale</code> 库中的实现过程，以及如何在 CPU 上来模拟整个运行过程。</p>
+<p>下面，我们依旧按着先学会用，再探究为什么的原则来进行叙述。</p>
+<p>首先，我们来介绍一下 <code>fairscale</code> 库。</p>
+<p><strong>关键词：LLaMA、张量并行、ColumnParallelLinear、RowParallelLinear、FairScale</strong></p>
+<h2 id="1-fairscale-并行计算库">1. <code>fairscale</code> 并行计算库<a class="anchor" href="#1-fairscale-%e5%b9%b6%e8%a1%8c%e8%ae%a1%e7%ae%97%e5%ba%93">#</a></h2>
+<p>FairScale 是 Meta 于2021年 [1] 提出的一个用于高性能、大规模训练的 PyTorch 扩展库。从名字可以看出，Fair Scale，“公平的规模” 确实有那么一点并行的味道。</p>
+<h3 id="11-fairscale-库介绍">1.1 <code>fairscale</code> 库介绍<a class="anchor" href="#11-fairscale-%e5%ba%93%e4%bb%8b%e7%bb%8d">#</a></h3>
+<p>FairScale 是在 PyTorch 的基础功能之上进行了扩展，同时引入了新的最先进的模型扩展技术。FairScale 通过可组合的模块和易于使用的 API，提供了当前最前沿的分布式训练方法。这些 API 是研究人员在资源受限的情况下尝试扩展模型时的重要工具之一。</p>
+<div align=center><img width="550" src="/images/featured/250524105048.jpg" alt="图 1. FairScale 库 Logo"/> </div><center>图 1. FairScale 库 Logo</center>
+<p>FairScale 的设计理念包括以下几个方面：</p>
+<ul>
+<li>
+<p><strong>可用性（Usability）</strong> —— 用户应该能够在认知负担最小的情况下理解并使用 FairScale 的 API。</p>
+</li>
+<li>
+<p><strong>模块化（Modularity）</strong> —— 用户应该能够将多个 FairScale API 无缝整合到自己的训练循环中。</p>
+</li>
+<li>
+<p><strong>性能（Performance）</strong> —— FairScale 的 API 在扩展能力和效率方面提供最优性能。</p>
+</li>
+</ul>
+<p>以上描述摘自 FairScale 项目介绍。</p>
+<h3 id="12-安装-fairscale-库">1.2 安装 <code>fairscale</code> 库<a class="anchor" href="#12-%e5%ae%89%e8%a3%85-fairscale-%e5%ba%93">#</a></h3>
+<p>在介绍完 FairScale 后我们再来看如何安装这个库。首先，如果是在 CPU 上安装的话，可以直接使用 <code>pip install fairscal==0.4.13</code> 进行安装。这里安装的是最新的 0.4.13 版本，你也可以根据自己的实际情况调整。</p>
+<p>本来按道理，如果是在 GPU 上安装，上面的 <code>pip</code> 命令应该也没问题，结果我们在安装过程中反复提示如下报错：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span>could <span style="color:#007020;font-weight:bold">not</span> find a version that satisfies the requirement setuptools<span style="color:#666">&gt;=</span><span style="color:#40a070">40.6.2</span><span style="color:#666">.</span> </span></span></code></pre></div><p>但是检查后发现当前 <code>setuptools</code> 版本为 68.2.2 ，不存在上诉问题。又经过一番排查，才在官网看到了解决方案。所以，无论你是在 CPU 或者 GPU 环境下安装，若果出现类似上面错误，都可以按照下面的方法解决。</p>
+<p>方案一：安装时加上<code>--no-build-isolation</code></p>
+<pre tabindex="0"><code>pip install fairscal==0.4.13 --no-build-isolation</code></pre><p>方案二：克隆或下载官方仓库 [1] 后，进入仓库目录输入<code>python setup.py install </code>进行安装</p>
+<p>当然，我们正式使用这个库肯定是在 GPU 上使用，CPU 上仅供学习，模拟。</p>
+<h3 id="13-cpu-上模拟运行">1.3 CPU 上模拟运行<a class="anchor" href="#13-cpu-%e4%b8%8a%e6%a8%a1%e6%8b%9f%e8%bf%90%e8%a1%8c">#</a></h3>
+<p>在完成 <code>fairscale</code> 库的安装以后，我们便可以通过如下代码完成在 CPU 上的模拟运行，完整示例代码可参见 <code>Code/C04_Parallel/parallel_linear_cpu.py</code> 文件。</p>
+<p><strong>① 导入模块</strong></p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">import</span> <span style="color:#0e84b5;font-weight:bold">os</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span> <span style="color:#007020;font-weight:bold">import</span> <span style="color:#0e84b5;font-weight:bold">torch</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span> <span style="color:#007020;font-weight:bold">import</span> <span style="color:#0e84b5;font-weight:bold">torch.distributed</span> <span style="color:#007020;font-weight:bold">as</span> <span style="color:#0e84b5;font-weight:bold">dist</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span> <span style="color:#007020;font-weight:bold">import</span> <span style="color:#0e84b5;font-weight:bold">torch.multiprocessing</span> <span style="color:#007020;font-weight:bold">as</span> <span style="color:#0e84b5;font-weight:bold">mp</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">5</span> <span style="color:#007020;font-weight:bold">from</span> <span style="color:#0e84b5;font-weight:bold">fairscale.nn.model_parallel.initialize</span> <span style="color:#007020;font-weight:bold">import</span> initialize_model_parallel
+</span></span><span style="display:flex;"><span><span style="color:#40a070">6</span> <span style="color:#007020;font-weight:bold">from</span> <span style="color:#0e84b5;font-weight:bold">fairscale.nn.model_parallel</span> <span style="color:#007020;font-weight:bold">import</span> ColumnParallelLinear
+</span></span><span style="display:flex;"><span><span style="color:#40a070">7</span> <span style="color:#007020;font-weight:bold">from</span> <span style="color:#0e84b5;font-weight:bold">fairscale.nn.model_parallel</span> <span style="color:#007020;font-weight:bold">import</span> RowParallelLinear</span></span></code></pre></div><p>在上述代码中，第3行是后续将使用分布式方式来运行整个示例代码。第4行是后续将使用 <code>spawn</code> 模块来实现 CPU 山的多进程模拟。第5~7行是载入并行计算时需要用到模块。</p>
+<p><strong>② 设置环境变量</strong></p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">run</span>(rank, world_size):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>     <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;Rank: </span><span style="color:#70a0d0">{</span>rank<span style="color:#70a0d0">}</span><span style="color:#4070a0"> initializing model parallel with size </span><span style="color:#70a0d0">{</span>world_size<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>     os<span style="color:#666">.</span>environ[<span style="color:#4070a0">&#39;MASTER_ADDR&#39;</span>] <span style="color:#666">=</span> <span style="color:#4070a0">&#39;localhost&#39;</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span>     os<span style="color:#666">.</span>environ[<span style="color:#4070a0">&#39;MASTER_PORT&#39;</span>] <span style="color:#666">=</span> <span style="color:#4070a0">&#39;12355&#39;</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">5</span>     os<span style="color:#666">.</span>environ[<span style="color:#4070a0">&#39;RANK&#39;</span>] <span style="color:#666">=</span> <span style="color:#007020">str</span>(rank)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">6</span>     os<span style="color:#666">.</span>environ[<span style="color:#4070a0">&#39;WORLD_SIZE&#39;</span>] <span style="color:#666">=</span> <span style="color:#007020">str</span>(world_size)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">7</span>     dist<span style="color:#666">.</span>init_process_group(backend<span style="color:#666">=</span><span style="color:#4070a0">&#34;gloo&#34;</span>, rank<span style="color:#666">=</span>rank, world_size<span style="color:#666">=</span>world_size)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">8</span>     initialize_model_parallel(world_size)</span></span></code></pre></div><p>在上述代码中，第1行是定义一个函数 <code>run()</code>，它在每个进程中运行；其中 <code>rank</code> 表示当前进程的全局编号，取值范围是 <code>[0, world_size - 1]</code>，<code>world_size</code> 是总共参与分布式训练的进程数。第2行则是打印出在当前进程中自己的编号，在后续输出结果中我们可以看到。第3行是设置主节点地址为 <code>'localhost'</code>，适用于单机多进程，多机训练时应设为主节点的 IP。第4行是设置进程间通信使用的端口，所有进程都必须设置为同一个端口。第5行是设置当前进程的 <code>rank</code>（编号）。</p>
+<p>这里需要注意的一点是，虽然这些子进程都运行在同一台主机上，但后续<code>mp.spawn()</code> 会复制当前 Python 进程的代码和环境，然后为每个进程传入一个独立的 <code>rank</code> 参数。在每个子进程中，<code>os.environ['RANK'] = str(rank)</code> 是在子进程自己的内存空间中执行的赋值操作，即<code>os.environ</code> 实际是当前进程的一个本地字典，它并不共享（或覆盖）其他进程的环境变量。这和平时我们理解的 OS 里的环境变量有点区别。</p>
+<p>第7行初始化 PyTorch 的分布式进程组，让所有进程进入通信准备状态，其中 <code>backend=&quot;gloo&quot;</code> 表示使用 CPU 通信后端（可跨平台），若使用 GPU，则通常用 <code>&quot;nccl&quot;</code>。第8行是初始化模型并行所需的辅助结构（例如张量并行的组划分等），意思是把全局通信组再切分成多个模型并行子组，准备 ColumnParallelLinear 等模块使用。</p>
+<p>下面便是关于两个参数的相关介绍：</p>
+<table>
+	<thead>
+			<tr>
+					<th>选项</th>
+					<th>特性</th>
+					<th>描述</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>gloo</td>
+					<td>类型</td>
+					<td>通用通信后端，Facebook 的 CPU/GPU 通信库</td>
+			</tr>
+			<tr>
+					<td></td>
+					<td>支持设备</td>
+					<td>CPU / GPU 都支持</td>
+			</tr>
+			<tr>
+					<td></td>
+					<td>通信方式</td>
+					<td>使用 TCP/IP 或共享内存</td>
+			</tr>
+			<tr>
+					<td></td>
+					<td>性能</td>
+					<td>相比 NCCL，在 GPU 上慢很多</td>
+			</tr>
+			<tr>
+					<td></td>
+					<td>推荐场景</td>
+					<td>本地 CPU 模拟测试、没有 GPU 的机器、调试环境、小规模训练</td>
+			</tr>
+			<tr>
+					<td>nccl</td>
+					<td>类型</td>
+					<td>高性能 GPU 通信库（NVIDIA 出品）</td>
+			</tr>
+			<tr>
+					<td></td>
+					<td>支持设备</td>
+					<td>GPU 专用</td>
+			</tr>
+			<tr>
+					<td></td>
+					<td>通信方式</td>
+					<td>使用 CUDA-aware 的通信（P2P, RDMA）</td>
+			</tr>
+			<tr>
+					<td></td>
+					<td>性能</td>
+					<td>非常快，尤其是在多卡（单机/多机）训练时</td>
+			</tr>
+			<tr>
+					<td></td>
+					<td>推荐场景</td>
+					<td>多 GPU 的训练，包括单机多卡和多机多卡</td>
+			</tr>
+	</tbody>
+</table>
+<p><strong>③ 模型定义</strong></p>
+<p>在完成上面的准备工作以后，我们继续在 <code>run()</code> 函数里定义一个简单的两层神经网络，完成此次并行过程，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span>     batch_size,input_dim <span style="color:#666">=</span> <span style="color:#40a070">2</span>, <span style="color:#40a070">3</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     hidden_dim,output_dim <span style="color:#666">=</span> <span style="color:#40a070">4</span>, <span style="color:#40a070">5</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>     x <span style="color:#666">=</span> torch<span style="color:#666">.</span>randn(batch_size, input_dim)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>     layer1 <span style="color:#666">=</span> ColumnParallelLinear(in_features<span style="color:#666">=</span>input_dim, 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>     			out_features<span style="color:#666">=</span>hidden_dim, gather_output<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">False</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>     layer2 <span style="color:#666">=</span> RowParallelLinear(in_features<span style="color:#666">=</span>hidden_dim, 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>     			input_is_parallel<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">True</span>, out_features<span style="color:#666">=</span>output_dim)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>     o1 <span style="color:#666">=</span> layer1(x)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>     o2 <span style="color:#666">=</span> layer2(o1)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>     <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;Rank: </span><span style="color:#70a0d0">{</span>rank<span style="color:#70a0d0">}</span><span style="color:#4070a0"> output shape: </span><span style="color:#70a0d0">{</span>o2<span style="color:#666">.</span>shape<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>     <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;Rank: </span><span style="color:#70a0d0">{</span>rank<span style="color:#70a0d0">}</span><span style="color:#4070a0"> output shape:</span><span style="color:#4070a0;font-weight:bold">\n</span><span style="color:#4070a0"> </span><span style="color:#70a0d0">{</span>o2<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>     dist<span style="color:#666">.</span>destroy_process_group()</span></span></code></pre></div><p>在上述代码中，第4~5行便是实例化一个 <code>ColumnParallelLinear</code> 类对象，<code>gather_output=False</code> 表示不讲最后分布在各个进程（GPU）上的结果拼接到一起。第6~7行则是实例化一个 <code>RowParallelLinear</code> 类对象，<code>input_is_parallel=True</code> 表示指定输入需要分布在各个进程上，也就是和上面的 <code>gather_output=False</code> 配合使用。第8~11行便是计算整个前向传播过程，并输出最后的结果。第12行是销毁整个进程组回收资源。</p>
+<p>同时，这里需要注意的一点是，因为模型并行的组件通常跨进程工作，所以不能用单进程的 <code>Sequential</code> 封装，即不能通过一下方式来封装：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span>net <span style="color:#666">=</span> nn<span style="color:#666">.</span>Sequential(ColumnParallelLinear(<span style="color:#666">...</span>), RowParallelLinear(<span style="color:#666">...</span>))</span></span></code></pre></div><p><strong>④ 结果分析</strong></p>
+<p>在完成上述准备工作以后，我们可以通过如下代码运行：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">main</span>():
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>     world_size <span style="color:#666">=</span> <span style="color:#40a070">2</span>  <span style="color:#60a0b0;font-style:italic"># 模拟2卡</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>     mp<span style="color:#666">.</span>spawn(run, args<span style="color:#666">=</span>(world_size,), nprocs<span style="color:#666">=</span>world_size, join<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">True</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">5</span> <span style="color:#007020;font-weight:bold">if</span> <span style="color:#bb60d5">__name__</span> <span style="color:#666">==</span> <span style="color:#4070a0">&#34;__main__&#34;</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">6</span>     main()</span></span></code></pre></div><p>上述代码运行结束后，便会输出类似如下结果：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> 当前进程 PID: <span style="color:#40a070">21544</span><span style="">，</span>父进程 PPID: <span style="color:#40a070">21535</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span> Rank: <span style="color:#40a070">0</span> initializing model parallel <span style="color:#007020;font-weight:bold">with</span> size <span style="color:#40a070">2</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span> 当前进程 PID: <span style="color:#40a070">21545</span><span style="">，</span>父进程 PPID: <span style="color:#40a070">21535</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span> Rank: <span style="color:#40a070">1</span> initializing model parallel <span style="color:#007020;font-weight:bold">with</span> size <span style="color:#40a070">2</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span> <span style="color:#666">&gt;</span> initializing model parallel <span style="color:#007020;font-weight:bold">with</span> size <span style="color:#40a070">2</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span> <span style="color:#666">&gt;</span> initializing ddp <span style="color:#007020;font-weight:bold">with</span> size <span style="color:#40a070">1</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span> <span style="color:#666">&gt;</span> initializing pipeline <span style="color:#007020;font-weight:bold">with</span> size <span style="color:#40a070">1</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span> Rank: <span style="color:#40a070">0</span> output shape: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">2</span>, <span style="color:#40a070">5</span>])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span> Rank: <span style="color:#40a070">1</span> output shape: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">2</span>, <span style="color:#40a070">5</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span> Rank: <span style="color:#40a070">0</span> output shape:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span> 	tensor([[<span style="color:#666">-</span><span style="color:#40a070">0.8471</span>, <span style="color:#666">-</span><span style="color:#40a070">0.4116</span>,  <span style="color:#40a070">0.1244</span>,  <span style="color:#40a070">0.0042</span>,  <span style="color:#40a070">1.1281</span>],
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>         [ <span style="color:#40a070">1.0552</span>,  <span style="color:#40a070">1.6335</span>,  <span style="color:#40a070">1.5514</span>, <span style="color:#666">-</span><span style="color:#40a070">0.1004</span>, <span style="color:#666">-</span><span style="color:#40a070">2.1235</span>]], grad_fn<span style="color:#666">=&lt;</span>AddBackward0<span style="color:#666">&gt;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span> Rank: <span style="color:#40a070">1</span> output shape:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>  tensor([[<span style="color:#666">-</span><span style="color:#40a070">0.8471</span>, <span style="color:#666">-</span><span style="color:#40a070">0.4116</span>,  <span style="color:#40a070">0.1244</span>,  <span style="color:#40a070">0.0042</span>,  <span style="color:#40a070">1.1281</span>],
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>         [ <span style="color:#40a070">1.0552</span>,  <span style="color:#40a070">1.6335</span>,  <span style="color:#40a070">1.5514</span>, <span style="color:#666">-</span><span style="color:#40a070">0.1004</span>, <span style="color:#666">-</span><span style="color:#40a070">2.1235</span>]], grad_fn<span style="color:#666">=&lt;</span>AddBackward0<span style="color:#666">&gt;</span>)</span></span></code></pre></div><p>根据前4行的输出结果我们可以看出，两个进程的 <code>PID</code> 分别是 21544 和 21545，且它们的父进程都是 21535。同时，根据11~15行的输出结果可以看出，在两个进程上的输出结果都是一样，而这也是刚好符合我们预期的。</p>
+<p>注意，这里我们需要明白一件事，由于程序是并行所以其实函数 <code>run()</code> 在每个设备上都会执行一次，并且内部依靠 rank 来区分计算逻辑。</p>
+<h3 id="14-gpu-上真实运行">1.4 GPU 上真实运行<a class="anchor" href="#14-gpu-%e4%b8%8a%e7%9c%9f%e5%ae%9e%e8%bf%90%e8%a1%8c">#</a></h3>
+<p>在有了前面的介绍以后，在 GPU 上的运行过程就变得非常简单了，只需要修改对应的环境配置即可，如下所示：</p>
+<p>上述代码运行结束以后便可以得到类似如下结果：</p>
+<p>完整示例代码可参见 <code>Code/C04_Parallel/parallel_linear_gpu.py</code> 文件。</p>
+<h2 id="2-从零实现-columnparallellinear">2. 从零实现 ColumnParallelLinear<a class="anchor" href="#2-%e4%bb%8e%e9%9b%b6%e5%ae%9e%e7%8e%b0-columnparallellinear">#</a></h2>
+<p>在介绍完如何使用 ColumnParallelLinear 和 RowParallelLinear 以后，我们再来看详细看看两者内部在 FairScale 框架中的实现过程，也即践行我们的“先学会怎么用，在探究为什么”这一理念。完整注释标注代码可参见 <code>Code/C04_Parallel/parallel.py</code> 文件。</p>
+<p>为了让大家能够更加清楚的弄懂整个实现过程，我们先来给大家介绍一下 stride 这个概念。</p>
+<h3 id="21-stride-概念介绍">2.1 stride 概念介绍<a class="anchor" href="#21-stride-%e6%a6%82%e5%bf%b5%e4%bb%8b%e7%bb%8d">#</a></h3>
+<p>学习过卷积神经网络的朋友对于 stride 这个概念一定不会陌生，即每次卷积操作以后移动的距离。当然，不清楚的也没关系，因为两者虽然都叫 stride 但是还是有不少的差别。</p>
+<p>根据我们在上一篇文章中的介绍，张量并行的计算过程并不涉及到 stride 这个东西，但是为什么在代码实现的时候有多出来了呢？</p>
+<p>一句话总结，FairScale 库在实现 ColumnParallelLinear 和 RowParallelLinear 这两种张量并行的时候考虑了更加通用的场景，可以让用户更加灵活地去划分权重矩阵到不同的 GPU 上进行计算，所以引入了 stride 这样一个概念。</p>
+<p>下面，我们以 ColumnParallelLinear 为例，来看看 stride 到底是什么样的含义。</p>
+<div align=center><img width="800" src="/images/featured/202505282225.png"/> </div><center>图 2. stride 原理示意图</center>
+<p>如图2所示，最上方为 ColumnParallelLinear 计算时初始化的权重矩阵，形状为 <code>[output_size, in_feature]</code> ；左右两块分别用来示例权重矩阵在两块显卡（<code>world_size = 2</code>）上，<code>stride</code>  分别为 1 和 2 时，各个设备上划分得到的权重块。</p>
+<p>根据图2中的计算过程，首先会根据 <code>output_size</code> 和 <code>world_size</code> 计算得到 <code>output_size_per_partion</code>，即得到每个 GPU 设备上权重块的大小，例如此处计算得到的结果便是 4 ；然后再根据 stride 计算得到 <code>per_partition_per_stride_size</code>，即得到在划分每个设备上的权重块的时候应该以多大的间隔进行，例如这里左右两边分别是 $4//1=4$ 和 $4//2=2$。</p>
+<p><strong>可以看出，这里尤其需要注意的是，两步计算过程都要保证能够整除。</strong></p>
+<p>在计算得到 <code>per_partition_per_stride_size</code> 后，便可以把权重矩阵进行划分得到 <code>weight_list</code>，最终根据 <code>weight_list[rank::world_size]</code> 索引得到每块 GPU 上对应的权重块。</p>
+<p>根据最后得到的结果可以看出，图2中左右两侧最终得到的每块设备上权重块的大小都是 4 ，但是区别在于索引得到了原权重矩阵中不同的行。当然，这中设计只是为了满足其它更为复杂的场景，在本文所要实现的 ColumnParallelLinear 和 RowParallelLinear 中，stride 均为 1，即直接按照每块设备权重块的大小在原始权重均值上连续划分即可。</p>
+<p>说到这里你是否会产生一个疑问？</p>
+<p>我们在上一篇文章当中似乎隐约提过，对于每块设备上的权重块我们可以直接在各个设备上进行初始化，而非先初始化一个整块然后划分到各个设备上，因为前者看起来效率更高。</p>
+<p>为什么呢？这个问题我们放到稍后进行回答。</p>
+<h3 id="22-columnparallellinear-代码实现">2.2 ColumnParallelLinear 代码实现<a class="anchor" href="#22-columnparallellinear-%e4%bb%a3%e7%a0%81%e5%ae%9e%e7%8e%b0">#</a></h3>
+<p>在介绍完 stride 的概念以后，我们再来看下如何实现整个 ColumnParallelLinear 部分。</p>
+<p>为了让大家能够更加清晰地理解整个实现过程，我们先通过一个图来看看整个代码的层次结构，如图3所示。</p>
+<div align=center><img width="600" src="/images/featured/202505282141.png"/> </div><center>图 3. ColumnParallelLinear 代码结构图</center>
+<p>如图3所示，我们将会定义 <code>ColumnParallelLinear</code> 这个类，并且在初始化方法 <code>__init__()</code> 中来完成各个设备上矩阵块的划分，然后通过 <code>forward()</code> 来完成前向传播计算过程。最终，<code>self.weight</code> 中记录的便是每个设备上对应的矩阵块，<code>get_master_weight()</code> 返回的便是整个权重矩阵。</p>
+<p><strong>① 初始化方法</strong></p>
+<p>下面，我们带着大家来仔细看看初始化方法中的实现过程，如下所示：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">ColumnParallelLinear</span>(torch<span style="color:#666">.</span>nn<span style="color:#666">.</span>Module):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">__init__</span>(<span style="color:#007020">self</span>, in_features: <span style="color:#007020">int</span>, out_features: <span style="color:#007020">int</span>,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>             bias: <span style="color:#007020">bool</span> <span style="color:#666">=</span> <span style="color:#007020;font-weight:bold">True</span>, gather_output: <span style="color:#007020">bool</span> <span style="color:#666">=</span> <span style="color:#007020;font-weight:bold">True</span>, 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>             init_method: Callable[[torch<span style="color:#666">.</span>Tensor], torch<span style="color:#666">.</span>Tensor] <span style="color:#666">=</span> init<span style="color:#666">.</span>xavier_normal_,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>             stride: <span style="color:#007020">int</span> <span style="color:#666">=</span> <span style="color:#40a070">1</span>, keep_master_weight_for_test: <span style="color:#007020">bool</span> <span style="color:#666">=</span> <span style="color:#007020;font-weight:bold">False</span>) <span style="color:#666">-&gt;</span> <span style="color:#007020;font-weight:bold">None</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>         <span style="color:#007020">super</span>(ColumnParallelLinear, <span style="color:#007020">self</span>)<span style="color:#666">.</span><span style="color:#06287e">__init__</span>()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>in_features <span style="color:#666">=</span> in_features
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>out_features <span style="color:#666">=</span> out_features
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>gather_output <span style="color:#666">=</span> gather_output
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>         world_size <span style="color:#666">=</span> get_model_parallel_world_size()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>output_size_per_partition <span style="color:#666">=</span> divide_and_check_no_remainder(out_features, world_size)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>weight <span style="color:#666">=</span> nn<span style="color:#666">.</span>Parameter(torch<span style="color:#666">.</span>Tensor(<span style="color:#007020">self</span><span style="color:#666">.</span>output_size_per_partition, <span style="color:#007020">self</span><span style="color:#666">.</span>in_features))
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>         <span style="color:#007020;font-weight:bold">if</span> bias:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>             <span style="color:#007020">self</span><span style="color:#666">.</span>bias <span style="color:#666">=</span> nn<span style="color:#666">.</span>Parameter(torch<span style="color:#666">.</span>Tensor(<span style="color:#007020">self</span><span style="color:#666">.</span>output_size_per_partition))
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>             <span style="color:#007020;font-weight:bold">with</span> torch<span style="color:#666">.</span>no_grad():
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>                 <span style="color:#007020">self</span><span style="color:#666">.</span>bias<span style="color:#666">.</span>zero_()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>         <span style="color:#007020;font-weight:bold">else</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>             <span style="color:#007020">self</span><span style="color:#666">.</span>register_parameter(<span style="color:#4070a0">&#34;bias&#34;</span>, <span style="color:#007020;font-weight:bold">None</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>master_weight <span style="color:#666">=</span> _initialize_affine_weight( <span style="color:#007020">self</span><span style="color:#666">.</span>weight,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span>             <span style="color:#007020">self</span><span style="color:#666">.</span>out_features, <span style="color:#007020">self</span><span style="color:#666">.</span>in_features, <span style="color:#007020">self</span><span style="color:#666">.</span>output_size_per_partition,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">21</span>             <span style="color:#40a070">0</span>, init_method, stride<span style="color:#666">=</span>stride,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">22</span>             return_master_weight<span style="color:#666">=</span>keep_master_weight_for_test)</span></span></code></pre></div><p>在上述代码中，第2~5行是实例化类时所接收的参数，其中 <code>init_method</code> 用于后续初始化完整的权重矩阵，<code>gather_output</code> 用于指定是否将前向传播后每个设备上的结果合并到一起；<code>keep_master_weight_for_test</code> 用于指定第19行代码中是否返回结果，为 <code>False</code> 时 <code>self.master_weight</code> 将为 <code>None</code>，其主要用于模型开发时结果分析。</p>
+<p>第10行是得到当前主机上可并行的设备数量 <code>world_size</code>。第11行是计算得到每个 GPU 设备上权重块的大小，同时会判断能否整除，不能则会报错。第12行是初始化每块设备上权重块的大小所以形状是 <code>[output_size_per_partition, in_features]</code>，相当于是一个占位符的作用，因为后面在第19行 <code>_initialize_affine_weight()</code> 函数中会被重新赋值。第13~18行则是初始化偏置。第19~22行则是先初始化一个完整的权重矩阵，然后再划分到各个设备上，下面我们继续来看这部分代码。</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">_initialize_affine_weight</span>( weight: torch<span style="color:#666">.</span>Tensor, out_features: <span style="color:#007020">int</span>, 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span> 				 in_features: <span style="color:#007020">int</span>, per_partition_size: <span style="color:#007020">int</span>, partition_dim: <span style="color:#007020">int</span>,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>         init_method: Callable[[torch<span style="color:#666">.</span>Tensor], torch<span style="color:#666">.</span>Tensor],
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>         stride: <span style="color:#007020">int</span> <span style="color:#666">=</span> <span style="color:#40a070">1</span>,return_master_weight: <span style="color:#007020">bool</span> <span style="color:#666">=</span> <span style="color:#007020;font-weight:bold">False</span>, ):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>     world_size <span style="color:#666">=</span> get_model_parallel_world_size()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>     <span style="color:#007020;font-weight:bold">if</span> world_size <span style="color:#666">==</span> <span style="color:#40a070">1</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>         init_method(weight)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>         <span style="color:#007020;font-weight:bold">if</span> return_master_weight:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>             <span style="color:#007020;font-weight:bold">return</span> weight
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>         <span style="color:#007020;font-weight:bold">return</span> <span style="color:#007020;font-weight:bold">None</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>     master_weight <span style="color:#666">=</span> torch<span style="color:#666">.</span>empty(out_features, in_features, dtype<span style="color:#666">=</span>weight<span style="color:#666">.</span>dtype, requires_grad<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">False</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>     init_method(master_weight)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>     per_partition_per_stride_size <span style="color:#666">=</span> divide_and_check_no_remainder(per_partition_size, stride)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>     weight_list <span style="color:#666">=</span> torch<span style="color:#666">.</span>split(master_weight, per_partition_per_stride_size, dim<span style="color:#666">=</span>partition_dim)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>     rank <span style="color:#666">=</span> get_model_parallel_rank()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>     my_weight_list <span style="color:#666">=</span> weight_list[rank::world_size]
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>     <span style="color:#007020;font-weight:bold">with</span> torch<span style="color:#666">.</span>no_grad():
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span>         torch<span style="color:#666">.</span>cat(my_weight_list, dim<span style="color:#666">=</span>partition_dim, out<span style="color:#666">=</span>weight)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span>     <span style="color:#007020;font-weight:bold">if</span> return_master_weight:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">21</span>         <span style="color:#007020;font-weight:bold">return</span> master_weight
+</span></span><span style="display:flex;"><span><span style="color:#40a070">22</span>     <span style="color:#007020;font-weight:bold">return</span> <span style="color:#007020;font-weight:bold">None</span></span></span></code></pre></div><p>在上述代码，第1行 <code>weight</code> 便是 <code>ColumnParallelLinear</code> 初始化方法中传入的 <code>self.weight</code>。第7~10行是判断，如果当前仅在存在一个设备，则直接重新初始化 <code>weight</code> 即可。这里需要注意的是，因为 <code>init_method</code> 默认是 <code>in-place</code> 操作 <code>init.xavier_normal_</code>，所以 <code>init_method(weight)</code> 执行完毕以后就会修改原始 <code>self.weight</code> 中的值。</p>
+<p>第12~13行是初始化一个完整的权重矩阵 <code>master_weight</code>，并对其进行重新初始化。再次注意，这里我们需要明白一件事，由于程序是并行所以其实整个程序在每个设备上都会执行一次，并且依靠 rank 来区分计算逻辑，也就是说在每个设备上都会初始化一个 <code>master_weight</code>，这一点我们通过后面的图示进行说明。</p>
+<p>第14行是计算得到在划分每个设备上的权重块的时候应该以多大的间隔进行。第15行则是根据指定的间隔对 <code>master_weight</code> 进行划分，对应图2中所示的过程。第16行是得到当前设备设备（进程）对应的 rank，并根据17行来划分得到自己对应部分的权重块。第18~19行是将索引得到的权重拼接到一起。</p>
+<p><strong>② 前向传播</strong></p>
+<p>进一步，实现完初始化操作后开始完成前向传播计算过程，实现代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">forward</span>(<span style="color:#007020">self</span>, input_: torch<span style="color:#666">.</span>Tensor) <span style="color:#666">-&gt;</span> torch<span style="color:#666">.</span>Tensor:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>         input_parallel <span style="color:#666">=</span> copy_to_model_parallel_region(input_)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>         output_parallel <span style="color:#666">=</span> F<span style="color:#666">.</span>linear(input_parallel, <span style="color:#007020">self</span><span style="color:#666">.</span>weight, <span style="color:#007020">self</span><span style="color:#666">.</span>bias)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span>         <span style="color:#007020;font-weight:bold">if</span> <span style="color:#007020">self</span><span style="color:#666">.</span>gather_output:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">5</span>             output <span style="color:#666">=</span> gather_from_model_parallel_region(output_parallel)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">6</span>         <span style="color:#007020;font-weight:bold">else</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">7</span>             output <span style="color:#666">=</span> output_parallel
+</span></span><span style="display:flex;"><span><span style="color:#40a070">8</span>         <span style="color:#007020;font-weight:bold">return</span> output</span></span></code></pre></div><p>在上述代码中，第2行是将原始完整输入拷贝到各个设备上，使各个设备使用同一份输入。不过这里可能会问，明明每个进程接收的 <code>input_</code> 是一样的，为什么还需要 <code>copy_to_model_parallel_region(input_)</code>？那是因为即使你在主进程构造了相同的 <code>input_</code> 张量，如果你不调用 <code>copy_to_model_parallel_region(input_)</code>，那么在多进程并行中，每个进程上的 <code>input_</code> 实际上仍然是各自独立的一份内存副本，并非同步的共享张量。第3行则是完整的输入，同每个设备上对应的权重块进行线性变换的过程。第4~8行则是判断是否将计算完成后分布在各个设备上的输出拼接到一起并返回。</p>
+<p><strong>③得到完整矩阵</strong></p>
+<p>最后，我们还可以通过 <code>get_master_weight()</code> 方法来返回得到参与线性计算的 <code>master_weight</code> 矩阵，代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">get_master_weight</span>(<span style="color:#007020">self</span>) <span style="color:#666">-&gt;</span> torch<span style="color:#666">.</span>Tensor:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>         <span style="color:#007020;font-weight:bold">return</span> gather_from_model_parallel_region(
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>         		<span style="color:#007020">self</span><span style="color:#666">.</span>weight<span style="color:#666">.</span>data<span style="color:#666">.</span>transpose(<span style="color:#40a070">0</span>, <span style="color:#40a070">1</span>))<span style="color:#666">.</span>transpose_(<span style="color:#40a070">0</span>, <span style="color:#40a070">1</span>)</span></span></code></pre></div><p>这里尤其需要 注意一点，<code>get_master_weight()</code> 函数返回的 <code>master_weight</code> 才是真正各个设备上权重块拼接后的结果，并不是每个类对象中的全局 <code>self.master_weight</code>  。</p>
+<h3 id="23-图解-columnparallellinear-并行过程">2.3 图解 ColumnParallelLinear 并行过程<a class="anchor" href="#23-%e5%9b%be%e8%a7%a3-columnparallellinear-%e5%b9%b6%e8%a1%8c%e8%bf%87%e7%a8%8b">#</a></h3>
+<p>虽然整个 ColumnParallelLinear 的实现过程已经介绍完了，但是我们相信大家一定会弄错一个地方，下面我们再通过一个图示来给大家回顾一下整个代码在运行时变量的变化过程，完整示例代码见 <code>Code/C04_Parallel/ColumnParallelLinear_cpu.py</code> 文件。</p>
+<p>首先，我们给出程序代码，如下所示：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">run</span>(rank, world_size<span style="color:#666">=</span><span style="color:#40a070">2</span>):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     <span style="color:#666">......</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>     dist<span style="color:#666">.</span>init_process_group(backend<span style="color:#666">=</span><span style="color:#4070a0">&#34;gloo&#34;</span>, rank<span style="color:#666">=</span>rank, world_size<span style="color:#666">=</span>world_size)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>     initialize_model_parallel(world_size)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>     batch_size,input_dim,output_dim <span style="color:#666">=</span> <span style="color:#40a070">2</span>,<span style="color:#40a070">3</span>,<span style="color:#40a070">8</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>     x <span style="color:#666">=</span> torch<span style="color:#666">.</span>randn(batch_size, input_dim)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>     layer <span style="color:#666">=</span> ColumnParallelLinear( in_features<span style="color:#666">=</span>input_dim,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>         out_features<span style="color:#666">=</span>output_dim, gather_output<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">False</span>, 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>         keep_master_weight_for_test<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">True</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>     output <span style="color:#666">=</span> layer(x)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>     <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;Rank:</span><span style="color:#70a0d0">{</span>rank<span style="color:#70a0d0">}</span><span style="color:#4070a0"> Output:</span><span style="color:#4070a0;font-weight:bold">\n</span><span style="color:#70a0d0">{</span>output<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>     <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;Rank:</span><span style="color:#70a0d0">{</span>rank<span style="color:#70a0d0">}</span><span style="color:#4070a0"> master_weight:</span><span style="color:#4070a0;font-weight:bold">\n</span><span style="color:#70a0d0">{</span>layer<span style="color:#666">.</span>master_weight<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>     <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;Rank:</span><span style="color:#70a0d0">{</span>rank<span style="color:#70a0d0">}</span><span style="color:#4070a0"> get_master_weight:</span><span style="color:#4070a0;font-weight:bold">\n</span><span style="color:#70a0d0">{</span>layer<span style="color:#666">.</span>get_master_weight()<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>     <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;Rank:</span><span style="color:#70a0d0">{</span>rank<span style="color:#70a0d0">}</span><span style="color:#4070a0"> weight:</span><span style="color:#4070a0;font-weight:bold">\n</span><span style="color:#70a0d0">{</span>layer<span style="color:#666">.</span>weight<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>     dist<span style="color:#666">.</span>destroy_process_group()</span></span></code></pre></div><p>在上述代码中，我们指定了 <code>world_size=2</code>，并且输出我们需要验证和分析部分的变量。同时，我们还可以通过如下图所示的过程来表示 <code>run()</code> 在并行时的情况。</p>
+<div align=center><img width="600" src="/images/featured/202505282053.png"/> </div><center>图 4. ColumnParallelLinear 并行计算流程</center>
+<p>如图4所示为双卡并行时 ColumnParallelLinear 中各个变量的变化情况。从上往下看，并行时函数 <code>run()</code> 会分别在两个进程上执行实例化一个 <code>layer</code> 类对象，然后各自初始得到一个 <code>weight</code>。进一步，各自再初始化得到一个 <code>master_weight</code>，并且根据 rank 计算得到对应的划分块，接着从各自的 <code>master_weight</code> 取出这部分权重作为自己设备上对应的权重块 <code>weight</code>。所以，最后通过 <code>layer.master_weight</code> 得到的便是各个进程上一开始初始化的 <code>master_weight</code>，每个进程都不一样；通过 <code>layer.get_master_weight()</code> 得到的便是所有设备上权重块拼接后的结果，每个进程返回的结果都是一样的；通过 <code>layer.weight</code> 得到的便是每个设备上对应的权重块。</p>
+<p>上述代码运行结束后的结果类似如下所示：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#666">&gt;</span> initializing model parallel <span style="color:#007020;font-weight:bold">with</span> size <span style="color:#40a070">2</span>
+</span></span><span style="display:flex;"><span><span style="color:#666">&gt;</span> initializing ddp <span style="color:#007020;font-weight:bold">with</span> size <span style="color:#40a070">1</span>
+</span></span><span style="display:flex;"><span><span style="color:#666">&gt;</span> initializing pipeline <span style="color:#007020;font-weight:bold">with</span> size <span style="color:#40a070">1</span>
+</span></span><span style="display:flex;"><span>[Rank:<span style="color:#40a070">0</span>] Output:
+</span></span><span style="display:flex;"><span>tensor([[ <span style="color:#40a070">1.1377</span>, <span style="color:#666">-</span><span style="color:#40a070">0.2127</span>, <span style="color:#666">-</span><span style="color:#40a070">0.1992</span>,  <span style="color:#40a070">1.9902</span>],
+</span></span><span style="display:flex;"><span>        [ <span style="color:#40a070">0.0053</span>, <span style="color:#666">-</span><span style="color:#40a070">0.4526</span>, <span style="color:#666">-</span><span style="color:#40a070">0.6691</span>, <span style="color:#666">-</span><span style="color:#40a070">0.2070</span>]], grad_fn<span style="color:#666">=&lt;</span>AddmmBackward0<span style="color:#666">&gt;</span>)
+</span></span><span style="display:flex;"><span>[Rank:<span style="color:#40a070">1</span>] Output:
+</span></span><span style="display:flex;"><span>tensor([[<span style="color:#666">-</span><span style="color:#40a070">0.5462</span>, <span style="color:#666">-</span><span style="color:#40a070">0.4056</span>,  <span style="color:#40a070">0.5707</span>, <span style="color:#666">-</span><span style="color:#40a070">0.0984</span>],
+</span></span><span style="display:flex;"><span>        [ <span style="color:#40a070">0.0651</span>,  <span style="color:#40a070">0.3634</span>, <span style="color:#666">-</span><span style="color:#40a070">0.2874</span>, <span style="color:#666">-</span><span style="color:#40a070">0.1482</span>]], grad_fn<span style="color:#666">=&lt;</span>AddmmBackward0<span style="color:#666">&gt;</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>Rank:<span style="color:#40a070">0</span> master_weight:
+</span></span><span style="display:flex;"><span>tensor([[<span style="color:#666">-</span><span style="color:#40a070">0.6482</span>,  <span style="color:#40a070">0.0033</span>, <span style="color:#666">-</span><span style="color:#40a070">0.4027</span>],
+</span></span><span style="display:flex;"><span>        [ <span style="color:#40a070">0.1520</span>,  <span style="color:#40a070">0.6575</span>, <span style="color:#666">-</span><span style="color:#40a070">0.2176</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.4115</span>,  <span style="color:#40a070">0.6603</span>, <span style="color:#666">-</span><span style="color:#40a070">0.0949</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.6823</span>,  <span style="color:#40a070">0.5604</span>, <span style="color:#666">-</span><span style="color:#40a070">1.0497</span>],
+</span></span><span style="display:flex;"><span>        [ <span style="color:#40a070">0.5418</span>,  <span style="color:#40a070">0.0205</span>, <span style="color:#666">-</span><span style="color:#40a070">0.2759</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.0383</span>,  <span style="color:#40a070">0.2029</span>, <span style="color:#666">-</span><span style="color:#40a070">0.1678</span>],
+</span></span><span style="display:flex;"><span>        [ <span style="color:#40a070">0.2387</span>, <span style="color:#666">-</span><span style="color:#40a070">0.0888</span>,  <span style="color:#40a070">0.1351</span>],
+</span></span><span style="display:flex;"><span>        [ <span style="color:#40a070">0.2006</span>, <span style="color:#666">-</span><span style="color:#40a070">0.0577</span>, <span style="color:#666">-</span><span style="color:#40a070">0.1250</span>]])
+</span></span><span style="display:flex;"><span>Rank:<span style="color:#40a070">1</span> master_weight:
+</span></span><span style="display:flex;"><span>tensor([[ <span style="color:#40a070">0.0858</span>,  <span style="color:#40a070">0.1115</span>, <span style="color:#666">-</span><span style="color:#40a070">0.4627</span>],
+</span></span><span style="display:flex;"><span>        [ <span style="color:#40a070">0.3607</span>, <span style="color:#666">-</span><span style="color:#40a070">0.2240</span>,  <span style="color:#40a070">0.3769</span>],
+</span></span><span style="display:flex;"><span>        [ <span style="color:#40a070">0.0109</span>,  <span style="color:#40a070">0.2240</span>,  <span style="color:#40a070">0.7165</span>],
+</span></span><span style="display:flex;"><span>        [ <span style="color:#40a070">0.0143</span>,  <span style="color:#40a070">0.5922</span>,  <span style="color:#40a070">0.2749</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.8927</span>, <span style="color:#666">-</span><span style="color:#40a070">0.4710</span>, <span style="color:#666">-</span><span style="color:#40a070">0.5375</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.1299</span>, <span style="color:#666">-</span><span style="color:#40a070">0.1249</span>,  <span style="color:#40a070">0.3380</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.4457</span>,  <span style="color:#40a070">0.4655</span>, <span style="color:#666">-</span><span style="color:#40a070">0.3996</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.0582</span>, <span style="color:#666">-</span><span style="color:#40a070">0.2470</span>, <span style="color:#666">-</span><span style="color:#40a070">0.3050</span>]])
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>Rank:<span style="color:#40a070">0</span> get_master_weight:
+</span></span><span style="display:flex;"><span>tensor([[<span style="color:#666">-</span><span style="color:#40a070">0.6482</span>,  <span style="color:#40a070">0.0033</span>, <span style="color:#666">-</span><span style="color:#40a070">0.4027</span>],
+</span></span><span style="display:flex;"><span>        [ <span style="color:#40a070">0.1520</span>,  <span style="color:#40a070">0.6575</span>, <span style="color:#666">-</span><span style="color:#40a070">0.2176</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.4115</span>,  <span style="color:#40a070">0.6603</span>, <span style="color:#666">-</span><span style="color:#40a070">0.0949</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.6823</span>,  <span style="color:#40a070">0.5604</span>, <span style="color:#666">-</span><span style="color:#40a070">1.0497</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.8927</span>, <span style="color:#666">-</span><span style="color:#40a070">0.4710</span>, <span style="color:#666">-</span><span style="color:#40a070">0.5375</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.1299</span>, <span style="color:#666">-</span><span style="color:#40a070">0.1249</span>,  <span style="color:#40a070">0.3380</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.4457</span>,  <span style="color:#40a070">0.4655</span>, <span style="color:#666">-</span><span style="color:#40a070">0.3996</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.0582</span>, <span style="color:#666">-</span><span style="color:#40a070">0.2470</span>, <span style="color:#666">-</span><span style="color:#40a070">0.3050</span>]])
+</span></span><span style="display:flex;"><span>Rank:<span style="color:#40a070">1</span> get_master_weight:
+</span></span><span style="display:flex;"><span>tensor([[<span style="color:#666">-</span><span style="color:#40a070">0.6482</span>,  <span style="color:#40a070">0.0033</span>, <span style="color:#666">-</span><span style="color:#40a070">0.4027</span>],
+</span></span><span style="display:flex;"><span>        [ <span style="color:#40a070">0.1520</span>,  <span style="color:#40a070">0.6575</span>, <span style="color:#666">-</span><span style="color:#40a070">0.2176</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.4115</span>,  <span style="color:#40a070">0.6603</span>, <span style="color:#666">-</span><span style="color:#40a070">0.0949</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.6823</span>,  <span style="color:#40a070">0.5604</span>, <span style="color:#666">-</span><span style="color:#40a070">1.0497</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.8927</span>, <span style="color:#666">-</span><span style="color:#40a070">0.4710</span>, <span style="color:#666">-</span><span style="color:#40a070">0.5375</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.1299</span>, <span style="color:#666">-</span><span style="color:#40a070">0.1249</span>,  <span style="color:#40a070">0.3380</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.4457</span>,  <span style="color:#40a070">0.4655</span>, <span style="color:#666">-</span><span style="color:#40a070">0.3996</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.0582</span>, <span style="color:#666">-</span><span style="color:#40a070">0.2470</span>, <span style="color:#666">-</span><span style="color:#40a070">0.3050</span>]])
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>Rank:<span style="color:#40a070">0</span> weight:
+</span></span><span style="display:flex;"><span>Parameter containing:
+</span></span><span style="display:flex;"><span>tensor([[<span style="color:#666">-</span><span style="color:#40a070">0.6482</span>,  <span style="color:#40a070">0.0033</span>, <span style="color:#666">-</span><span style="color:#40a070">0.4027</span>],
+</span></span><span style="display:flex;"><span>        [ <span style="color:#40a070">0.1520</span>,  <span style="color:#40a070">0.6575</span>, <span style="color:#666">-</span><span style="color:#40a070">0.2176</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.4115</span>,  <span style="color:#40a070">0.6603</span>, <span style="color:#666">-</span><span style="color:#40a070">0.0949</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.6823</span>,  <span style="color:#40a070">0.5604</span>, <span style="color:#666">-</span><span style="color:#40a070">1.0497</span>]], requires_grad<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">True</span>)
+</span></span><span style="display:flex;"><span>Rank:<span style="color:#40a070">1</span> weight:
+</span></span><span style="display:flex;"><span>Parameter containing:
+</span></span><span style="display:flex;"><span>tensor([[<span style="color:#666">-</span><span style="color:#40a070">0.8927</span>, <span style="color:#666">-</span><span style="color:#40a070">0.4710</span>, <span style="color:#666">-</span><span style="color:#40a070">0.5375</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.1299</span>, <span style="color:#666">-</span><span style="color:#40a070">0.1249</span>,  <span style="color:#40a070">0.3380</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.4457</span>,  <span style="color:#40a070">0.4655</span>, <span style="color:#666">-</span><span style="color:#40a070">0.3996</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.0582</span>, <span style="color:#666">-</span><span style="color:#40a070">0.2470</span>, <span style="color:#666">-</span><span style="color:#40a070">0.3050</span>]], requires_grad<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">True</span>)</span></span></code></pre></div><p>介绍到这里，相信大家对于 ColumnParallelLinear 内部的实现流程已经比较清楚了，下面我们需要来回答前面提出的问题：</p>
+<p>为什么非先初始化一个整块 <code>master_weight</code> 然后划分到各个设备上，而不是仅在各个设备上初始自己对应的权重块，也就是上面对应的 <code>layer.weight</code>？</p>
+<h3 id="24-全局-master_weight-作用">2.4 全局 <code>master_weight</code> 作用<a class="anchor" href="#24-%e5%85%a8%e5%b1%80-master_weight-%e4%bd%9c%e7%94%a8">#</a></h3>
+<p>对于为什么需要全局 <code>master_weight</code> 有下面几点原因：</p>
+<p>先造一个完整的大矩阵再切，可以保证“切出来的每一片”在逻辑上、位置上、随机数上都严格对应全局矩阵，并且方便做 checkpoint、debug 和各种跳跃式切分。并且，由于代码实现是并行各自切自己的，所以还没有通信上的开销。</p>
+<p>虽然每个进程都构造了 <code>master_weight</code>，但它仅用于初始化自己的 <code>self.weight</code> 变量，<code>master_weight</code> 本身不会参与训练和计算图构建，也不会保留下来（除非 <code>keep_master_weight_for_test=True</code>），而整个过程是为了保证每个 rank 的 <code>self.weight</code> 是从相同初始化逻辑中切出来的 —— 以确保整个模型行为一致性。</p>
+<p>如果你只初始化局部权重块，虽然节省了那点微不足道的内存／计算，但是会丢失一致性、可重组性以及对复杂切分（<code>stride&gt;1</code>）的天然支持。当 <code>stride&gt;1</code>，切分并不是简单的连续区间，而是跳跃式地取若干小块，如果你只给每卡初始化它自己那几段，那么在不先生成全局 <code>master_weight</code> 的前提下，要正确地“插入”这些跳跃段就非常复杂——得搞清楚它们在全局矩阵的原始排布。</p>
+<h2 id="3-从零实现-rowparallellinear">3. 从零实现 RowParallelLinear<a class="anchor" href="#3-%e4%bb%8e%e9%9b%b6%e5%ae%9e%e7%8e%b0-rowparallellinear">#</a></h2>
+<p>在介绍完 ColumnParallelLinear 以后，我们再来看 RowParallelLinear 的实现过程就非常容易了，我们下面简单地来看一下。</p>
+<h3 id="31-rowparallellinear-代码实现">3.1 RowParallelLinear 代码实现<a class="anchor" href="#31-rowparallellinear-%e4%bb%a3%e7%a0%81%e5%ae%9e%e7%8e%b0">#</a></h3>
+<p>对于 RowParallelLinear 的实现过程来说，其整个代码层次结构同图3类似，所以我们下面直接来看代码的实现过程。</p>
+<p><strong>① 初始化方法</strong></p>
+<p>下面，首先来看看初始化方法中的实现过程，如下所示：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">RowParallelLinear</span>(torch<span style="color:#666">.</span>nn<span style="color:#666">.</span>Module):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">__init__</span>( <span style="color:#007020">self</span>, in_features: <span style="color:#007020">int</span>, out_features: <span style="color:#007020">int</span>,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>             bias: <span style="color:#007020">bool</span> <span style="color:#666">=</span> <span style="color:#007020;font-weight:bold">True</span>, input_is_parallel: <span style="color:#007020">bool</span> <span style="color:#666">=</span> <span style="color:#007020;font-weight:bold">False</span>,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>             init_method: Callable[[torch<span style="color:#666">.</span>Tensor], torch<span style="color:#666">.</span>Tensor] <span style="color:#666">=</span> init<span style="color:#666">.</span>xavier_normal_,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>             stride: <span style="color:#007020">int</span> <span style="color:#666">=</span> <span style="color:#40a070">1</span>, keep_master_weight_for_test: <span style="color:#007020">bool</span> <span style="color:#666">=</span> <span style="color:#007020;font-weight:bold">False</span>,):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>         <span style="color:#007020">super</span>(RowParallelLinear, <span style="color:#007020">self</span>)<span style="color:#666">.</span><span style="color:#06287e">__init__</span>()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>in_features <span style="color:#666">=</span> in_features
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>out_features <span style="color:#666">=</span> out_features
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>input_is_parallel <span style="color:#666">=</span> input_is_parallel
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>         world_size <span style="color:#666">=</span> get_model_parallel_world_size()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>input_size_per_partition <span style="color:#666">=</span> divide_and_check_no_remainder(in_features, world_size)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>weight <span style="color:#666">=</span> nn<span style="color:#666">.</span>Parameter(torch<span style="color:#666">.</span>Tensor(<span style="color:#007020">self</span><span style="color:#666">.</span>out_features, <span style="color:#007020">self</span><span style="color:#666">.</span>input_size_per_partition))
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>         <span style="color:#007020;font-weight:bold">if</span> bias:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>             <span style="color:#007020">self</span><span style="color:#666">.</span>bias <span style="color:#666">=</span> nn<span style="color:#666">.</span>Parameter(torch<span style="color:#666">.</span>Tensor(<span style="color:#007020">self</span><span style="color:#666">.</span>out_features))
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>             <span style="color:#007020;font-weight:bold">with</span> torch<span style="color:#666">.</span>no_grad():
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>                 <span style="color:#007020">self</span><span style="color:#666">.</span>bias<span style="color:#666">.</span>zero_()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>         <span style="color:#007020;font-weight:bold">else</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>             <span style="color:#007020">self</span><span style="color:#666">.</span>register_parameter(<span style="color:#4070a0">&#34;bias&#34;</span>, <span style="color:#007020;font-weight:bold">None</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>master_weight <span style="color:#666">=</span> _initialize_affine_weight( <span style="color:#007020">self</span><span style="color:#666">.</span>weight,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span>             <span style="color:#007020">self</span><span style="color:#666">.</span>out_features, <span style="color:#007020">self</span><span style="color:#666">.</span>in_features, <span style="color:#007020">self</span><span style="color:#666">.</span>input_size_per_partition,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">21</span>             <span style="color:#40a070">1</span>, init_method, stride<span style="color:#666">=</span>stride,return_master_weight<span style="color:#666">=</span>keep_master_weight_for_test)</span></span></code></pre></div><p>上述代码基本上和 ColumnParallelLinear 中的一致，就不再赘述。唯一的区别在于第11~12行中，RowParallelLinear 中是对输入维度进行划分，所以 <code>input_size</code> 是需要能够被 <code>world_size</code> 整除的，最后 <code>self.weight</code> 的形状为 <code>[out_features, input_size_per_partition]</code>。</p>
+<p><strong>② 前向传播</strong></p>
+<p>进一步，实现完初始化操作后开始完成前向传播计算过程，实现代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">forward</span>(<span style="color:#007020">self</span>, input_: torch<span style="color:#666">.</span>Tensor) <span style="color:#666">-&gt;</span> torch<span style="color:#666">.</span>Tensor:  
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>         <span style="color:#007020;font-weight:bold">if</span> <span style="color:#007020">self</span><span style="color:#666">.</span>input_is_parallel:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>             input_parallel <span style="color:#666">=</span> input_
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>         <span style="color:#007020;font-weight:bold">else</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>             input_parallel <span style="color:#666">=</span> scatter_to_model_parallel_region(input_)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>         output_parallel <span style="color:#666">=</span> F<span style="color:#666">.</span>linear(input_parallel, <span style="color:#007020">self</span><span style="color:#666">.</span>weight)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>         output_ <span style="color:#666">=</span> reduce_from_model_parallel_region(output_parallel)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>         <span style="color:#007020;font-weight:bold">if</span> <span style="color:#007020">self</span><span style="color:#666">.</span>bias <span style="color:#007020;font-weight:bold">is</span> <span style="color:#007020;font-weight:bold">not</span> <span style="color:#007020;font-weight:bold">None</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>             output <span style="color:#666">=</span> output_ <span style="color:#666">+</span> <span style="color:#007020">self</span><span style="color:#666">.</span>bias
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>         <span style="color:#007020;font-weight:bold">else</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>             output <span style="color:#666">=</span> output_
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>         <span style="color:#007020;font-weight:bold">return</span> output</span></span></code></pre></div><p>在上述代码中，第2~5行用来判断输入 <code>input_</code> 此时是否已经分布在各个设备上，例如前一步刚刚是计算结束的 <code>ColumnParallelLinear</code> 那 <code>input_is_parallel</code> 就应该设置为 <code>True</code>，否则就要将输入进行划分并广播到各个设备上。第5~6行是各个设备分别各自完成对应的线性组合计算然后相加得到最后的输出 <code>output_</code> 结果。</p>
+<h3 id="32-图解-rowparallellinear-并行过程">3.2 图解 RowParallelLinear 并行过程<a class="anchor" href="#32-%e5%9b%be%e8%a7%a3-rowparallellinear-%e5%b9%b6%e8%a1%8c%e8%bf%87%e7%a8%8b">#</a></h3>
+<p>同样，这里我们也通过一张图来简单地看一下在 RowParallelLinear 中整个代码在运行时权重矩阵的变化过程，整个代码在运行时变量的变化过程，完整示例代码见 <code>Code/C04_Parallel/RowParallelLinear_cpu.py</code> 文件。</p>
+<p>首先，我们给出程序代码，如下所示：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">run</span>(rank, world_size <span style="color:#666">=</span> <span style="color:#40a070">2</span>):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     <span style="color:#666">......</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>     dist<span style="color:#666">.</span>init_process_group(backend<span style="color:#666">=</span><span style="color:#4070a0">&#34;gloo&#34;</span>, rank<span style="color:#666">=</span>rank, world_size<span style="color:#666">=</span>world_size)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>     initialize_model_parallel(world_size)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>     batch_size,input_dim,output_dim <span style="color:#666">=</span> <span style="color:#40a070">2</span>,<span style="color:#40a070">4</span>,<span style="color:#40a070">8</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>     x <span style="color:#666">=</span> torch<span style="color:#666">.</span>randn(batch_size, input_dim)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>     layer <span style="color:#666">=</span> RowParallelLinear( in_features<span style="color:#666">=</span>input_dim, out_features<span style="color:#666">=</span>output_dim, 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>                 input_is_parallel<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">False</span>, keep_master_weight_for_test<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">True</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>     output <span style="color:#666">=</span> layer(x)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>     <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;Rank:</span><span style="color:#70a0d0">{</span>rank<span style="color:#70a0d0">}</span><span style="color:#4070a0"> Output:</span><span style="color:#4070a0;font-weight:bold">\n</span><span style="color:#70a0d0">{</span>output<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>     <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;Rank:</span><span style="color:#70a0d0">{</span>rank<span style="color:#70a0d0">}</span><span style="color:#4070a0"> master_weight:</span><span style="color:#4070a0;font-weight:bold">\n</span><span style="color:#70a0d0">{</span>layer<span style="color:#666">.</span>master_weight<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>     <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;Rank:</span><span style="color:#70a0d0">{</span>rank<span style="color:#70a0d0">}</span><span style="color:#4070a0"> get_master_weight:</span><span style="color:#4070a0;font-weight:bold">\n</span><span style="color:#70a0d0">{</span>layer<span style="color:#666">.</span>get_master_weight()<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>     <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;Rank:</span><span style="color:#70a0d0">{</span>rank<span style="color:#70a0d0">}</span><span style="color:#4070a0"> weight:</span><span style="color:#4070a0;font-weight:bold">\n</span><span style="color:#70a0d0">{</span>layer<span style="color:#666">.</span>weight<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>     dist<span style="color:#666">.</span>destroy_process_group()</span></span></code></pre></div><p>在上述代码中，第8行中我们指定了 <code>input_is_parallel = False</code>，也就表示当前输入 <code>x</code> 并没有分配到各个设备上，需要通过我们上面介绍的 <code>input_parallel = scatter_to_model_parallel_region(input_)</code> 进行广播。 同时，我们还可以通过如下图所示的过程来表示 <code>run()</code> 在并行时的情况。</p>
+<div align=center><img width="600" src="/images/featured/202506011049.png"/> </div><center>图 5. RowParallelLinear 并行计算流程</center>
+<p>如图5所示便是双卡并行时 RowParallelLinear 中权重参数的变化过程，整体上同图4中的过程一致，这里就不再赘述。</p>
+<p>最后，上述 <code>run()</code> 函数运行结束以后的结果为：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#666">&gt;</span> initializing model parallel <span style="color:#007020;font-weight:bold">with</span> size <span style="color:#40a070">2</span>
+</span></span><span style="display:flex;"><span><span style="color:#666">&gt;</span> initializing ddp <span style="color:#007020;font-weight:bold">with</span> size <span style="color:#40a070">1</span>
+</span></span><span style="display:flex;"><span><span style="color:#666">&gt;</span> initializing pipeline <span style="color:#007020;font-weight:bold">with</span> size <span style="color:#40a070">1</span>
+</span></span><span style="display:flex;"><span>Rank:<span style="color:#40a070">1</span> Output:
+</span></span><span style="display:flex;"><span>tensor([[<span style="color:#666">-</span><span style="color:#40a070">1.5984</span>,  <span style="color:#40a070">0.3450</span>, <span style="color:#666">-</span><span style="color:#40a070">0.8908</span>, <span style="color:#666">-</span><span style="color:#40a070">1.0466</span>,  <span style="color:#40a070">0.1380</span>, <span style="color:#666">-</span><span style="color:#40a070">0.0195</span>, <span style="color:#666">-</span><span style="color:#40a070">0.6476</span>,  <span style="color:#40a070">1.5980</span>],
+</span></span><span style="display:flex;"><span>        [ <span style="color:#40a070">0.7189</span>,  <span style="color:#40a070">0.0848</span>,  <span style="color:#40a070">0.2930</span>, <span style="color:#666">-</span><span style="color:#40a070">0.2203</span>, <span style="color:#666">-</span><span style="color:#40a070">1.7449</span>, <span style="color:#666">-</span><span style="color:#40a070">0.4163</span>, <span style="color:#666">-</span><span style="color:#40a070">0.6861</span>, <span style="color:#666">-</span><span style="color:#40a070">0.8015</span>]],
+</span></span><span style="display:flex;"><span>       grad_fn<span style="color:#666">=&lt;</span>AddBackward0<span style="color:#666">&gt;</span>)Rank:<span style="color:#40a070">0</span> Output:
+</span></span><span style="display:flex;"><span>tensor([[<span style="color:#666">-</span><span style="color:#40a070">1.5984</span>,  <span style="color:#40a070">0.3450</span>, <span style="color:#666">-</span><span style="color:#40a070">0.8908</span>, <span style="color:#666">-</span><span style="color:#40a070">1.0466</span>,  <span style="color:#40a070">0.1380</span>, <span style="color:#666">-</span><span style="color:#40a070">0.0195</span>, <span style="color:#666">-</span><span style="color:#40a070">0.6476</span>,  <span style="color:#40a070">1.5980</span>],
+</span></span><span style="display:flex;"><span>        [ <span style="color:#40a070">0.7189</span>,  <span style="color:#40a070">0.0848</span>,  <span style="color:#40a070">0.2930</span>, <span style="color:#666">-</span><span style="color:#40a070">0.2203</span>, <span style="color:#666">-</span><span style="color:#40a070">1.7449</span>, <span style="color:#666">-</span><span style="color:#40a070">0.4163</span>, <span style="color:#666">-</span><span style="color:#40a070">0.6861</span>, <span style="color:#666">-</span><span style="color:#40a070">0.8015</span>]],
+</span></span><span style="display:flex;"><span>       grad_fn<span style="color:#666">=&lt;</span>AddBackward0<span style="color:#666">&gt;</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>Rank:<span style="color:#40a070">1</span> master_weight:
+</span></span><span style="display:flex;"><span>tensor([[ <span style="color:#40a070">0.4043</span>, <span style="color:#666">-</span><span style="color:#40a070">0.3316</span>,  <span style="color:#40a070">0.4244</span>, <span style="color:#666">-</span><span style="color:#40a070">0.1243</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.2400</span>, <span style="color:#666">-</span><span style="color:#40a070">0.0837</span>,  <span style="color:#40a070">0.2050</span>,  <span style="color:#40a070">0.0367</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.2023</span>, <span style="color:#666">-</span><span style="color:#40a070">0.1222</span>,  <span style="color:#40a070">0.0777</span>,  <span style="color:#40a070">0.0610</span>],
+</span></span><span style="display:flex;"><span>        [ <span style="color:#40a070">0.1911</span>, <span style="color:#666">-</span><span style="color:#40a070">0.3903</span>, <span style="color:#666">-</span><span style="color:#40a070">0.2756</span>, <span style="color:#666">-</span><span style="color:#40a070">0.2109</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.0623</span>, <span style="color:#666">-</span><span style="color:#40a070">0.5191</span>, <span style="color:#666">-</span><span style="color:#40a070">0.9562</span>, <span style="color:#666">-</span><span style="color:#40a070">0.9136</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.6861</span>, <span style="color:#666">-</span><span style="color:#40a070">0.2524</span>, <span style="color:#666">-</span><span style="color:#40a070">0.1756</span>, <span style="color:#666">-</span><span style="color:#40a070">0.0309</span>],
+</span></span><span style="display:flex;"><span>        [ <span style="color:#40a070">0.2642</span>, <span style="color:#666">-</span><span style="color:#40a070">0.2509</span>, <span style="color:#666">-</span><span style="color:#40a070">0.1439</span>, <span style="color:#666">-</span><span style="color:#40a070">0.4757</span>],
+</span></span><span style="display:flex;"><span>        [ <span style="color:#40a070">0.3479</span>, <span style="color:#666">-</span><span style="color:#40a070">0.1346</span>, <span style="color:#666">-</span><span style="color:#40a070">0.2158</span>, <span style="color:#666">-</span><span style="color:#40a070">0.0095</span>]])
+</span></span><span style="display:flex;"><span>Rank:<span style="color:#40a070">0</span> master_weight:
+</span></span><span style="display:flex;"><span>tensor([[<span style="color:#666">-</span><span style="color:#40a070">0.3933</span>, <span style="color:#666">-</span><span style="color:#40a070">0.0278</span>,  <span style="color:#40a070">0.5974</span>, <span style="color:#666">-</span><span style="color:#40a070">0.0525</span>],
+</span></span><span style="display:flex;"><span>        [ <span style="color:#40a070">0.0853</span>, <span style="color:#666">-</span><span style="color:#40a070">0.3322</span>,  <span style="color:#40a070">0.2918</span>, <span style="color:#666">-</span><span style="color:#40a070">0.1643</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.2847</span>,  <span style="color:#40a070">0.1345</span>, <span style="color:#666">-</span><span style="color:#40a070">0.3409</span>,  <span style="color:#40a070">0.2798</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.2567</span>,  <span style="color:#40a070">0.3180</span>,  <span style="color:#40a070">0.0633</span>,  <span style="color:#40a070">0.0461</span>],
+</span></span><span style="display:flex;"><span>        [ <span style="color:#40a070">0.2794</span>,  <span style="color:#40a070">0.1202</span>, <span style="color:#666">-</span><span style="color:#40a070">0.3799</span>, <span style="color:#666">-</span><span style="color:#40a070">0.4058</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.0569</span>, <span style="color:#666">-</span><span style="color:#40a070">0.1793</span>, <span style="color:#666">-</span><span style="color:#40a070">0.7418</span>, <span style="color:#666">-</span><span style="color:#40a070">0.7882</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.1109</span>, <span style="color:#666">-</span><span style="color:#40a070">0.4893</span>, <span style="color:#666">-</span><span style="color:#40a070">0.0777</span>, <span style="color:#666">-</span><span style="color:#40a070">0.1438</span>],
+</span></span><span style="display:flex;"><span>        [ <span style="color:#40a070">0.4086</span>, <span style="color:#666">-</span><span style="color:#40a070">0.5037</span>, <span style="color:#666">-</span><span style="color:#40a070">0.2567</span>, <span style="color:#666">-</span><span style="color:#40a070">0.6275</span>]])
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>Rank:<span style="color:#40a070">0</span> get_master_weight:
+</span></span><span style="display:flex;"><span>tensor([[<span style="color:#666">-</span><span style="color:#40a070">0.3933</span>, <span style="color:#666">-</span><span style="color:#40a070">0.0278</span>,  <span style="color:#40a070">0.4244</span>, <span style="color:#666">-</span><span style="color:#40a070">0.1243</span>],
+</span></span><span style="display:flex;"><span>        [ <span style="color:#40a070">0.0853</span>, <span style="color:#666">-</span><span style="color:#40a070">0.3322</span>,  <span style="color:#40a070">0.2050</span>,  <span style="color:#40a070">0.0367</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.2847</span>,  <span style="color:#40a070">0.1345</span>,  <span style="color:#40a070">0.0777</span>,  <span style="color:#40a070">0.0610</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.2567</span>,  <span style="color:#40a070">0.3180</span>, <span style="color:#666">-</span><span style="color:#40a070">0.2756</span>, <span style="color:#666">-</span><span style="color:#40a070">0.2109</span>],
+</span></span><span style="display:flex;"><span>        [ <span style="color:#40a070">0.2794</span>,  <span style="color:#40a070">0.1202</span>, <span style="color:#666">-</span><span style="color:#40a070">0.9562</span>, <span style="color:#666">-</span><span style="color:#40a070">0.9136</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.0569</span>, <span style="color:#666">-</span><span style="color:#40a070">0.1793</span>, <span style="color:#666">-</span><span style="color:#40a070">0.1756</span>, <span style="color:#666">-</span><span style="color:#40a070">0.0309</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.1109</span>, <span style="color:#666">-</span><span style="color:#40a070">0.4893</span>, <span style="color:#666">-</span><span style="color:#40a070">0.1439</span>, <span style="color:#666">-</span><span style="color:#40a070">0.4757</span>],
+</span></span><span style="display:flex;"><span>        [ <span style="color:#40a070">0.4086</span>, <span style="color:#666">-</span><span style="color:#40a070">0.5037</span>, <span style="color:#666">-</span><span style="color:#40a070">0.2158</span>, <span style="color:#666">-</span><span style="color:#40a070">0.0095</span>]])
+</span></span><span style="display:flex;"><span>Rank:<span style="color:#40a070">1</span> get_master_weight:
+</span></span><span style="display:flex;"><span>tensor([[<span style="color:#666">-</span><span style="color:#40a070">0.3933</span>, <span style="color:#666">-</span><span style="color:#40a070">0.0278</span>,  <span style="color:#40a070">0.4244</span>, <span style="color:#666">-</span><span style="color:#40a070">0.1243</span>],
+</span></span><span style="display:flex;"><span>        [ <span style="color:#40a070">0.0853</span>, <span style="color:#666">-</span><span style="color:#40a070">0.3322</span>,  <span style="color:#40a070">0.2050</span>,  <span style="color:#40a070">0.0367</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.2847</span>,  <span style="color:#40a070">0.1345</span>,  <span style="color:#40a070">0.0777</span>,  <span style="color:#40a070">0.0610</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.2567</span>,  <span style="color:#40a070">0.3180</span>, <span style="color:#666">-</span><span style="color:#40a070">0.2756</span>, <span style="color:#666">-</span><span style="color:#40a070">0.2109</span>],
+</span></span><span style="display:flex;"><span>        [ <span style="color:#40a070">0.2794</span>,  <span style="color:#40a070">0.1202</span>, <span style="color:#666">-</span><span style="color:#40a070">0.9562</span>, <span style="color:#666">-</span><span style="color:#40a070">0.9136</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.0569</span>, <span style="color:#666">-</span><span style="color:#40a070">0.1793</span>, <span style="color:#666">-</span><span style="color:#40a070">0.1756</span>, <span style="color:#666">-</span><span style="color:#40a070">0.0309</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.1109</span>, <span style="color:#666">-</span><span style="color:#40a070">0.4893</span>, <span style="color:#666">-</span><span style="color:#40a070">0.1439</span>, <span style="color:#666">-</span><span style="color:#40a070">0.4757</span>],
+</span></span><span style="display:flex;"><span>        [ <span style="color:#40a070">0.4086</span>, <span style="color:#666">-</span><span style="color:#40a070">0.5037</span>, <span style="color:#666">-</span><span style="color:#40a070">0.2158</span>, <span style="color:#666">-</span><span style="color:#40a070">0.0095</span>]])
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>Rank:<span style="color:#40a070">1</span> weight:
+</span></span><span style="display:flex;"><span>Parameter containing:
+</span></span><span style="display:flex;"><span>tensor([[ <span style="color:#40a070">0.4244</span>, <span style="color:#666">-</span><span style="color:#40a070">0.1243</span>],
+</span></span><span style="display:flex;"><span>        [ <span style="color:#40a070">0.2050</span>,  <span style="color:#40a070">0.0367</span>],
+</span></span><span style="display:flex;"><span>        [ <span style="color:#40a070">0.0777</span>,  <span style="color:#40a070">0.0610</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.2756</span>, <span style="color:#666">-</span><span style="color:#40a070">0.2109</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.9562</span>, <span style="color:#666">-</span><span style="color:#40a070">0.9136</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.1756</span>, <span style="color:#666">-</span><span style="color:#40a070">0.0309</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.1439</span>, <span style="color:#666">-</span><span style="color:#40a070">0.4757</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.2158</span>, <span style="color:#666">-</span><span style="color:#40a070">0.0095</span>]], requires_grad<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">True</span>)
+</span></span><span style="display:flex;"><span>Rank:<span style="color:#40a070">0</span> weight:
+</span></span><span style="display:flex;"><span>Parameter containing:
+</span></span><span style="display:flex;"><span>tensor([[<span style="color:#666">-</span><span style="color:#40a070">0.3933</span>, <span style="color:#666">-</span><span style="color:#40a070">0.0278</span>],
+</span></span><span style="display:flex;"><span>        [ <span style="color:#40a070">0.0853</span>, <span style="color:#666">-</span><span style="color:#40a070">0.3322</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.2847</span>,  <span style="color:#40a070">0.1345</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.2567</span>,  <span style="color:#40a070">0.3180</span>],
+</span></span><span style="display:flex;"><span>        [ <span style="color:#40a070">0.2794</span>,  <span style="color:#40a070">0.1202</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.0569</span>, <span style="color:#666">-</span><span style="color:#40a070">0.1793</span>],
+</span></span><span style="display:flex;"><span>        [<span style="color:#666">-</span><span style="color:#40a070">0.1109</span>, <span style="color:#666">-</span><span style="color:#40a070">0.4893</span>],
+</span></span><span style="display:flex;"><span>        [ <span style="color:#40a070">0.4086</span>, <span style="color:#666">-</span><span style="color:#40a070">0.5037</span>]], requires_grad<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">True</span>)</span></span></code></pre></div><p>到此，对于 ColumnParallelLinear 和 RowParallelLinear 这两个张量并行的实现过程就介绍完了，感谢您的阅读！</p>
+<h1 id="引用">引用<a class="anchor" href="#%e5%bc%95%e7%94%a8">#</a></h1>
+<p>[1] <a href="https://github.com/facebookresearch/fairscale">https://github.com/facebookresearch/fairscale</a></p>
+<div class="book-page-pv text-small" id="busuanzi_container_page_pv">
+      <span class="book-page-pv-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" focusable="false">
+          <path d="M1.5 12s3.9-6.5 10.5-6.5S22.5 12 22.5 12s-3.9 6.5-10.5 6.5S1.5 12 1.5 12Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7"/>
+          <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.7"/>
+        </svg>
+      </span>
+      <span class="book-page-pv-label">阅读</span>
+      <span class="book-page-pv-value" id="busuanzi_value_page_pv">--</span>
+    </div><section class="book-article-index book-related-articles" aria-labelledby="related-articles-title">
+    <h2 id="related-articles-title">相关阅读</h2>
+    <div class="book-article-grid"><article class="book-article-card book-related-article-card">
+              <h3 class="book-article-card-title">
+                <a href="/featured/parallel-linear/">大模型中的 ParallelLinear 张量并行计算原理</a>
+              </h3><p class="book-article-card-desc">本文以 LLaMA、GPT-3 等千亿参数大模型为什么无法用单卡训练为出发点，系统讲清数据并行、模型并行与张量并行的动机与区别，重点图解 ColumnParallelLinear、RowParallelLinear 的切分与通信原理，并对比 …</p></article></div>
+  </section></article>
+ 
+      
+
+
+      <footer class="book-footer">
+        
+  <div class="flex flex-wrap justify-between">
+
+<div>
+
+</div>
+
+<div>
+
+</div>
+
+</div>
+
+
+
+ 
+        
+  
+  <div class="book-comments"><div class="giscus"></div>
+<script src="https://giscus.app/client.js"
+        data-repo="mlwithme/mlwithme.github.io"
+        data-repo-id="R_kgDOTBt94Q"
+        data-category="Announcements"
+        data-category-id="DIC_kwDOTBt94c4C_21V"
+        data-mapping="pathname"
+        data-strict="1"
+        data-reactions-enabled="1"
+        data-emit-metadata="0"
+        data-input-position="top"
+        data-theme="preferred_color_scheme"
+        data-lang="zh-CN"
+        data-loading="lazy"
+        crossorigin="anonymous"
+        async>
+</script>
+</div>
+  
+ 
+        
+  <link rel="stylesheet" href="https://mlwithme.github.io/katex/katex.min.css" />
+  <script defer src="https://mlwithme.github.io/katex/katex.min.js"></script>
+  <script defer src="https://mlwithme.github.io/katex/auto-render.min.js"></script>
+  
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        if (window.renderMathInElement) {
+          renderMathInElement(
+            document.querySelector(".book-page"),
+            Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
+          );
+        }
+      });
+    </script>
+  
+
+        
+  
+ 
+        
+  
+    <script>(function(){document.querySelectorAll("pre:has(code)").forEach(e=>{e.addEventListener("click",e.focus),e.addEventListener("copy",function(t){if(t.preventDefault(),navigator.clipboard){const t=window.getSelection().toString()||e.textContent;navigator.clipboard.writeText(t)}})})})()</script>
+  
+
+      </footer>
+
+      <label for="menu-control" class="hidden book-menu-overlay"></label>
+    </div>
+
+    
+  
+  <aside class="book-toc">
+    <div class="book-toc-content">
+      
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#1-fairscale-并行计算库">1. <code>fairscale</code> 并行计算库</a>
+      <ul>
+        <li><a href="#11-fairscale-库介绍">1.1 <code>fairscale</code> 库介绍</a></li>
+        <li><a href="#12-安装-fairscale-库">1.2 安装 <code>fairscale</code> 库</a></li>
+        <li><a href="#13-cpu-上模拟运行">1.3 CPU 上模拟运行</a></li>
+        <li><a href="#14-gpu-上真实运行">1.4 GPU 上真实运行</a></li>
+      </ul>
+    </li>
+    <li><a href="#2-从零实现-columnparallellinear">2. 从零实现 ColumnParallelLinear</a>
+      <ul>
+        <li><a href="#21-stride-概念介绍">2.1 stride 概念介绍</a></li>
+        <li><a href="#22-columnparallellinear-代码实现">2.2 ColumnParallelLinear 代码实现</a></li>
+        <li><a href="#23-图解-columnparallellinear-并行过程">2.3 图解 ColumnParallelLinear 并行过程</a></li>
+        <li><a href="#24-全局-master_weight-作用">2.4 全局 <code>master_weight</code> 作用</a></li>
+      </ul>
+    </li>
+    <li><a href="#3-从零实现-rowparallellinear">3. 从零实现 RowParallelLinear</a>
+      <ul>
+        <li><a href="#31-rowparallellinear-代码实现">3.1 RowParallelLinear 代码实现</a></li>
+        <li><a href="#32-图解-rowparallellinear-并行过程">3.2 图解 RowParallelLinear 并行过程</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+
+
+
+
+    </div>
+  </aside>
+  
+ 
+  </main>
+
+  <button
+  type="button"
+  class="book-back-to-top"
+  aria-label="回到顶部"
+  title="回到顶部"
+>
+  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <path
+      d="M12 5.5l-5.25 5.25 1.5 1.5 2.7-2.7V18.5h2.1V9.55l2.7 2.7 1.5-1.5L12 5.5z"
+      fill="currentColor"
+    ></path>
+  </svg>
+</button>
+
+<script>
+  (function () {
+    var button = document.querySelector(".book-back-to-top");
+    if (!button) {
+      return;
+    }
+
+    var toggleButton = function () {
+      if (window.scrollY > 360) {
+        button.classList.add("is-visible");
+      } else {
+        button.classList.remove("is-visible");
+      }
+    };
+
+    button.addEventListener("click", function () {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+
+    toggleButton();
+    window.addEventListener("scroll", toggleButton, { passive: true });
+  })();
+</script>
+
+<div class="book-floating-toolbox" data-book-floating-toolbox>
+  <ul
+    class="book-floating-toolbox__items"
+    id="book-floating-toolbox-items"
+    role="menu"
+    aria-label="工具箱"
+    hidden
+  >
+    <li class="book-floating-toolbox__item" role="none" style="--book-toolbox-index: 0; --book-toolbox-count: 3;">
+      <a
+        class="book-floating-toolbox__action"
+        role="menuitem"
+        href="/glossary/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="术语百科"
+      >
+        <span class="book-floating-toolbox__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path
+              d="M5 4.5h11.5a2.5 2.5 0 0 1 2.5 2.5V20l-4-2.5L11 20l-4-2.5L3 20V7a2.5 2.5 0 0 1 2-2.5z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linejoin="round"
+            ></path>
+            <path
+              d="M7.5 9.5h7M7.5 12.5h5"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+            ></path>
+          </svg>
+        </span>
+      </a>
+      <span class="book-floating-toolbox__tip" aria-hidden="true">术语百科</span>
+    </li>
+    <li class="book-floating-toolbox__item" role="none" style="--book-toolbox-index: 1; --book-toolbox-count: 3;">
+      <a
+        class="book-floating-toolbox__action"
+        role="menuitem"
+        href="/code-templates/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="代码模板"
+      >
+        <span class="book-floating-toolbox__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path
+              d="M8.5 7.5 4 12l4.5 4.5M15.5 7.5 20 12l-4.5 4.5M13.5 5l-3 14"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            ></path>
+          </svg>
+        </span>
+      </a>
+      <span class="book-floating-toolbox__tip" aria-hidden="true">代码模板</span>
+    </li>
+    <li class="book-floating-toolbox__item" role="none" style="--book-toolbox-index: 2; --book-toolbox-count: 3;">
+      <a
+        class="book-floating-toolbox__action"
+        role="menuitem"
+        href="https://www.machinelearningwithme.com"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="开发中……"
+      >
+        <span class="book-floating-toolbox__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path
+              d="M9 3.5h6a1.5 1.5 0 0 1 1.5 1.5V7h2.25A1.75 1.75 0 0 1 20.5 8.75v9A1.75 1.75 0 0 1 18.75 19.5H5.25A1.75 1.75 0 0 1 3.5 17.75v-9A1.75 1.75 0 0 1 5.25 7H7.5V5A1.5 1.5 0 0 1 9 3.5z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linejoin="round"
+            ></path>
+            <path
+              d="M9 7h6"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+            ></path>
+            <circle cx="12" cy="13" r="3" fill="none" stroke="currentColor" stroke-width="1.6"></circle>
+          </svg>
+        </span>
+      </a>
+      <span class="book-floating-toolbox__tip" aria-hidden="true">开发中……</span>
+    </li>
+  </ul>
+  <button
+    type="button"
+    class="book-floating-toolbox__toggle"
+    aria-label="工具箱"
+    aria-haspopup="menu"
+    aria-expanded="false"
+    aria-controls="book-floating-toolbox-items"
+    title="工具箱"
+    data-book-toolbox-toggle
+  >
+    <svg class="book-floating-toolbox__toggle-icon-open" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        d="M14.7 6.3a4 4 0 0 0-5.4 5.4l-6.3 6.3a1 1 0 0 0 0 1.4l2 2a1 1 0 0 0 1.4 0l6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-2.4z"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linejoin="round"
+        stroke-linecap="round"
+      ></path>
+      <circle
+        cx="19.5"
+        cy="4.5"
+        r="1.6"
+        fill="currentColor"
+      ></circle>
+    </svg>
+    <svg class="book-floating-toolbox__toggle-icon-close" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        d="M6.5 6.5l11 11M17.5 6.5l-11 11"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.8"
+        stroke-linecap="round"
+      ></path>
+    </svg>
+  </button>
+</div>
+
+<script>
+  (function () {
+    var root = document.querySelector("[data-book-floating-toolbox]");
+    if (!root) {
+      return;
+    }
+    var toggle = root.querySelector("[data-book-toolbox-toggle]");
+    var items = root.querySelector(".book-floating-toolbox__items");
+    if (!toggle || !items) {
+      return;
+    }
+
+    var isOpen = function () {
+      return root.classList.contains("is-open");
+    };
+
+    var open = function () {
+      root.classList.add("is-open");
+      items.hidden = false;
+      toggle.setAttribute("aria-expanded", "true");
+    };
+
+    var close = function () {
+      root.classList.remove("is-open");
+      items.hidden = true;
+      toggle.setAttribute("aria-expanded", "false");
+    };
+
+    toggle.addEventListener("click", function (event) {
+      event.stopPropagation();
+      if (isOpen()) {
+        close();
+      } else {
+        open();
+      }
+    });
+
+    document.addEventListener("click", function (event) {
+      if (!isOpen()) {
+        return;
+      }
+      if (root.contains(event.target)) {
+        return;
+      }
+      close();
+    });
+
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape" && isOpen()) {
+        close();
+        toggle.focus();
+      }
+    });
+
+    items.addEventListener("click", function (event) {
+      if (event.target.closest("a")) {
+        close();
+      }
+    });
+
+    window.addEventListener("pageshow", close);
+  })();
+</script>
+
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

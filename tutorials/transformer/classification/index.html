@@ -1,0 +1,4633 @@
+<!DOCTYPE html>
+<html lang="zh_CN" dir="ltr">
+<head>
+  <!--
+Made with Book Theme
+https://github.com/alex-shpak/hugo-book
+--><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="本文是 Transformer 精读系列第6讲，从零用 Transformer Encoder 搭建 AG_News 新闻文本分类模型。系统讲清分类任务只需 Encoder 不需要 Decoder 的原因、Encoder 输出张量的池化策略、标签与文本的清洗规则与 Vocab 构 …">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="index,follow,max-image-preview:large">
+
+
+
+
+
+<meta property="og:url" content="https://mlwithme.github.io/tutorials/transformer/classification/">
+<meta property="og:site_name" content="《从零学AI指南手册》">
+<meta property="og:title" content="第6讲 Transformer 文本分类实战教程：基于 Encoder 复刻 BERT 的 AG_News 分类实现">
+<meta property="og:description" content="本文是 Transformer 精读系列第6讲，从零用 Transformer Encoder 搭建 AG_News 新闻文本分类模型。系统讲清分类任务只需 Encoder 不需要 Decoder 的原因、Encoder 输出张量的池化策略、标签与文本的清洗规则与 Vocab 构 …">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:type" content="article">
+<meta property="og:image" content="https://mlwithme.github.io/share-cover.png">
+<meta property="og:image:url" content="https://mlwithme.github.io/share-cover.png">
+<meta property="og:image:secure_url" content="https://mlwithme.github.io/share-cover.png">
+<meta property="og:image:width" content="759">
+<meta property="og:image:height" content="759">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:alt" content="《从零学AI指南手册》 - 第6讲 Transformer 文本分类实战教程：基于 Encoder 复刻 BERT 的 AG_News 分类实现">
+
+  <meta property="article:section" content="tutorials">
+  
+    <meta property="article:published_time" content="2026-07-09T22:37:10&#43;08:00">
+  
+  
+    <meta property="article:modified_time" content="2026-07-12T14:56:43&#43;08:00">
+  
+  
+
+
+<script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"WebSite","description":"面向机器学习、深度学习与 AI Agent 的中文系统化学习手册，包含原理讲解、代码示例与实战案例。","inLanguage":"zh_CN","name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
+  </script>
+  <script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.github.io/share-cover.png"},"name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
+  </script><script type="application/ld+json">
+      {"@context":"https://schema.org","@type":"Article","articleSection":"tutorials","author":{"@type":"Person","name":"WangCheng","url":"https://mlwithme.github.ioauthor/"},"dateModified":"2026-07-12T14:56:43+08:00","datePublished":"2026-07-09T22:37:10+08:00","description":"本文是 Transformer 精读系列第6讲，从零用 Transformer Encoder 搭建 AG_News 新闻文本分类模型。系统讲清分类任务只需 Encoder 不需要 Decoder 的原因、Encoder 输出张量的池化策略、标签与文本的清洗规则与 Vocab 构 …","headline":"第6讲 Transformer 文本分类实战教程：基于 Encoder 复刻 BERT 的 AG_News 分类实现","image":["https://mlwithme.github.io/share-cover.png"],"inLanguage":"zh_CN","mainEntityOfPage":"https://mlwithme.github.io/tutorials/transformer/classification/","publisher":{"@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.github.io/share-cover.png"},"name":"《从零学AI指南手册》"},"url":"https://mlwithme.github.io/tutorials/transformer/classification/"}
+    </script><script type="application/ld+json">
+        {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","item":"https://mlwithme.github.io/","name":"首页","position":1},{"@type":"ListItem","item":"https://mlwithme.github.io/tutorials/","name":"专栏文章","position":2},{"@type":"ListItem","item":"https://mlwithme.github.io/tutorials/transformer/","name":"图解 Transformer 入门指南教程","position":3},{"@type":"ListItem","item":"https://mlwithme.github.io/tutorials/transformer/classification/","name":"第6讲 Transformer 文本分类实战教程：基于 Encoder 复刻 BERT 的 AG_News 分类实现","position":4}]}
+      </script>
+
+<title>第6讲 Transformer 文本分类实战教程：基于 Encoder 复刻 BERT 的 AG_News 分类实现 • 《从零学AI指南手册》</title>
+<link rel="icon" href="https://mlwithme.github.io/favicon.png" type="image/png">
+<link rel="shortcut icon" href="https://mlwithme.github.io/favicon.png" type="image/png">
+<link rel="apple-touch-icon" href="https://mlwithme.github.io/favicon.png">
+
+<link rel="manifest" href="/manifest.json">
+<link rel="canonical" href="https://mlwithme.github.io/tutorials/transformer/classification/">
+<link rel="stylesheet" href="/book.min.f6a0d10e1ebfedb446c42559024d340c2bf535391c02340b45233f7f70d21212.css" integrity="sha256-9qDRDh6/7bRGxCVZAk00DCv1NTkcAjQLRSM/f3DSEhI=" crossorigin="anonymous">
+  <script defer type="module" src="/zh-cn.search.min.dfd1fe31bc2a2e217cb690a6a708cf8dd323737c55fe0f592d70a19806537dc4.js" integrity="sha256-39H&#43;MbwqLiF8tpCmpwjPjdMjc3xV/g9ZLXChmAZTfcQ=" crossorigin="anonymous"></script>
+
+  
+
+
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="第6讲 Transformer 文本分类实战教程：基于 Encoder 复刻 BERT 的 AG_News 分类实现">
+<meta name="twitter:description" content="本文是 Transformer 精读系列第6讲，从零用 Transformer Encoder 搭建 AG_News 新闻文本分类模型。系统讲清分类任务只需 Encoder 不需要 Decoder 的原因、Encoder 输出张量的池化策略、标签与文本的清洗规则与 Vocab 构 …">
+<meta name="twitter:url" content="https://mlwithme.github.io/tutorials/transformer/classification/">
+<meta name="twitter:image" content="https://mlwithme.github.io/share-cover.png">
+<meta name="twitter:image:alt" content="《从零学AI指南手册》 - 第6讲 Transformer 文本分类实战教程：基于 Encoder 复刻 BERT 的 AG_News 分类实现">
+<script>
+  var _hmt = _hmt || [];
+  (function() {
+    var hm = document.createElement("script");
+    hm.src = "https://hm.baidu.com/hm.js?74a336dd47fbbab3ceb99d4ad8afcb76";
+    var s = document.getElementsByTagName("script")[0];
+    s.parentNode.insertBefore(hm, s);
+  })();
+</script>
+<script async src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
+
+</head>
+<body dir="ltr" class="book-kind-page book-type-tutorials">
+  <input type="checkbox" class="hidden toggle" id="menu-control" />
+  <input type="checkbox" class="hidden toggle" id="toc-control" />
+  <main class="container flex">
+    
+<aside class="book-menu">
+  <div class="book-menu-content">
+    
+  <nav>
+<h2 class="book-brand">
+  <a class="flex align-center" href="/"><svg xmlns="http://www.w3.org/2000/svg" height="20" width="20" viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true" class="book-brand-icon" style="margin-right:.35em;flex:none">
+      <path d="M240-200h120v-240h240v240h120v-360L480-740 240-560v360Zm-80 80q-33 0-56.5-23.5T80-200v-360q0-27 11-49t31-39l280-220q21-17 47-25t51-8q25 0 51 8t47 25l280 220q20 17 31 39t11 49v360q0 33-23.5 56.5T840-120H600q-17 0-28.5-11.5T560-160v-200H400v200q0 17-11.5 28.5T360-120H160Zm320-280Z"/>
+    </svg>
+
+    <span>返回主页</span>
+
+  </a>
+</h2>
+
+
+<div class="book-search hidden">
+  <input id="book-search-input" type="text" 
+    placeholder="Search"
+    aria-label="Search"
+    maxlength="64" />
+  <div class="book-search-spinner hidden"></div>
+  <ul id="book-search-results"></ul>
+</div>
+<script>document.querySelector(".book-search").classList.remove("hidden")</script>
+
+
+
+
+
+
+
+
+
+
+
+  
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/featured/" class="">
+      <span class="book-menu-link-title">精选文章</span>
+</a>
+  
+
+          
+  <ul>
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bb7497cb5e222579131ad9ad959011cb" class="toggle" checked />
+    <label for="section-bb7497cb5e222579131ad9ad959011cb" class="flex">
+      <a href="/tutorials/" class="">
+        <span class="book-menu-link-title">专栏文章</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/tutorials/transformer/" class="">
+      <span class="book-menu-link-title">图解 Transformer 入门指南教程</span>
+</a>
+  
+
+          
+  <ul>
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/tutorials/bert/" class="">
+      <span class="book-menu-link-title">从零玩转 Bert 详解6大下游任务</span>
+</a>
+  
+
+          
+  <ul>
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/" class="">
+      <span class="book-menu-link-title">大模型Agent开发（更新中……）</span>
+</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-279cf10e5100caa4f65ba3f7dd8888a4" class="toggle"  />
+    <label for="section-279cf10e5100caa4f65ba3f7dd8888a4" class="flex">
+      <a href="/agent/chapter01/" class="">
+        <span class="book-menu-link-title">第 1 章 RAG 基础概念</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/what-is-rag/" class="">
+      <span class="book-menu-link-title">1.1 RAG 提出背景</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/rag-pipeline-overview/" class="">
+      <span class="book-menu-link-title">1.2 RAG 流程概览</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-83c662c2764f1c19f8005eab77fee110" class="toggle"  />
+    <label for="section-83c662c2764f1c19f8005eab77fee110" class="flex">
+      <a href="/agent/chapter02/" class="">
+        <span class="book-menu-link-title">第 2 章 大模型接入与使用</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/intro-to-llm-sdk/" class="">
+      <span class="book-menu-link-title">2.1 SDK 介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/modern-llm-sdk/" class="">
+      <span class="book-menu-link-title">2.2 现代大模型中的 SDK</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/dashscope-api-overview/" class="">
+      <span class="book-menu-link-title">2.3 DashScope 接口体系</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/qwen-onboarding/" class="">
+      <span class="book-menu-link-title">2.4 千问大模型接入与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-1e583d7a26333453241d87c5c16592bd" class="toggle"  />
+    <label for="section-1e583d7a26333453241d87c5c16592bd" class="flex">
+      <a href="/agent/chapter03/" class="">
+        <span class="book-menu-link-title">第 3 章 文档标准化与语义检索</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/document-loading-and-preprocessing/" class="">
+      <span class="book-menu-link-title">3.1 文档加载与标准化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/text-splitting-strategies/" class="">
+      <span class="book-menu-link-title">3.2 常见文本切分策略</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/vector-database-selection/" class="">
+      <span class="book-menu-link-title">3.3 向量数据库选择</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/qwen-embedding-model/" class="">
+      <span class="book-menu-link-title">3.4 Qwen3 Embedding 模型介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/semantic-retrieval-pipeline/" class="">
+      <span class="book-menu-link-title">3.5 语义搜索引擎构建</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/milvus-tutorial/" class="">
+      <span class="book-menu-link-title">3.6  Milvus 模块解析</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="toggle"  />
+    <label for="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="flex">
+      <a href="/agent/chapter04/" class="">
+        <span class="book-menu-link-title">第 4 章 RAG 与 Agent</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/two-step-rag/" class="">
+      <span class="book-menu-link-title">4.1 两步式 RAG 搭建</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/function-calling-basics/" class="">
+      <span class="book-menu-link-title">4.2 Function Calling 概念介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/langchain-tool-decorator/" class="">
+      <span class="book-menu-link-title">4.3 LangChain 中的 Tool 修饰器</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/rag-agent-essentials/" class="">
+      <span class="book-menu-link-title">4.4 RAG Agent 原理与搭建</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/react-framework/" class="">
+      <span class="book-menu-link-title">4.5 复杂问题拆解与ReAct框架</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/two-stage-indexing/" class="">
+      <span class="book-menu-link-title">4.6 RAG 中的两阶段索引</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/qwen3-reranking/" class="">
+      <span class="book-menu-link-title">4.7 Qwen3 Reranking 原理与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/two-stage-rag-agent/" class="">
+      <span class="book-menu-link-title">4.8 基于两阶段索引的 RAG Agent</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/langgraph-basics/" class="">
+      <span class="book-menu-link-title">4.9 LangGraph 基本概念介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/langgraph-custom-rag-agent/" class="">
+      <span class="book-menu-link-title">4.10  基于 LangGraph 构建自定义 RAG Agent</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bf5130286ff0eee8f362b632167a5e6b" class="toggle"  />
+    <label for="section-bf5130286ff0eee8f362b632167a5e6b" class="flex">
+      <a href="/agent/chapter05/" class="">
+        <span class="book-menu-link-title">第 5 章 Agent 记忆机制与管理</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/agent-memory-overview/" class="">
+      <span class="book-menu-link-title">5.1 Agent 记忆机制概览</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/langchain-short-term-memory/" class="">
+      <span class="book-menu-link-title">5.2 短期记忆持久化与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/short-term-memory-management/" class="">
+      <span class="book-menu-link-title">5.3 短期记忆管理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/short-term-memory-rag-agent/" class="">
+      <span class="book-menu-link-title">5.4 拥有短期记忆的 RAG Agent</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/long-term-memory-strategies/" class="">
+      <span class="book-menu-link-title">5.5 长期记忆管理与持久化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/mini-chatgpt-from-scratch/" class="">
+      <span class="book-menu-link-title">5.6 从零实现 Mini ChatGPT 助手</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/pgvector-setup/" class="">
+      <span class="book-menu-link-title">5.7 pgvector 配置安装</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/long-term-memory-retrieval-and-forgetting/" class="">
+      <span class="book-menu-link-title">5.8 长期记忆检索与遗忘</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/langgraph-mini-chatgpt/" class="">
+      <span class="book-menu-link-title">5.9 基于 LangGraph 的Mini ChatGPT 助手</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/create-agent-mini-chatgpt/" class="">
+      <span class="book-menu-link-title">5.10 使用 create_agent 搭建 Mini ChatGPT</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/" class="">
+      <span class="book-menu-link-title">深度学习</span>
+</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/mindmap/" class="">
+      <span class="book-menu-link-title">目录思维导图</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-cf7621e8efb1f3153eaca44a113dcdb9" class="toggle"  />
+    <label for="section-cf7621e8efb1f3153eaca44a113dcdb9" class="flex">
+      <a href="/dl/chapter01/" class="">
+        <span class="book-menu-link-title">第 1 章 深度学习简介</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/dl-development-stages/" class="">
+      <span class="book-menu-link-title">1.1 深度学习的发展阶段</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/dl-key-figures/" class="">
+      <span class="book-menu-link-title">1.2 深度学习中的关键人物</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/mainstream-dl-frameworks/" class="">
+      <span class="book-menu-link-title">1.3 深度学习框架介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f9bf1a68c19405769f9c4a1495708a55" class="toggle"  />
+    <label for="section-f9bf1a68c19405769f9c4a1495708a55" class="flex">
+      <a href="/dl/chapter02/" class="">
+        <span class="book-menu-link-title">第 2 章 环境配置</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/dl-dev-environment-architecture/" class="">
+      <span class="book-menu-link-title">2.1 体系结构介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/dl-cuda-pytorch-install/" class="">
+      <span class="book-menu-link-title">2.2 深度学习环境安装</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/dl-cuda-training-env-setup/" class="">
+      <span class="book-menu-link-title">2.3 开发环境安装配置</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="toggle"  />
+    <label for="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="flex">
+      <a href="/dl/chapter03/" class="">
+        <span class="book-menu-link-title">第 3 章 深度学习基础</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/linear-regression-basics/" class="">
+      <span class="book-menu-link-title">3.1 线性回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/linear-regression-implementation/" class="">
+      <span class="book-menu-link-title">3.2 线性回归简洁实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/backpropagation-and-gradient-descent/" class="">
+      <span class="book-menu-link-title">3.3 梯度下降与反向传播</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/regression-from-scratch/" class="">
+      <span class="book-menu-link-title">3.4 从零实现回归模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/softmax-regression-basics/" class="">
+      <span class="book-menu-link-title">3.5 从逻辑回归到Softmax回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/softmax-regression-implementation/" class="">
+      <span class="book-menu-link-title">3.6 Softmax回归简洁实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/softmax-regression-from-scratch/" class="">
+      <span class="book-menu-link-title">3.7 从零实现分类模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/regression-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">3.8 回归模型评估指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/classification-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">3.9 分类模型评估指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/overfitting-and-regularization/" class="">
+      <span class="book-menu-link-title">3.10 过拟合与正则化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/hyperparameters-and-cross-validation/" class="">
+      <span class="book-menu-link-title">3.11 超参数与交叉验证</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/activation-functions/" class="">
+      <span class="book-menu-link-title">3.12 激活函数</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/multi-label-classification/" class="">
+      <span class="book-menu-link-title">3.13 多标签分类</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-7a12cee83820a928df00362d70804a97" class="toggle"  />
+    <label for="section-7a12cee83820a928df00362d70804a97" class="flex">
+      <a href="/dl/chapter04/" class="">
+        <span class="book-menu-link-title">第 4 章 卷积神经网络</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/cnn-basics/" class="">
+      <span class="book-menu-link-title">4.1 卷积的概念</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/convolution-operation/" class="">
+      <span class="book-menu-link-title">4.2 卷积的计算过程</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/convolution-and-pooling/" class="">
+      <span class="book-menu-link-title">4.3 填充和池化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/lenet5/" class="">
+      <span class="book-menu-link-title">4.4 LeNet5网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/alexnet/" class="">
+      <span class="book-menu-link-title">4.5 AlexNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/vgg/" class="">
+      <span class="book-menu-link-title">4.6 VGG网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/nin/" class="">
+      <span class="book-menu-link-title">4.7 NIN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/googlenet/" class="">
+      <span class="book-menu-link-title">4.8 GoogLeNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/resnet/" class="">
+      <span class="book-menu-link-title">4.9 ResNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/densenet/" class="">
+      <span class="book-menu-link-title">4.10 DenseNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-be9addfd3a15c372d609d09cabb94159" class="toggle"  />
+    <label for="section-be9addfd3a15c372d609d09cabb94159" class="flex">
+      <a href="/dl/chapter05/" class="">
+        <span class="book-menu-link-title">第 5 章 模型训练与复用</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/training-logs-management/" class="">
+      <span class="book-menu-link-title">5.1 参数及日志管理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/tensorboard-tutorial/" class="">
+      <span class="book-menu-link-title">5.2 Tensorboard可视化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/pytorch-model-save-load/" class="">
+      <span class="book-menu-link-title">5.3 模型的保存与复用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/transfer-learning-tutorial/" class="">
+      <span class="book-menu-link-title">5.4 模型的迁移学习</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/pretrained-model-reuse/" class="">
+      <span class="book-menu-link-title">5.5 开源模型复用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/multi-gpu-training/" class="">
+      <span class="book-menu-link-title">5.6 多GPU训练</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/training-data-preprocessing-cache/" class="">
+      <span class="book-menu-link-title">5.7 数据预处理与缓存</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="toggle"  />
+    <label for="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="flex">
+      <a href="/dl/chapter06/" class="">
+        <span class="book-menu-link-title">第 6 章 模型优化方法</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/learning-rate-scheduler/" class="">
+      <span class="book-menu-link-title">6.1 学习率调度器</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/gradient-clipping/" class="">
+      <span class="book-menu-link-title">6.2 梯度裁剪</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/batch-norm/" class="">
+      <span class="book-menu-link-title">6.3 批归一化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/layer-norm/" class="">
+      <span class="book-menu-link-title">6.4 层归一化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/group-norm/" class="">
+      <span class="book-menu-link-title">6.5 组归一化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/momentum/" class="">
+      <span class="book-menu-link-title">6.6 动量法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/ada-grad/" class="">
+      <span class="book-menu-link-title">6.7 AdaGrad算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/ada-delta/" class="">
+      <span class="book-menu-link-title">6.8 AdaDelta算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/adam/" class="">
+      <span class="book-menu-link-title">6.9 Adam算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/weight-initialization/" class="">
+      <span class="book-menu-link-title">6.10 初始化方法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-517b751d7c44a7ac77d25d295ed44271" class="toggle"  />
+    <label for="section-517b751d7c44a7ac77d25d295ed44271" class="flex">
+      <a href="/dl/chapter07/" class="">
+        <span class="book-menu-link-title">第 7 章 循环神经网络</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/rnn-basics/" class="">
+      <span class="book-menu-link-title">7.1 RNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/time-series-modeling/" class="">
+      <span class="book-menu-link-title">7.2 时序数据</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/lstm/" class="">
+      <span class="book-menu-link-title">7.3 LSTM网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/gru/" class="">
+      <span class="book-menu-link-title">7.4 GRU网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/bi-rnn/" class="">
+      <span class="book-menu-link-title">7.5 BiRNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/char-rnn/" class="">
+      <span class="book-menu-link-title">7.6 CharRNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-b9b861f64ba32bc68dfb977497de37d9" class="toggle"  />
+    <label for="section-b9b861f64ba32bc68dfb977497de37d9" class="flex">
+      <a href="/dl/chapter08/" class="">
+        <span class="book-menu-link-title">第 8 章 时序与模型融合</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/textcnn/" class="">
+      <span class="book-menu-link-title">8.1 TextCNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/textrnn/" class="">
+      <span class="book-menu-link-title">8.2 TextRNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/cnn-rnn/" class="">
+      <span class="book-menu-link-title">8.3 CNN-RNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/convlstm/" class="">
+      <span class="book-menu-link-title">8.4 ConvLSTM网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/3dcnn/" class="">
+      <span class="book-menu-link-title">8.5 3DCNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/stresnet/" class="">
+      <span class="book-menu-link-title">8.6 STResNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-e54a1e28b1438b8266637bcb8dac1a44" class="toggle"  />
+    <label for="section-e54a1e28b1438b8266637bcb8dac1a44" class="flex">
+      <a href="/dl/chapter09/" class="">
+        <span class="book-menu-link-title">第 9 章 自然语言处理</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/nlp-basics/" class="">
+      <span class="book-menu-link-title">9.1 自然语言处理介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/word2vec-principle/" class="">
+      <span class="book-menu-link-title">9.2 Word2Vec词向量</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/word2vec-training-and-usage/" class="">
+      <span class="book-menu-link-title">9.3 Word2Vec训练与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/glove/" class="">
+      <span class="book-menu-link-title">9.4 GloVe词向量</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/word-vector-finetuning/" class="">
+      <span class="book-menu-link-title">9.5 词向量的微调使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/fasttext/" class="">
+      <span class="book-menu-link-title">9.6 fastText网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/seq2seq-tutorial/" class="">
+      <span class="book-menu-link-title">9.7 Seq2Seq网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/seq-model-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">9.8 序列模型评价指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/nmt-seq2seq/" class="">
+      <span class="book-menu-link-title">9.9 NMT网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/attention-mechanism/" class="">
+      <span class="book-menu-link-title">9.10 注意力机制</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/nmt-with-attention/" class="">
+      <span class="book-menu-link-title">9.11 含注意力的NMT网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/rnn-with-attention/" class="">
+      <span class="book-menu-link-title">9.12 含注意力的RNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f6636b2f9dc1df93b9fa64dd201716d9" class="toggle"  />
+    <label for="section-f6636b2f9dc1df93b9fa64dd201716d9" class="flex">
+      <a href="/dl/chapter10/" class="">
+        <span class="book-menu-link-title">第 10 章 现代神经网络</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/elmo/" class="">
+      <span class="book-menu-link-title">10.1 ELMo网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-principle/" class="">
+      <span class="book-menu-link-title">10.2 Transformer网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-architecture/" class="">
+      <span class="book-menu-link-title">10.3 Transformer结构</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-implementation/" class="">
+      <span class="book-menu-link-title">10.4 Transformer实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-couplet-model/" class="">
+      <span class="book-menu-link-title">10.5 Transformer对联模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-principle/" class="">
+      <span class="book-menu-link-title">10.6 BERT网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-from-scratch/" class="">
+      <span class="book-menu-link-title">10.7 从零实现BERT</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-text-classification/" class="">
+      <span class="book-menu-link-title">10.8 BERT文本分类模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-sentence-pair-matching/" class="">
+      <span class="book-menu-link-title">10.9 BERT问题选择模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-question-answering/" class="">
+      <span class="book-menu-link-title">10.10 BERT问题回答模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-ner/" class="">
+      <span class="book-menu-link-title">10.11 BERT命名体识别模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-pretraining/" class="">
+      <span class="book-menu-link-title">10.12 BERT从零训练</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-1/" class="">
+      <span class="book-menu-link-title">10.13 GPT-1模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-2-and-gpt-3/" class="">
+      <span class="book-menu-link-title">10.14 GPT-2与GPT-3模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-2-chinese-pretraining/" class="">
+      <span class="book-menu-link-title">10.15 基于GPT-2的中文预训练模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/instructgpt-and-chatgpt/" class="">
+      <span class="book-menu-link-title">10.16 InstructGPT与ChatGPT</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/chatgpt-prompt-engineering/" class="">
+      <span class="book-menu-link-title">10.17 ChatGPT与提示词工程</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/baichuan-usage/" class="">
+      <span class="book-menu-link-title">10.18 百川大模型使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/baichuan-implementation/" class="">
+      <span class="book-menu-link-title">10.19 百川大模型实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-4-and-gpts/" class="">
+      <span class="book-menu-link-title">10.20 GPT-4与GPTs使用</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/" class="">
+      <span class="book-menu-link-title">机器学习</span>
+</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/mindmap/" class="">
+      <span class="book-menu-link-title">目录思维导图</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-48f56957e94e3cf66f3022103a7dd0ff" class="toggle"  />
+    <label for="section-48f56957e94e3cf66f3022103a7dd0ff" class="flex">
+      <a href="/ml/chapter01/" class="">
+        <span class="book-menu-link-title">第 1 章 环境配置</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/conda-install-tutorial/" class="">
+      <span class="book-menu-link-title">1.1 安装使用Conda</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/ml-conda-env-setup/" class="">
+      <span class="book-menu-link-title">1.2 开发环境安装配置</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-56a896338a1c41249d22a3efa0e0063c" class="toggle"  />
+    <label for="section-56a896338a1c41249d22a3efa0e0063c" class="flex">
+      <a href="/ml/chapter02/" class="">
+        <span class="book-menu-link-title">第 2 章 线性回归</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/linear-regression-basics/" class="">
+      <span class="book-menu-link-title">2.1 模型的建立与求解</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/multivariate-linear-regression/" class="">
+      <span class="book-menu-link-title">2.2 多变量线性回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/polynomial-regression/" class="">
+      <span class="book-menu-link-title">2.3 多项式回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/regression-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">2.4 回归模型评估</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/gradient-descent-derivation/" class="">
+      <span class="book-menu-link-title">2.5 梯度下降</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/normal-distribution/" class="">
+      <span class="book-menu-link-title">2.6 正态分布</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/linear-regression-loss-derivation/" class="">
+      <span class="book-menu-link-title">2.7 目标函数推导</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ccd0dc9386ea80613d4cedf91b30058d" class="toggle"  />
+    <label for="section-ccd0dc9386ea80613d4cedf91b30058d" class="flex">
+      <a href="/ml/chapter03/" class="">
+        <span class="book-menu-link-title">第 3 章 逻辑回归</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/logistic-regression-basics/" class="">
+      <span class="book-menu-link-title">3.1 模型的建立与求解</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/logistic-regression-multiclass/" class="">
+      <span class="book-menu-link-title">3.2 多分类任务</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/classification-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">3.3 常见的分类评估指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/logistic-regression-loss-derivation/" class="">
+      <span class="book-menu-link-title">3.4 目标函数推导</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="toggle"  />
+    <label for="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="flex">
+      <a href="/ml/chapter04/" class="">
+        <span class="book-menu-link-title">第 4 章 模型的改善与泛化</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/generalization-basics/" class="">
+      <span class="book-menu-link-title">4.1 基本概念</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/feature-scaling/" class="">
+      <span class="book-menu-link-title">4.2 特征标准化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/overfitting-solutions/" class="">
+      <span class="book-menu-link-title">4.3过拟合</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/l1-l2-regularization/" class="">
+      <span class="book-menu-link-title">4.4 正则化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/bias-and-variance/" class="">
+      <span class="book-menu-link-title">4.5 偏差、方差与交叉验证</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/handwritten-digit-recognition-case/" class="">
+      <span class="book-menu-link-title">4.6 实例分析手写体识别</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-40f463d9d502d24b86ea6120b7030123" class="toggle"  />
+    <label for="section-40f463d9d502d24b86ea6120b7030123" class="flex">
+      <a href="/ml/chapter05/" class="">
+        <span class="book-menu-link-title">第 5 章 K近邻</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/knn-principle/" class="">
+      <span class="book-menu-link-title">5.1 K近邻思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/knn-algorithm-details/" class="">
+      <span class="book-menu-link-title">5.2 K近邻原理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/sklearn-knn-example/" class="">
+      <span class="book-menu-link-title">5.3 sklearn接口与示例代码</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/kd-tree-knn/" class="">
+      <span class="book-menu-link-title">5.4 kd树构建与搜索</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/knn-from-scratch/" class="">
+      <span class="book-menu-link-title">5.5 从零实现K近邻</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-5a460dc18f1e79253296cf2cd0498446" class="toggle"  />
+    <label for="section-5a460dc18f1e79253296cf2cd0498446" class="flex">
+      <a href="/ml/chapter06/" class="">
+        <span class="book-menu-link-title">第 6 章 文本特征与模型复用</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/bag-of-words/" class="">
+      <span class="book-menu-link-title">6.1 词袋模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/knn-spam-classification/" class="">
+      <span class="book-menu-link-title">6 .2 基于K近邻算法的垃圾邮件分类</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/tf-idf/" class="">
+      <span class="book-menu-link-title">6.3 考虑权重的词袋模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/wordcloud-generation/" class="">
+      <span class="book-menu-link-title">6.4 词云图</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-96f45a8b8c8b75adc70c78026d93dbf6" class="toggle"  />
+    <label for="section-96f45a8b8c8b75adc70c78026d93dbf6" class="flex">
+      <a href="/ml/chapter07/" class="">
+        <span class="book-menu-link-title">第 7 章 朴素贝叶斯</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/naive-bayes-basics/" class="">
+      <span class="book-menu-link-title">7.1 朴素贝叶斯算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/bayes-estimation/" class="">
+      <span class="book-menu-link-title">7.2 贝叶斯估计</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/naive-bayes-implementation/" class="">
+      <span class="book-menu-link-title">7.3 朴素贝叶斯实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/multinomial-naive-bayes/" class="">
+      <span class="book-menu-link-title">7.4 多项式朴素贝叶斯原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/gaussian-naive-bayes/" class="">
+      <span class="book-menu-link-title">7.5 高斯朴素贝叶斯原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-22476e49d5058c3e5e7e7366b7ab676f" class="toggle"  />
+    <label for="section-22476e49d5058c3e5e7e7366b7ab676f" class="flex">
+      <a href="/ml/chapter08/" class="">
+        <span class="book-menu-link-title">第 8 章 决策树</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-principle/" class="">
+      <span class="book-menu-link-title">8.1 决策树的基本思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-sklearn/" class="">
+      <span class="book-menu-link-title">8.2 决策树建模与可视化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/id3-vs-c45/" class="">
+      <span class="book-menu-link-title">8.3 决策树生成之ID3与C4.5</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-pruning/" class="">
+      <span class="book-menu-link-title">8.4 决策树剪枝过程</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-from-scratch/" class="">
+      <span class="book-menu-link-title">8.5 从零实现ID3与C4.5算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-continuous-features/" class="">
+      <span class="book-menu-link-title">8.6 连续型特征变量下决策树实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/cart-algorithm/" class="">
+      <span class="book-menu-link-title">8.7 CART生成与剪枝算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/cart-from-scratch/" class="">
+      <span class="book-menu-link-title">8.8 从零实现CART算法及剪枝示例</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-2feb6a51cabb61dba860f45c1881386b" class="toggle"  />
+    <label for="section-2feb6a51cabb61dba860f45c1881386b" class="flex">
+      <a href="/ml/chapter09/" class="">
+        <span class="book-menu-link-title">第 9 章 集成学习与提升算法</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/ensemble-learning-basics/" class="">
+      <span class="book-menu-link-title">9.1 集成学习算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/random-forest-principle/" class="">
+      <span class="book-menu-link-title">9.2 随机森林</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/random-forest-titanic/" class="">
+      <span class="book-menu-link-title">9.3 泰坦尼克号生还预测</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/adaboost/" class="">
+      <span class="book-menu-link-title">9.4 AdaBoost原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/multi-adaboost/" class="">
+      <span class="book-menu-link-title">9.5 MultiAdaBoost原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/gradient-boost/" class="">
+      <span class="book-menu-link-title">9.6 Gradient Boost 原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-938ae119c3849b03ccb6f91cef4243dd" class="toggle"  />
+    <label for="section-938ae119c3849b03ccb6f91cef4243dd" class="flex">
+      <a href="/ml/chapter10/" class="">
+        <span class="book-menu-link-title">第 10 章 支持向量机</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-principle/" class="">
+      <span class="book-menu-link-title">10.1 SVM思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-nonlinear-kernel/" class="">
+      <span class="book-menu-link-title">10.2 SVM线性不可分</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-max-margin/" class="">
+      <span class="book-menu-link-title">10.3 SVM原理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-soft-margin/" class="">
+      <span class="book-menu-link-title">10.4 SVM中的软间隔</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/lagrange-multipliers/" class="">
+      <span class="book-menu-link-title">10.5 拉格朗日乘数法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/kkt-conditions/" class="">
+      <span class="book-menu-link-title">10.6 对偶性与KKT条件</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-optimization/" class="">
+      <span class="book-menu-link-title">10.7 SVM优化问题</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-kernel-functions/" class="">
+      <span class="book-menu-link-title">10.8 SVM核函数原理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/smo-algorithm/" class="">
+      <span class="book-menu-link-title">10.9 SMO算法求解SVM</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-from-scratch/" class="">
+      <span class="book-menu-link-title">10.10 从零实现SVM分类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-9f4d9786d4ab755fde42c64d09b0d026" class="toggle"  />
+    <label for="section-9f4d9786d4ab755fde42c64d09b0d026" class="flex">
+      <a href="/ml/chapter11/" class="">
+        <span class="book-menu-link-title">第 11 章 聚类分析</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/clustering-basics/" class="">
+      <span class="book-menu-link-title">11.1 聚类算法的思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-principle/" class="">
+      <span class="book-menu-link-title">11.2 Kmeans聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-iteration/" class="">
+      <span class="book-menu-link-title">11.3 Kmeans算法求解</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-from-scratch/" class="">
+      <span class="book-menu-link-title">11.4 从零实现Kmeans聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-plus-plus/" class="">
+      <span class="book-menu-link-title">11.5 Kmeans&#43;&#43;聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/clustering-external-metrics/" class="">
+      <span class="book-menu-link-title">11.6 聚类外部评价指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/weighted-kmeans/" class="">
+      <span class="book-menu-link-title">11.7 加权Kmeans聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/clustering-internal-metrics/" class="">
+      <span class="book-menu-link-title">11.8 聚类内部评价指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-k-selection/" class="">
+      <span class="book-menu-link-title">11.9 聚类K值选取与分析</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/dbscan/" class="">
+      <span class="book-menu-link-title">11.10 基于密度的聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/hierarchical-clustering/" class="">
+      <span class="book-menu-link-title">11.11 基于层次的聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-d5e78c45312818bb3abd5c19c858f7e5" class="toggle"  />
+    <label for="section-d5e78c45312818bb3abd5c19c858f7e5" class="flex">
+      <a href="/ml/chapter12/" class="">
+        <span class="book-menu-link-title">第 12 章 降维算法</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/pca-principle/" class="">
+      <span class="book-menu-link-title">12.1 主成分分析</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/kpca/" class="">
+      <span class="book-menu-link-title">12.2 基于核函数的主成分分析</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-a82b41bb7eb95af72bc11e8a3d668acd" class="toggle"  />
+    <label for="section-a82b41bb7eb95af72bc11e8a3d668acd" class="flex">
+      <a href="/ml/chapter13/" class="">
+        <span class="book-menu-link-title">第 13 章 自训练与标签传播</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/self-training/" class="">
+      <span class="book-menu-link-title">13.1 Self-Training 自训练算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/label-propagation/" class="">
+      <span class="book-menu-link-title">13.2 Label Propagation算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/label-spreading/" class="">
+      <span class="book-menu-link-title">13.3 Label Spreading 算法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</nav>
+
+
+
+
+  <script>(function(){var e=document.querySelector("aside .book-menu-content");addEventListener("beforeunload",function(){localStorage.setItem("menu.scrollTop",e.scrollTop)}),e.scrollTop=localStorage.getItem("menu.scrollTop")})()</script>
+
+
+
+  </div>
+</aside>
+ 
+
+    <div class="book-page">
+      <header class="book-header hidden">
+        
+  <div class="flex align-center justify-between">
+  <label for="menu-control">
+    <img src="/icons/menu.svg" class="book-icon" alt="Menu" />
+  </label>
+
+  <h3>第6讲 Transformer 文本分类实战教程：基于 Encoder 复刻 BERT 的 AG_News 分类实现</h3>
+
+  <label for="toc-control">
+    
+    <img src="/icons/toc.svg" class="book-icon" alt="Table of Contents" />
+    
+  </label>
+</div>
+
+
+  
+  <aside class="hidden">
+    
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#61-数据预处理">6.1 数据预处理</a>
+      <ul>
+        <li><a href="#611-语料介绍">6.1.1 语料介绍</a></li>
+        <li><a href="#612-数据集构建">6.1.2 数据集构建</a></li>
+      </ul>
+    </li>
+    <li><a href="#62-文本分类模型">6.2 文本分类模型</a>
+      <ul>
+        <li><a href="#621-网络结构">6.2.1 网络结构</a></li>
+        <li><a href="#622-模型训练">6.2.2 模型训练</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+
+
+
+
+  </aside>
+  
+ 
+      </header>
+
+      
+      
+  <article class="markdown book-article"><nav class="book-breadcrumbs text-small book-breadcrumbs--page" aria-label="面包屑导航">
+    <ol class="book-breadcrumbs__list"><li class="book-breadcrumbs__item"><a class="book-breadcrumbs__link" href="https://mlwithme.github.io/">首页</a></li><li class="book-breadcrumbs__item"><a class="book-breadcrumbs__link" href="https://mlwithme.github.io/tutorials/">专栏文章</a></li><li class="book-breadcrumbs__item"><a class="book-breadcrumbs__link" href="https://mlwithme.github.io/tutorials/transformer/">图解 Transformer 入门指南教程</a></li><li class="book-breadcrumbs__item"><span class="book-breadcrumbs__current" aria-current="page">第6节 基于Transformer的分类模型</span></li></ol>
+  </nav><div class="book-article-lastmod text-small">
+        <span class="book-article-lastmod-label">更新于</span>
+        <span class="book-article-lastmod-value">2026年7月12日</span>
+      </div><h1 id="第6节-基于transformer的分类模型">第6节 基于Transformer的分类模型<a class="anchor" href="#%e7%ac%ac6%e8%8a%82-%e5%9f%ba%e4%ba%8etransformer%e7%9a%84%e5%88%86%e7%b1%bb%e6%a8%a1%e5%9e%8b">#</a></h1>
+<p>经过前面几节内容的介绍，相信大家对于Transformer的原理应该有了一个比较清晰的认识。不过要想做到灵活运用Transformer结构，那就还得再看看其它情况下的运用场景。在这部分内容中，将会以AG_News数据集为例，来搭建一个基于Transformer结构的文本分类模型。</p>
+<div align=center><img width="200" src="/images/tutorials/202607121220.png" alt="图 6-1. 基于Transformer Encoder的文本分类网络结构图"/> </div><center>图 6-1. 基于Transformer Encoder的文本分类网络结构图</center>
+<p>如图6-1所示便是一个基于Transformer结构的文本分类模型。不过准确的说应该只是一个基于Transformer中Encoder的文本分类模型。这是因为在文本分类任务中并没有解码这一过程，所以我们只需要将Encoder编码得到的向量输入到分类器中进行分类即可。同时需要注意的是，Encoder部分最后输出张量的形状为[batch_size,d_model,src_len]（图6-1中Encoder输出的src_len为7），我们需要根据相应策略来进行下一步的处理，具体见后文。</p>
+<p>这里值得一提的是，其实BERT模型的网络结构本质上就等同于图6-1所示的网络结构，看懂了图6-1所示的结果对于后续理解BERT问题就不大了。</p>
+<p>本部分完整代码可参见 <a href="https://github.com/mlwithme/TransformerClassification">https://github.com/mlwithme/TransformerClassification</a>。</p>
+<h2 id="61-数据预处理">6.1 数据预处理<a class="anchor" href="#61-%e6%95%b0%e6%8d%ae%e9%a2%84%e5%a4%84%e7%90%86">#</a></h2>
+<h3 id="611-语料介绍">6.1.1 语料介绍<a class="anchor" href="#611-%e8%af%ad%e6%96%99%e4%bb%8b%e7%bb%8d">#</a></h3>
+<p>在正式介绍模型之前，我们还是先来看看后续所要用到的AG_News数据集。AG_News新闻主题分类数据集是通过从原始语料库中选择 4 个最大的类构建的。每个类包含 30000 个训练样本和 1900 个测试样本。训练样本总数为 120000条，测试总数为 7600条。AG_News原始数据大概长这样：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#4070a0">&#34;3&#34;</span>,<span style="color:#4070a0">&#34;Fears for T N pension after talks&#34;</span>,<span style="color:#4070a0">&#34;Unions representing workers at </span>
+</span></span><span style="display:flex;"><span>Turner   Newall say they are <span style="color:#4070a0">&#39;disappointed&#39;</span> after talks <span style="color:#007020;font-weight:bold">with</span> stricken parent firm Federal Mogul<span style="color:#666">.</span><span style="color:#4070a0">&#34;</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span> <span style="color:#4070a0">&#34;4&#34;</span>,<span style="color:#4070a0">&#34;The Race is On: Second Private Team Sets Launch Date for Human Spaceflight (SPACE.com)&#34;</span>,<span style="color:#4070a0">&#34;SPACE.com - TORONTO, Canada -- A second</span><span style="color:#4070a0;font-weight:bold">\t</span><span style="color:#4070a0">eam of rocketeers competing for the  #36;10 million Ansari X Prize, a contest for \privately funded suborbital space flight, has officially announced the first\launch date for its manned rocket.&#34;</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span> <span style="color:#4070a0">&#34;4&#34;</span>,<span style="color:#4070a0">&#34;Ky. Company Wins Grant to Study Peptides (AP)&#34;</span>,<span style="color:#4070a0">&#34;AP - A company founded by a chemistry researcher at the University of Louisville won a grant to develop a method of producing better peptides, which are short chains of amino acids, the building blocks of proteins.&#34;</span></span></span></code></pre></div><p>上述一共包含有3个样本，每1行为1个样本。同时，所有样本均使用逗号作为分隔符，一共包含有 3 列，分别对应类标（1 到 4）、标题和新闻描述。在本篇文中，我们暂时只使用新闻描述作为输入（当然也可以用title作为输入来进行分类）。</p>
+<p>对于该数据的载入，你可以使用Pytorch中的方法来下载并使用[13]：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">from</span> <span style="color:#0e84b5;font-weight:bold">torchtext.datasets</span> <span style="color:#007020;font-weight:bold">import</span> AG_NEWS
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span> train_iter <span style="color:#666">=</span> AG_NEWS(split<span style="color:#666">=</span><span style="color:#4070a0">&#39;train&#39;</span>)</span></span></code></pre></div><p>也可以自己下载原始数据来进行处理。在这里为了延续使用与熟悉<a href="/tutorials/transformer/translation/">「第5节 Transformer 翻译模型实战教程：Multi30K EN→DE 数据预处理与 Seq2Seq 训练」</a>中介绍的预处理代码，所以这里我们暂不使用Pytorch内置的代码。</p>
+<h3 id="612-数据集构建">6.1.2 数据集构建<a class="anchor" href="#612-%e6%95%b0%e6%8d%ae%e9%9b%86%e6%9e%84%e5%bb%ba">#</a></h3>
+<p>由于分类模型数据集的构建过程并不复杂，其大部分工作在第5节中其实已经介绍过了，所以这里就只是简单的介绍一下。</p>
+<p><strong>第1步：定义tokenize</strong></p>
+<p>对于英文语料的处理，可以继续沿用5.1.3节中对英文语料的类似处理方式，实现代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">my_tokenizer</span>(s):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>     tokenizer <span style="color:#666">=</span> get_tokenizer(<span style="color:#4070a0">&#39;basic_english&#39;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>     <span style="color:#007020;font-weight:bold">return</span> tokenizer(s)</span></span></code></pre></div><p>从6.1.1节中的示例语料中可以看到， 原始语料中有很多奇奇怪怪的字符，因此还需要对其稍微做一点处理。例如①只保留字母、数字、以及常用标点；②全部转换为小写字等。当然，你也可以自己再添加其它处理方式。具体代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">clean_str</span>(string):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>     string <span style="color:#666">=</span> re<span style="color:#666">.</span>sub(<span style="color:#4070a0">&#34;[^A-Za-z0-9\-\?\!\.\,]&#34;</span>, <span style="color:#4070a0">&#34; &#34;</span>, string)<span style="color:#666">.</span>lower()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>     <span style="color:#007020;font-weight:bold">return</span> string</span></span></code></pre></div><p><strong>第3步：建立词表</strong></p>
+<p>在介绍完tokenize和字符串清理的实现方法后，我们就可以正式通过torchtext.vocab中的Vocab方法来构建词典了，代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">build_vocab</span>(tokenizer, filepath, min_freq, specials<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">if</span> specials <span style="color:#007020;font-weight:bold">is</span> <span style="color:#007020;font-weight:bold">None</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>         specials <span style="color:#666">=</span> [<span style="color:#4070a0">&#39;&lt;unk&gt;&#39;</span>, <span style="color:#4070a0">&#39;&lt;pad&gt;&#39;</span>]
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span>     counter <span style="color:#666">=</span> Counter()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">5</span>     <span style="color:#007020;font-weight:bold">with</span> <span style="color:#007020">open</span>(filepath, encoding<span style="color:#666">=</span><span style="color:#4070a0">&#39;utf8&#39;</span>) <span style="color:#007020;font-weight:bold">as</span> f:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">6</span>         <span style="color:#007020;font-weight:bold">for</span> string_ <span style="color:#007020;font-weight:bold">in</span> tqdm(f):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">7</span>             string_ <span style="color:#666">=</span> string_<span style="color:#666">.</span>strip()<span style="color:#666">.</span>split(<span style="color:#4070a0">&#39;&#34;,&#34;&#39;</span>)[<span style="color:#666">-</span><span style="color:#40a070">1</span>][:<span style="color:#666">-</span><span style="color:#40a070">1</span>] <span style="color:#60a0b0;font-style:italic"># 取标签和新闻描述</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">8</span>             counter<span style="color:#666">.</span>update(tokenizer(clean_str(string_)))
+</span></span><span style="display:flex;"><span><span style="color:#40a070">9</span>     <span style="color:#007020;font-weight:bold">return</span> Vocab(counter, min_freq<span style="color:#666">=</span>min_freq, specials<span style="color:#666">=</span>specials)</span></span></code></pre></div><p>在上述代码中，tokenizer表示所使用的分词器； min_freq表示最小字频，去掉小于min_freq的字。第3行代码用来指定特殊的字符；第5~8行代码用来遍历文件中的每一个样本（每行一个）并进行tokenize和计数，其中对于counter.update进行介绍可以参考[10]；第9行则是返回最后得到词典。</p>
+<p>在完成上述过程后，我们将得到一个Vocab类的实例化对象：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span>{<span style="color:#4070a0">&#39;&lt;unk&gt;&#39;</span>: <span style="color:#40a070">0</span>, <span style="color:#4070a0">&#39;&lt;pad&gt;&#39;</span>: <span style="color:#40a070">1</span>, <span style="color:#4070a0">&#39;the&#39;</span>: <span style="color:#40a070">2</span>, <span style="color:#4070a0">&#39;.&#39;</span>: <span style="color:#40a070">3</span>, <span style="color:#4070a0">&#39;,&#39;</span>: <span style="color:#40a070">4</span>, <span style="color:#4070a0">&#39;a&#39;</span>: <span style="color:#40a070">5</span>, <span style="color:#4070a0">&#39;to&#39;</span>: <span style="color:#40a070">6</span>,<span style="color:#4070a0">&#39;of&#39;</span>: <span style="color:#40a070">7</span>, 
+</span></span><span style="display:flex;"><span><span style="color:#4070a0">&#39;in&#39;</span>: <span style="color:#40a070">8</span>, <span style="color:#4070a0">&#39;and&#39;</span>: <span style="color:#40a070">9</span>, <span style="color:#4070a0">&#39;on&#39;</span>: <span style="color:#40a070">10</span>, <span style="color:#4070a0">&#39;s&#39;</span>: <span style="color:#40a070">11</span>, <span style="color:#4070a0">&#39;for&#39;</span>: <span style="color:#40a070">12</span>, <span style="color:#4070a0">&#39;-&#39;</span>: <span style="color:#40a070">13</span>, <span style="color:#4070a0">&#39;39&#39;</span>: <span style="color:#40a070">14</span>, <span style="color:#4070a0">&#39;that&#39;</span>: <span style="color:#40a070">15</span>,<span style="color:#666">.....</span>}</span></span></code></pre></div><p>接下来，我们就需要定义一个类，并在类的初始化过程中根据训练语料完成字典的构建，代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">LoadSentenceClassificationDataset</span>():
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">__init__</span>(<span style="color:#007020">self</span>, train_file_path<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>,  <span style="color:#60a0b0;font-style:italic"># 训练集路径</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>                  tokenizer<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>, batch_size<span style="color:#666">=</span><span style="color:#40a070">20</span>,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>                  min_freq<span style="color:#666">=</span><span style="color:#40a070">1</span>,  <span style="color:#60a0b0;font-style:italic"># 最小词频，去掉小于min_freq的词</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>               max_sen_len<span style="color:#666">=</span><span style="color:#4070a0">&#39;same&#39;</span>): <span style="color:#60a0b0;font-style:italic"># 最大句子长度，默认为整个数据集中最长样本长度</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>         <span style="color:#60a0b0;font-style:italic"># max_sen_len = None时，表示按每个batch中最长的样本长度进行padding</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>         <span style="color:#60a0b0;font-style:italic"># 根据训练预料建立字典</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>tokenizer <span style="color:#666">=</span> tokenizer
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>min_freq <span style="color:#666">=</span> min_freq
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>specials <span style="color:#666">=</span> [<span style="color:#4070a0">&#39;&lt;unk&gt;&#39;</span>, <span style="color:#4070a0">&#39;&lt;pad&gt;&#39;</span>]
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>vocab <span style="color:#666">=</span> build_vocab(<span style="color:#007020">self</span><span style="color:#666">.</span>tokenizer, filepath<span style="color:#666">=</span>train_file_path,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>                    min_freq<span style="color:#666">=</span><span style="color:#007020">self</span><span style="color:#666">.</span>min_freq,specials<span style="color:#666">=</span><span style="color:#007020">self</span><span style="color:#666">.</span>specials)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>PAD_IDX <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>vocab[<span style="color:#4070a0">&#39;&lt;pad&gt;&#39;</span>]
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>UNK_IDX <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>vocab[<span style="color:#4070a0">&#39;&lt;unk&gt;&#39;</span>]
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>batch_size <span style="color:#666">=</span> batch_size
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>max_sen_len <span style="color:#666">=</span> max_sen_len</span></span></code></pre></div><p><strong>第4步：转换为Token序列</strong></p>
+<p>在得到构建的字典后，便可以通过如下函数来将训练集和测试集转换成Token序列：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">data_process</span>(<span style="color:#007020">self</span>, filepath):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>       <span style="color:#4070a0">&#34;&#34;&#34;
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0"> 3         将每一句话中的每一个词根据字典转换成索引的形式，同时返回所有样本中最长样本的长度
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0"> 4         :param filepath: 数据集路径
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0"> 5         :return:
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0"> 6         &#34;&#34;&#34;</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>         raw_iter <span style="color:#666">=</span> <span style="color:#007020">iter</span>(<span style="color:#007020">open</span>(filepath, encoding<span style="color:#666">=</span><span style="color:#4070a0">&#34;utf8&#34;</span>))
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>         data <span style="color:#666">=</span> []
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>         max_len <span style="color:#666">=</span> <span style="color:#40a070">0</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>         <span style="color:#007020;font-weight:bold">for</span> raw <span style="color:#007020;font-weight:bold">in</span> tqdm(raw_iter):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>             line <span style="color:#666">=</span> raw<span style="color:#666">.</span>rstrip(<span style="color:#4070a0">&#34;</span><span style="color:#4070a0;font-weight:bold">\n</span><span style="color:#4070a0">&#34;</span>)<span style="color:#666">.</span>split(<span style="color:#4070a0">&#39;&#34;,&#34;&#39;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>             s, l <span style="color:#666">=</span> line[<span style="color:#666">-</span><span style="color:#40a070">1</span>][:<span style="color:#666">-</span><span style="color:#40a070">1</span>], line[<span style="color:#40a070">0</span>][<span style="color:#40a070">1</span>:]
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>             s <span style="color:#666">=</span> clean_str(s)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>             tensor_ <span style="color:#666">=</span> torch<span style="color:#666">.</span>tensor([<span style="color:#007020">self</span><span style="color:#666">.</span>vocab[token] <span style="color:#007020;font-weight:bold">for</span> token <span style="color:#007020;font-weight:bold">in</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>                           		   <span style="color:#007020">self</span><span style="color:#666">.</span>tokenizer(s)], dtype<span style="color:#666">=</span>torch<span style="color:#666">.</span>long)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>             l <span style="color:#666">=</span> torch<span style="color:#666">.</span>tensor(<span style="color:#007020">int</span>(l) <span style="color:#666">-</span> <span style="color:#40a070">1</span>, dtype<span style="color:#666">=</span>torch<span style="color:#666">.</span>long) <span style="color:#60a0b0;font-style:italic"># 标签</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>             max_len <span style="color:#666">=</span> <span style="color:#007020">max</span>(max_len, tensor_<span style="color:#666">.</span>size(<span style="color:#40a070">0</span>))
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span>             data<span style="color:#666">.</span>append((tensor_, l))
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span>         <span style="color:#007020;font-weight:bold">return</span> data, max_len</span></span></code></pre></div><p>在上述代码中，第11~4行分别用来将原始输入序列转换为对应词表中的Token形式。在处理完成后，就会得到类似如下的结果：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> [(tensor([ <span style="color:#40a070">25</span>,    <span style="color:#40a070">65</span>,    <span style="color:#40a070">45</span>,  <span style="color:#40a070">1487</span>,     <span style="color:#40a070">5</span>,  <span style="color:#40a070">4062</span>,  <span style="color:#40a070">3291</span>,    <span style="color:#40a070">10</span>,  <span style="color:#40a070">2918</span>, <span style="color:#40a070">20217</span>,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>             <span style="color:#40a070">4</span>,  <span style="color:#40a070">1842</span>,  <span style="color:#40a070">4512</span>,  <span style="color:#40a070">1161</span>,    <span style="color:#40a070">15</span>,   <span style="color:#40a070">143</span>,   <span style="color:#40a070">140</span>,  <span style="color:#40a070">3658</span>, <span style="color:#40a070">21658</span>,  <span style="color:#40a070">4762</span>,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>            <span style="color:#40a070">40</span>,   <span style="color:#40a070">146</span>,   <span style="color:#40a070">409</span>,    <span style="color:#40a070">22</span>,     <span style="color:#40a070">8</span>,    <span style="color:#40a070">25</span>,    <span style="color:#40a070">65</span>,     <span style="color:#40a070">4</span>,    <span style="color:#40a070">16</span>,     <span style="color:#40a070">5</span>,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span>           <span style="color:#40a070">142</span>,   <span style="color:#40a070">287</span>,    <span style="color:#40a070">15</span>,     <span style="color:#40a070">4</span>,   <span style="color:#40a070">633</span>,    <span style="color:#40a070">39</span>,   <span style="color:#40a070">146</span>,   <span style="color:#40a070">409</span>,    <span style="color:#40a070">22</span>,  <span style="color:#40a070">5474</span>,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">5</span>             <span style="color:#40a070">3</span>,    <span style="color:#40a070">40</span>]), tensor(<span style="color:#40a070">1</span>)), <span style="color:#666">.....</span>]</span></span></code></pre></div><p><strong>第5步：padding处理</strong></p>
+<p>由于对于不同的样本来说其对应的序列长度通常来说都是不同的，但是在将数据输入到相应模型时却需要保持同样的长度。因此在这里我们就需要对Token序列化后的样本进行padding处理，具体代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">pad_sequence</span>(sequences,batch_first<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">False</span>, max_len<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>, padding_value<span style="color:#666">=</span><span style="color:#40a070">0</span>):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     max_size <span style="color:#666">=</span> sequences[<span style="color:#40a070">0</span>]<span style="color:#666">.</span>size()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>     trailing_dims <span style="color:#666">=</span> max_size[<span style="color:#40a070">1</span>:]
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>     length <span style="color:#666">=</span> max_len
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>     max_len <span style="color:#666">=</span> <span style="color:#007020">max</span>([s<span style="color:#666">.</span>size(<span style="color:#40a070">0</span>) <span style="color:#007020;font-weight:bold">for</span> s <span style="color:#007020;font-weight:bold">in</span> sequences])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>     <span style="color:#007020;font-weight:bold">if</span> length <span style="color:#007020;font-weight:bold">is</span> <span style="color:#007020;font-weight:bold">not</span> <span style="color:#007020;font-weight:bold">None</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>         max_len <span style="color:#666">=</span> <span style="color:#007020">max</span>(length, max_len)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>     <span style="color:#007020;font-weight:bold">if</span> batch_first:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>         out_dims <span style="color:#666">=</span> (<span style="color:#007020">len</span>(sequences), max_len) <span style="color:#666">+</span> trailing_dims
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>     <span style="color:#007020;font-weight:bold">else</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>         out_dims <span style="color:#666">=</span> (max_len, <span style="color:#007020">len</span>(sequences)) <span style="color:#666">+</span> trailing_dims
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>     out_tensor <span style="color:#666">=</span> sequences[<span style="color:#40a070">0</span>]<span style="color:#666">.</span>data<span style="color:#666">.</span>new(<span style="color:#666">*</span>out_dims)<span style="color:#666">.</span>fill_(padding_value)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>     <span style="color:#007020;font-weight:bold">for</span> i, tensor <span style="color:#007020;font-weight:bold">in</span> <span style="color:#007020">enumerate</span>(sequences):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>         length <span style="color:#666">=</span> tensor<span style="color:#666">.</span>size(<span style="color:#40a070">0</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>         <span style="color:#60a0b0;font-style:italic"># use index notation to prevent duplicate references to the tensor</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>         <span style="color:#007020;font-weight:bold">if</span> batch_first:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>             out_tensor[i, :length, <span style="color:#666">...</span>] <span style="color:#666">=</span> tensor
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>         <span style="color:#007020;font-weight:bold">else</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span>             out_tensor[:length, i, <span style="color:#666">...</span>] <span style="color:#666">=</span> tensor
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span>     <span style="color:#007020;font-weight:bold">return</span> out_tensor</span></span></code></pre></div><p>在上述代码中，<code>max_len</code> 表示 最大句子长度，默认为None，即在每个batch中以最长样本的长度对其它样本进行padding；当然同样也可以指定 <code>max_len</code> 的值为整个数据集中最长样本的长度进行padding处理。padding处理后的结果类似如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> tensor([[    <span style="color:#40a070">2</span>,   <span style="color:#40a070">342</span>,   <span style="color:#40a070">578</span>,  <span style="color:#666">...</span>,     <span style="color:#40a070">1</span>,     <span style="color:#40a070">1</span>,     <span style="color:#40a070">1</span>],
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>         [   <span style="color:#40a070">32</span>,    <span style="color:#40a070">13</span>, <span style="color:#40a070">14585</span>,  <span style="color:#666">...</span>,     <span style="color:#40a070">1</span>,     <span style="color:#40a070">1</span>,     <span style="color:#40a070">1</span>],
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>         [ <span style="color:#40a070">1189</span>,    <span style="color:#40a070">11</span>,   <span style="color:#40a070">327</span>,  <span style="color:#666">...</span>,     <span style="color:#40a070">1</span>,     <span style="color:#40a070">1</span>,     <span style="color:#40a070">1</span>],<span style="color:#666">...</span>)</span></span></code></pre></div><p>末尾的1即是padding的部分。</p>
+<p>在定义完pad_sequence这个函数后，我们便可以通过它来对每个batch中的数据集进行padding处理：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">generate_batch</span>(<span style="color:#007020">self</span>, data_batch):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>         batch_sentence, batch_label <span style="color:#666">=</span> [], []
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>         <span style="color:#007020;font-weight:bold">for</span> (sen, label) <span style="color:#007020;font-weight:bold">in</span> data_batch: <span style="color:#60a0b0;font-style:italic"># 开始对一个batch中的每一个样本进行处理。</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>             batch_sentence<span style="color:#666">.</span>append(sen)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>             batch_label<span style="color:#666">.</span>append(label)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>         batch_sentence <span style="color:#666">=</span> pad_sequence(batch_sentence, <span style="color:#60a0b0;font-style:italic">#[batch_size,max_len]</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>                                       padding_value<span style="color:#666">=</span><span style="color:#007020">self</span><span style="color:#666">.</span>PAD_IDX,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>                                       batch_first<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">False</span>,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>                                       max_len<span style="color:#666">=</span><span style="color:#007020">self</span><span style="color:#666">.</span>max_sen_len)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>         batch_label <span style="color:#666">=</span> torch<span style="color:#666">.</span>tensor(batch_label, dtype<span style="color:#666">=</span>torch<span style="color:#666">.</span>long)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>         <span style="color:#007020;font-weight:bold">return</span> batch_sentence, batch_label</span></span></code></pre></div><p><strong>第6步：构造DataLoade与使用示例</strong></p>
+<p>经过前面5步的操作，整个数据集的构建就算是已经基本完成了，只需要再构造一个DataLoader迭代器即可，代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">load_train_val_test_data</span>(<span style="color:#007020">self</span>, train_file_paths, test_file_paths):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>         train_data, max_sen_len <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>data_process(train_file_paths)  <span style="color:#60a0b0;font-style:italic"># 得到处理好的所有样本</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>         <span style="color:#007020;font-weight:bold">if</span> <span style="color:#007020">self</span><span style="color:#666">.</span>max_sen_len <span style="color:#666">==</span> <span style="color:#4070a0">&#39;same&#39;</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>             <span style="color:#007020">self</span><span style="color:#666">.</span>max_sen_len <span style="color:#666">=</span> max_sen_len
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>         test_data, _ <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>data_process(test_file_paths)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>         train_iter <span style="color:#666">=</span> DataLoader(train_data, batch_size<span style="color:#666">=</span><span style="color:#007020">self</span><span style="color:#666">.</span>batch_size,  
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>                shuffle<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">True</span>, collate_fn<span style="color:#666">=</span><span style="color:#007020">self</span><span style="color:#666">.</span>generate_batch) <span style="color:#60a0b0;font-style:italic"># 构造DataLoader</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>         test_iter <span style="color:#666">=</span> DataLoader(test_data, batch_size<span style="color:#666">=</span><span style="color:#007020">self</span><span style="color:#666">.</span>batch_size,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>                shuffle<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">True</span>, collate_fn<span style="color:#666">=</span><span style="color:#007020">self</span><span style="color:#666">.</span>generate_batch)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>         <span style="color:#007020;font-weight:bold">return</span> train_iter, test_iter</span></span></code></pre></div><p>在上述代码中，第2~5行便是分别用来将训练集和测试集转换为Token序列；第6~9行则是分别构造2个DataLoader，其中generate_batch将作为一个参数传入来对每个batch的样本进行处理。在完成类LoadSentenceClassificationDataset所有的编码过程后，便可以通过如下形式进行使用：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">if</span> <span style="color:#bb60d5">__name__</span> <span style="color:#666">==</span> <span style="color:#4070a0">&#39;__main__&#39;</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>     path <span style="color:#666">=</span> <span style="color:#4070a0">&#34;./data/ag_news_csv/test.csv&#34;</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>     data_loader <span style="color:#666">=</span> LoadSentenceClassificationDataset(train_file_path<span style="color:#666">=</span>path,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span>                                                     tokenizer<span style="color:#666">=</span>my_tokenizer,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">5</span>                                                     max_sen_len<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">6</span>     train_iter, test_iter <span style="color:#666">=</span> data_loader<span style="color:#666">.</span>load_train_val_test_data(path, path)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">7</span>     <span style="color:#007020;font-weight:bold">for</span> sample, label <span style="color:#007020;font-weight:bold">in</span> train_iter:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">8</span>         <span style="color:#007020">print</span>(sample<span style="color:#666">.</span>shape)  <span style="color:#60a0b0;font-style:italic"># [seq_len,batch_size]</span></span></span></code></pre></div><p>最后，由于Encoder只会在padding部分有mask操作，所以每个样本的key_padding_mask向量我们在训练部分再生成即可。下面，我们正式进入到文本分类模型部分的介绍。</p>
+<h2 id="62-文本分类模型">6.2 文本分类模型<a class="anchor" href="#62-%e6%96%87%e6%9c%ac%e5%88%86%e7%b1%bb%e6%a8%a1%e5%9e%8b">#</a></h2>
+<h3 id="621-网络结构">6.2.1 网络结构<a class="anchor" href="#621-%e7%bd%91%e7%bb%9c%e7%bb%93%e6%9e%84">#</a></h3>
+<p>总体来说，基于Transformer文本分类模型的网络结构其实就是图6-1所展示的所有部分，当然你还可以使用多个Encoder进行堆叠。最后，只需要将Encoder的输出喂入到一个softmax分类器即可完成分类任务。不过这里有两个细节的地方需要大家注意：</p>
+<p>①根据<a href="/tutorials/transformer/transformer-implement/">「第4节 Transformer PyTorch 完整实现教程：从 Token Embedding 到 Encoder/Decoder」</a>的介绍可知，Encoder在编码结束后输出的形状为[src_len,batch_size,embed_dim]（这里的src_len也可以理解为LSTM中time step的概念）。因此，在构造最后分类器的输入时就可以有多种不同的形式，例如只取最后一个位置上的向量、或者是取所有位置向量的平均（求和）等都可以。后面也会将这3种方式都实现供大家参考。</p>
+<p>②由于每个样本的长度各不相同，因此在对样本进行padding的时候就有两种方式。一般来说在大多数模型中多需要保持所有的样本具有相同的长度，不过由于这里我们使用的是自注意力的编码机制，因此只需要保持同一个batch中的样本长度一致即可。不过后面对这两种方式都进行了实现，只需要通过max_sen_len这个参数来控制即可。</p>
+<p>首先，我们需要定义一个名为ClassificationModel的类，其前向传播过程代码如下所示：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">ClassificationModel</span>(nn<span style="color:#666">.</span>Module):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">__init__</span>(<span style="color:#007020">self</span>, vocab_size<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>                  d_model<span style="color:#666">=</span><span style="color:#40a070">512</span>, nhead<span style="color:#666">=</span><span style="color:#40a070">8</span>,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>                  num_encoder_layers<span style="color:#666">=</span><span style="color:#40a070">6</span>,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>                  dim_feedforward<span style="color:#666">=</span><span style="color:#40a070">2048</span>,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>                  dim_classification<span style="color:#666">=</span><span style="color:#40a070">64</span>,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>                  num_classification<span style="color:#666">=</span><span style="color:#40a070">4</span>,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>                  dropout<span style="color:#666">=</span><span style="color:#40a070">0.1</span>):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>         <span style="color:#007020">super</span>(ClassificationModel, <span style="color:#007020">self</span>)<span style="color:#666">.</span><span style="color:#06287e">__init__</span>()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>pos_embedding <span style="color:#666">=</span> PositionalEncoding(d_model<span style="color:#666">=</span>d_model,dropout<span style="color:#666">=</span>dropout)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>src_token_embedding <span style="color:#666">=</span> TokenEmbedding(vocab_size, d_model)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>         encoder_layer <span style="color:#666">=</span> MyTransformerEncoderLayer(
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>                                      d_model, nhead,dim_feedforward,dropout)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>                                      encoder_norm <span style="color:#666">=</span> nn<span style="color:#666">.</span>LayerNorm(d_model)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>encoder <span style="color:#666">=</span> MyTransformerEncoder(encoder_layer,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>      					num_encoder_layers, encoder_norm)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>classifier <span style="color:#666">=</span> nn<span style="color:#666">.</span>Sequential(nn<span style="color:#666">.</span>Linear(d_model,dim_classification),
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>                           nn<span style="color:#666">.</span>Dropout(dropout),
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span>                           nn<span style="color:#666">.</span>Linear(dim_classification,num_classification))</span></span></code></pre></div><p>在上述代码中，第10~11行定义了Transformer中的Embedding操作；第12~13行定义了Transformer中的EncoderLayer；第14~16行定义了Transformer中的Encoder；第17~19行定义了一个分类器。最后，整个网络的前向传播过程如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">forward</span>(<span style="color:#007020">self</span>,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>                 src,  <span style="color:#60a0b0;font-style:italic"># [src_len, batch_size]</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>                 src_mask<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>                 src_key_padding_mask<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>,  <span style="color:#60a0b0;font-style:italic"># [batsh_size, src_len]</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>                 concat_type<span style="color:#666">=</span><span style="color:#4070a0">&#39;sum&#39;</span><span style="color:#60a0b0;font-style:italic"># 解码之后取所有位置相加，还是最后一个位置作为输出</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>                 ):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>         src_embed <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>src_token_embedding(src) <span style="color:#60a0b0;font-style:italic">#[src_len,batch_size,embed_dim]</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>         src_embed <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>pos_embedding(src_embed) <span style="color:#60a0b0;font-style:italic">#[src_len,batch_size,embed_dim]</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>         memory <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>encoder(src<span style="color:#666">=</span>src_embed,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>                               mask<span style="color:#666">=</span>src_mask,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>                               src_key_padding_mask<span style="color:#666">=</span>src_key_padding_mask)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>         		<span style="color:#60a0b0;font-style:italic"># [src_len,batch_size,embed_dim]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>         <span style="color:#007020;font-weight:bold">if</span> concat_type <span style="color:#666">==</span> <span style="color:#4070a0">&#39;sum&#39;</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>             memory <span style="color:#666">=</span> torch<span style="color:#666">.</span>sum(memory, dim<span style="color:#666">=</span><span style="color:#40a070">0</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>         <span style="color:#007020;font-weight:bold">elif</span> concat_type <span style="color:#666">==</span> <span style="color:#4070a0">&#39;avg&#39;</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>             memory <span style="color:#666">=</span> torch<span style="color:#666">.</span>sum(memory, dim<span style="color:#666">=</span><span style="color:#40a070">0</span>) <span style="color:#666">/</span> memory<span style="color:#666">.</span>size(<span style="color:#40a070">0</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>         <span style="color:#007020;font-weight:bold">else</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>             memory <span style="color:#666">=</span> memory[<span style="color:#666">-</span><span style="color:#40a070">1</span>, ::]  <span style="color:#60a0b0;font-style:italic"># 取最后一个时刻</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span>    <span style="color:#60a0b0;font-style:italic">#[src_len, batch_size, num_heads * kdim]==[src_len,batch_size,embed_dim]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span>         out <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>classifier(memory)  <span style="color:#60a0b0;font-style:italic"># 输出logits</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">21</span>         <span style="color:#007020;font-weight:bold">return</span> out  <span style="color:#60a0b0;font-style:italic"># [batch_size, num_class]</span></span></span></code></pre></div><p>在上述代码中，第7~11行用来执行编码器的前向传播过程；第13~18行便是用来选择以何种方式来选择分类器的输入，经实验后发现取各个位置的平均值效果最好；第20~21行便是将经过分类器后的输出进行返回。</p>
+<p>在定义完logits的前向传播过后，便可以通过如下形式进行使用：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">if</span> <span style="color:#bb60d5">__name__</span> <span style="color:#666">==</span> <span style="color:#4070a0">&#39;__main__&#39;</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     src_len <span style="color:#666">=</span> <span style="color:#40a070">7</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>     batch_size <span style="color:#666">=</span> <span style="color:#40a070">2</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>     dmodel <span style="color:#666">=</span> <span style="color:#40a070">32</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>     num_head <span style="color:#666">=</span> <span style="color:#40a070">4</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>     src <span style="color:#666">=</span> torch<span style="color:#666">.</span>tensor([[<span style="color:#40a070">4</span>, <span style="color:#40a070">3</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">6</span>, <span style="color:#40a070">0</span>, <span style="color:#40a070">0</span>, <span style="color:#40a070">0</span>],
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>                         [<span style="color:#40a070">5</span>, <span style="color:#40a070">7</span>, <span style="color:#40a070">8</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">4</span>, <span style="color:#40a070">0</span>, <span style="color:#40a070">0</span>]])<span style="color:#666">.</span>transpose(<span style="color:#40a070">0</span>, <span style="color:#40a070">1</span>)  <span style="color:#60a0b0;font-style:italic"># 转换成 [src_len, batch_size]</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>     src_key_padding_mask <span style="color:#666">=</span> torch<span style="color:#666">.</span>tensor([[<span style="color:#007020;font-weight:bold">True</span>, <span style="color:#007020;font-weight:bold">True</span>, <span style="color:#007020;font-weight:bold">True</span>, <span style="color:#007020;font-weight:bold">True</span>, <span style="color:#007020;font-weight:bold">False</span>, <span style="color:#007020;font-weight:bold">False</span>, <span style="color:#007020;font-weight:bold">False</span>],
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>                          [<span style="color:#007020;font-weight:bold">True</span>, <span style="color:#007020;font-weight:bold">True</span>, <span style="color:#007020;font-weight:bold">True</span>, <span style="color:#007020;font-weight:bold">True</span>, <span style="color:#007020;font-weight:bold">True</span>, <span style="color:#007020;font-weight:bold">False</span>, <span style="color:#007020;font-weight:bold">False</span>]])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>     model<span style="color:#666">=</span>ClassificationModel(vocab_size<span style="color:#666">=</span><span style="color:#40a070">10</span>,d_model<span style="color:#666">=</span>dmodel,nhead<span style="color:#666">=</span>num_head)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>     logits <span style="color:#666">=</span> model(src, src_key_padding_mask<span style="color:#666">=</span>src_key_padding_mask)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>     <span style="color:#007020">print</span>(logits<span style="color:#666">.</span>shape) <span style="color:#60a0b0;font-style:italic">#torch.Size([2, 4])</span></span></span></code></pre></div><h3 id="622-模型训练">6.2.2 模型训练<a class="anchor" href="#622-%e6%a8%a1%e5%9e%8b%e8%ae%ad%e7%bb%83">#</a></h3>
+<p>在定义完成整个分类模型的网络结构后下面就可以开始训练模型了。由于这部分代码较长，所以下面依旧以分块的形式进行介绍：</p>
+<p><strong>第1步：载入数据集</strong></p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">train_model</span>(config):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>     data_loader <span style="color:#666">=</span> LoadSentenceClassificationDataset(config<span style="color:#666">.</span>train_corpus_file_paths,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>                                 my_tokenizer,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span>                                 batch_size<span style="color:#666">=</span>config<span style="color:#666">.</span>batch_size,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">5</span>                                 min_freq<span style="color:#666">=</span>config<span style="color:#666">.</span>min_freq,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">6</span>                                 max_sen_len<span style="color:#666">=</span>config<span style="color:#666">.</span>max_sen_len)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">7</span>     train_iter, test_iter <span style="color:#666">=</span> data_loader<span style="color:#666">.</span>load_train_val_test_data(
+</span></span><span style="display:flex;"><span><span style="color:#40a070">8</span>               config<span style="color:#666">.</span>train_corpus_file_paths, config<span style="color:#666">.</span>test_corpus_file_paths)</span></span></code></pre></div><p>首先我们可以根据前面的介绍，通过类LoadSentenceClassificationDataset来载入数据集，其中config中定义了模型所涉及到的所有配置参数。同时，可以通过max_sen_len参数来控制padding时保持所有样本一样还是仅在每个batch内部一样。</p>
+<p>第2步：定义模型并初始化权重</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span>     classification_model <span style="color:#666">=</span> ClassificationModel(vocab_size<span style="color:#666">=</span><span style="color:#007020">len</span>(data_loader<span style="color:#666">.</span>vocab),
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>                            d_model<span style="color:#666">=</span>config<span style="color:#666">.</span>d_model,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>                            nhead<span style="color:#666">=</span>config<span style="color:#666">.</span>num_head,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>                            num_encoder_layers<span style="color:#666">=</span>config<span style="color:#666">.</span>num_encoder_layers,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>                            dim_feedforward<span style="color:#666">=</span>config<span style="color:#666">.</span>dim_feedforward,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>                            dim_classification<span style="color:#666">=</span>config<span style="color:#666">.</span>dim_classification,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>                            num_classification<span style="color:#666">=</span>config<span style="color:#666">.</span>num_class,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>                            dropout<span style="color:#666">=</span>config<span style="color:#666">.</span>dropout)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>     <span style="color:#007020;font-weight:bold">for</span> p <span style="color:#007020;font-weight:bold">in</span> classification_model<span style="color:#666">.</span>parameters():
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>         <span style="color:#007020;font-weight:bold">if</span> p<span style="color:#666">.</span>dim() <span style="color:#666">&gt;</span> <span style="color:#40a070">1</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>             nn<span style="color:#666">.</span>init<span style="color:#666">.</span>xavier_uniform_(p)</span></span></code></pre></div><p>在载入数据后，便可以定义一个文本分类模型ClassificationModel，并根据相关参数对其进行实例化；同时，可以对整个模型中的所有参数进行初始化操作。</p>
+<p><strong>第3步：定义损失学习率与优化器</strong></p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span>     loss_fn <span style="color:#666">=</span> torch<span style="color:#666">.</span>nn<span style="color:#666">.</span>CrossEntropyLoss()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>     learning_rate <span style="color:#666">=</span> CustomSchedule(config<span style="color:#666">.</span>d_model)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>     optimizer <span style="color:#666">=</span> torch<span style="color:#666">.</span>optim<span style="color:#666">.</span>Adam(classification_model<span style="color:#666">.</span>parameters(),
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span>                                  lr<span style="color:#666">=</span><span style="color:#40a070">0.</span>,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">5</span>                                  betas<span style="color:#666">=</span>(config<span style="color:#666">.</span>beta1, config<span style="color:#666">.</span>beta2), 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">6</span>                                  eps<span style="color:#666">=</span>config<span style="color:#666">.</span>epsilon)</span></span></code></pre></div><p>在上述代码中，第1行是定义交叉熵损失函数；第2行代码则是论文中所提出来的动态学习率计算过程，其计算公式和公式(5.1)没有差别。具体实现代码同5.2.2节中的一样，这里就不再赘述。</p>
+<p><strong>第4步：开始训练</strong></p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span>     <span style="color:#007020;font-weight:bold">for</span> epoch <span style="color:#007020;font-weight:bold">in</span> <span style="color:#007020">range</span>(config<span style="color:#666">.</span>epochs):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>         losses <span style="color:#666">=</span> <span style="color:#40a070">0</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>         start_time <span style="color:#666">=</span> time<span style="color:#666">.</span>time()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>         <span style="color:#007020;font-weight:bold">for</span> idx, (sample, label) <span style="color:#007020;font-weight:bold">in</span> <span style="color:#007020">enumerate</span>(train_iter):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>             sample <span style="color:#666">=</span> sample<span style="color:#666">.</span>to(config<span style="color:#666">.</span>device)  <span style="color:#60a0b0;font-style:italic"># [src_len, batch_size]</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>             label <span style="color:#666">=</span> label<span style="color:#666">.</span>to(config<span style="color:#666">.</span>device)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>             padding_mask <span style="color:#666">=</span> (sample <span style="color:#666">==</span> data_loader<span style="color:#666">.</span>PAD_IDX)<span style="color:#666">.</span>transpose(<span style="color:#40a070">0</span>, <span style="color:#40a070">1</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>             logits <span style="color:#666">=</span> classification_model(sample,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>                                           src_key_padding_mask<span style="color:#666">=</span>padding_mask)  
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>                                           <span style="color:#60a0b0;font-style:italic"># [batch_size,num_class]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>             optimizer<span style="color:#666">.</span>zero_grad()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>             loss <span style="color:#666">=</span> loss_fn(logits, label)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>             loss<span style="color:#666">.</span>backward()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>             lr <span style="color:#666">=</span> learning_rate()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>             <span style="color:#007020;font-weight:bold">for</span> p <span style="color:#007020;font-weight:bold">in</span> optimizer<span style="color:#666">.</span>param_groups:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>                 p[<span style="color:#4070a0">&#39;lr&#39;</span>] <span style="color:#666">=</span> lr
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>             optimizer<span style="color:#666">.</span>step()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>             losses <span style="color:#666">+=</span> loss<span style="color:#666">.</span>item()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span>             acc <span style="color:#666">=</span> (logits<span style="color:#666">.</span>argmax(<span style="color:#40a070">1</span>) <span style="color:#666">==</span> label)<span style="color:#666">.</span>float()<span style="color:#666">.</span>mean()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">21</span>             <span style="color:#007020;font-weight:bold">if</span> idx <span style="color:#666">%</span> <span style="color:#40a070">10</span> <span style="color:#666">==</span> <span style="color:#40a070">0</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">22</span>                 <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;Epoch: </span><span style="color:#70a0d0">{</span>epoch<span style="color:#70a0d0">}</span><span style="color:#4070a0">, Batch[</span><span style="color:#70a0d0">{</span>idx<span style="color:#70a0d0">}</span><span style="color:#4070a0">/</span><span style="color:#70a0d0">{</span><span style="color:#007020">len</span>(train_iter)<span style="color:#70a0d0">}</span><span style="color:#4070a0">], &#34;</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">23</span>                       <span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;Train loss :</span><span style="color:#70a0d0">{</span>loss<span style="color:#666">.</span>item()<span style="color:#70a0d0">:</span><span style="color:#4070a0">.3f</span><span style="color:#70a0d0">}</span><span style="color:#4070a0">, Train acc:</span><span style="color:#70a0d0">{</span>acc<span style="color:#70a0d0">:</span><span style="color:#4070a0">.3f</span><span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">24</span>         end_time <span style="color:#666">=</span> time<span style="color:#666">.</span>time()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">25</span>         train_loss <span style="color:#666">=</span> losses <span style="color:#666">/</span> <span style="color:#007020">len</span>(train_iter)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">26</span>         <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;Epoch: </span><span style="color:#70a0d0">{</span>epoch<span style="color:#70a0d0">}</span><span style="color:#4070a0">, Train loss: </span><span style="color:#70a0d0">{</span>train_loss<span style="color:#70a0d0">:</span><span style="color:#4070a0">.3f</span><span style="color:#70a0d0">}</span><span style="color:#4070a0">, Epoch time = </span>
+</span></span><span style="display:flex;"><span>		{(end_time  start_time):<span style="color:#40a070">.3</span>f}s<span style="color:#4070a0">&#34;)</span></span></span></code></pre></div><p>在上述代码中，第7行代码用来生成每个样本对应的padding mask向量；第15~16行是将每个step更新后的学习率送入到模型中。以下便是模型训练过程中的输出：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span>     Epoch: <span style="color:#40a070">9</span>, Batch: [<span style="color:#40a070">410</span><span style="color:#666">/</span><span style="color:#40a070">469</span>], Train loss <span style="color:#40a070">0.186</span>, Train acc: <span style="color:#40a070">0.938</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>     Epoch: <span style="color:#40a070">9</span>, Batch: [<span style="color:#40a070">420</span><span style="color:#666">/</span><span style="color:#40a070">469</span>], Train loss <span style="color:#40a070">0.150</span>, Train acc: <span style="color:#40a070">0.938</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>     Epoch: <span style="color:#40a070">9</span>, Batch: [<span style="color:#40a070">430</span><span style="color:#666">/</span><span style="color:#40a070">469</span>], Train loss <span style="color:#40a070">0.269</span>, Train acc: <span style="color:#40a070">0.941</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span>     Epoch: <span style="color:#40a070">9</span>, Batch: [<span style="color:#40a070">440</span><span style="color:#666">/</span><span style="color:#40a070">469</span>], Train loss <span style="color:#40a070">0.197</span>, Train acc: <span style="color:#40a070">0.925</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">5</span>     Epoch: <span style="color:#40a070">9</span>, Batch: [<span style="color:#40a070">450</span><span style="color:#666">/</span><span style="color:#40a070">469</span>], Train loss <span style="color:#40a070">0.245</span>, Train acc: <span style="color:#40a070">0.917</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">6</span>     Epoch: <span style="color:#40a070">9</span>, Batch: [<span style="color:#40a070">460</span><span style="color:#666">/</span><span style="color:#40a070">469</span>], Train loss <span style="color:#40a070">0.272</span>, Train acc: <span style="color:#40a070">0.902</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">7</span>     Accuracy on test <span style="color:#40a070">0.886</span></span></span></code></pre></div><div class="book-page-pv text-small" id="busuanzi_container_page_pv">
+      <span class="book-page-pv-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" focusable="false">
+          <path d="M1.5 12s3.9-6.5 10.5-6.5S22.5 12 22.5 12s-3.9 6.5-10.5 6.5S1.5 12 1.5 12Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7"/>
+          <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.7"/>
+        </svg>
+      </span>
+      <span class="book-page-pv-label">阅读</span>
+      <span class="book-page-pv-value" id="busuanzi_value_page_pv">--</span>
+    </div><section class="book-article-index book-related-articles" aria-labelledby="related-articles-title">
+    <h2 id="related-articles-title">相关阅读</h2>
+    <div class="book-article-grid"><article class="book-article-card book-related-article-card">
+              <h3 class="book-article-card-title">
+                <a href="/dl/chapter07/lstm/">7.3 LSTM网络</a>
+              </h3><p class="book-article-card-desc">在前面两节内容中，我们详细介绍了RNN模型的原理以及在PyTorch框架中的使用方法。虽然理论上RNN模型在处理序列数据方面具有着很好的效果，但在处理长序列数据时RNN模型可能会出现梯度消失或爆炸的情况，进而导致模型无法学习到长期依赖的关系 …</p></article><article class="book-article-card book-related-article-card">
+              <h3 class="book-article-card-title">
+                <a href="/tutorials/transformer/translation/">第5节 基于Transformer 的翻译模型</a>
+              </h3><p class="book-article-card-desc">本文是 Transformer 精读系列第5讲，从零开始搭建一个英语到德语的机器翻译模型。以 Multi30K 平行语料为对象，详细讲清 6 步数据预处理流程（tokenize、词表、序列化、padding、`/` 与 …</p></article><article class="book-article-card book-related-article-card">
+              <h3 class="book-article-card-title">
+                <a href="/tutorials/transformer/transformer-implement/">第4节 Transformer 的实现过程</a>
+              </h3><p class="book-article-card-desc">本文是 Transformer 精读系列第4讲，全程使用 PyTorch 一步步实现完整的 Transformer 模型，覆盖 Token Embedding、正弦 Positional …</p></article><article class="book-article-card book-related-article-card">
+              <h3 class="book-article-card-title">
+                <a href="/tutorials/transformer/multi-head-attention/">第1节 多头注意力机制原理</a>
+              </h3><p class="book-article-card-desc">本文是《Attention Is All You Need》精读系列第1讲，从 RNN 串行瓶颈出发讲清 Transformer 为什么必须引入自注意力，再用图解与公式拆解 Scaled Dot-Product …</p></article><article class="book-article-card book-related-article-card">
+              <h3 class="book-article-card-title">
+                <a href="/tutorials/transformer/positional-encoding/">第2节 位置编码与编码解码过程</a>
+              </h3><p class="book-article-card-desc">本文是 Transformer 精读系列第2讲，用图解与对比示例讲清 Transformer 为什么必须加入位置编码，并拆解正弦 Positional Encoding 公式与高低频维度直觉。随后通过可视化方式演示 …</p></article><article class="book-article-card book-related-article-card">
+              <h3 class="book-article-card-title">
+                <a href="/tutorials/transformer/self-attention/">第3节 网络结构与自注意力实现</a>
+              </h3><p class="book-article-card-desc">本文是 Transformer 精读系列第3讲，详细讲解如何用 PyTorch 一步步实现 MultiHeadAttention 模块。先回顾多层 Transformer 与单层 Encoder-Decoder 结构，再系统拆解自注意力实现 …</p></article></div>
+  </section></article>
+ 
+      
+
+
+      <footer class="book-footer">
+        
+  <div class="flex flex-wrap justify-between">
+
+<div>
+
+</div>
+
+<div>
+
+</div>
+
+</div>
+
+
+
+ 
+        
+  
+  <div class="book-comments"><div class="giscus"></div>
+<script src="https://giscus.app/client.js"
+        data-repo="mlwithme/mlwithme.github.io"
+        data-repo-id="R_kgDOTBt94Q"
+        data-category="Announcements"
+        data-category-id="DIC_kwDOTBt94c4C_21V"
+        data-mapping="pathname"
+        data-strict="1"
+        data-reactions-enabled="1"
+        data-emit-metadata="0"
+        data-input-position="top"
+        data-theme="preferred_color_scheme"
+        data-lang="zh-CN"
+        data-loading="lazy"
+        crossorigin="anonymous"
+        async>
+</script>
+</div>
+  
+ 
+        
+  <link rel="stylesheet" href="https://mlwithme.github.io/katex/katex.min.css" />
+  <script defer src="https://mlwithme.github.io/katex/katex.min.js"></script>
+  <script defer src="https://mlwithme.github.io/katex/auto-render.min.js"></script>
+  
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        if (window.renderMathInElement) {
+          renderMathInElement(
+            document.querySelector(".book-page"),
+            Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
+          );
+        }
+      });
+    </script>
+  
+
+        
+  
+ 
+        
+  
+    <script>(function(){document.querySelectorAll("pre:has(code)").forEach(e=>{e.addEventListener("click",e.focus),e.addEventListener("copy",function(t){if(t.preventDefault(),navigator.clipboard){const t=window.getSelection().toString()||e.textContent;navigator.clipboard.writeText(t)}})})})()</script>
+  
+
+      </footer>
+
+      <label for="menu-control" class="hidden book-menu-overlay"></label>
+    </div>
+
+    
+  
+  <aside class="book-toc">
+    <div class="book-toc-content">
+      
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#61-数据预处理">6.1 数据预处理</a>
+      <ul>
+        <li><a href="#611-语料介绍">6.1.1 语料介绍</a></li>
+        <li><a href="#612-数据集构建">6.1.2 数据集构建</a></li>
+      </ul>
+    </li>
+    <li><a href="#62-文本分类模型">6.2 文本分类模型</a>
+      <ul>
+        <li><a href="#621-网络结构">6.2.1 网络结构</a></li>
+        <li><a href="#622-模型训练">6.2.2 模型训练</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+
+
+
+
+    </div>
+  </aside>
+  
+ 
+  </main>
+
+  <button
+  type="button"
+  class="book-back-to-top"
+  aria-label="回到顶部"
+  title="回到顶部"
+>
+  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <path
+      d="M12 5.5l-5.25 5.25 1.5 1.5 2.7-2.7V18.5h2.1V9.55l2.7 2.7 1.5-1.5L12 5.5z"
+      fill="currentColor"
+    ></path>
+  </svg>
+</button>
+
+<script>
+  (function () {
+    var button = document.querySelector(".book-back-to-top");
+    if (!button) {
+      return;
+    }
+
+    var toggleButton = function () {
+      if (window.scrollY > 360) {
+        button.classList.add("is-visible");
+      } else {
+        button.classList.remove("is-visible");
+      }
+    };
+
+    button.addEventListener("click", function () {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+
+    toggleButton();
+    window.addEventListener("scroll", toggleButton, { passive: true });
+  })();
+</script>
+
+<div class="book-floating-toolbox" data-book-floating-toolbox>
+  <ul
+    class="book-floating-toolbox__items"
+    id="book-floating-toolbox-items"
+    role="menu"
+    aria-label="工具箱"
+    hidden
+  >
+    <li class="book-floating-toolbox__item" role="none" style="--book-toolbox-index: 0; --book-toolbox-count: 3;">
+      <a
+        class="book-floating-toolbox__action"
+        role="menuitem"
+        href="/glossary/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="术语百科"
+      >
+        <span class="book-floating-toolbox__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path
+              d="M5 4.5h11.5a2.5 2.5 0 0 1 2.5 2.5V20l-4-2.5L11 20l-4-2.5L3 20V7a2.5 2.5 0 0 1 2-2.5z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linejoin="round"
+            ></path>
+            <path
+              d="M7.5 9.5h7M7.5 12.5h5"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+            ></path>
+          </svg>
+        </span>
+      </a>
+      <span class="book-floating-toolbox__tip" aria-hidden="true">术语百科</span>
+    </li>
+    <li class="book-floating-toolbox__item" role="none" style="--book-toolbox-index: 1; --book-toolbox-count: 3;">
+      <a
+        class="book-floating-toolbox__action"
+        role="menuitem"
+        href="/code-templates/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="代码模板"
+      >
+        <span class="book-floating-toolbox__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path
+              d="M8.5 7.5 4 12l4.5 4.5M15.5 7.5 20 12l-4.5 4.5M13.5 5l-3 14"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            ></path>
+          </svg>
+        </span>
+      </a>
+      <span class="book-floating-toolbox__tip" aria-hidden="true">代码模板</span>
+    </li>
+    <li class="book-floating-toolbox__item" role="none" style="--book-toolbox-index: 2; --book-toolbox-count: 3;">
+      <a
+        class="book-floating-toolbox__action"
+        role="menuitem"
+        href="https://www.machinelearningwithme.com"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="开发中……"
+      >
+        <span class="book-floating-toolbox__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path
+              d="M9 3.5h6a1.5 1.5 0 0 1 1.5 1.5V7h2.25A1.75 1.75 0 0 1 20.5 8.75v9A1.75 1.75 0 0 1 18.75 19.5H5.25A1.75 1.75 0 0 1 3.5 17.75v-9A1.75 1.75 0 0 1 5.25 7H7.5V5A1.5 1.5 0 0 1 9 3.5z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linejoin="round"
+            ></path>
+            <path
+              d="M9 7h6"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+            ></path>
+            <circle cx="12" cy="13" r="3" fill="none" stroke="currentColor" stroke-width="1.6"></circle>
+          </svg>
+        </span>
+      </a>
+      <span class="book-floating-toolbox__tip" aria-hidden="true">开发中……</span>
+    </li>
+  </ul>
+  <button
+    type="button"
+    class="book-floating-toolbox__toggle"
+    aria-label="工具箱"
+    aria-haspopup="menu"
+    aria-expanded="false"
+    aria-controls="book-floating-toolbox-items"
+    title="工具箱"
+    data-book-toolbox-toggle
+  >
+    <svg class="book-floating-toolbox__toggle-icon-open" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        d="M14.7 6.3a4 4 0 0 0-5.4 5.4l-6.3 6.3a1 1 0 0 0 0 1.4l2 2a1 1 0 0 0 1.4 0l6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-2.4z"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linejoin="round"
+        stroke-linecap="round"
+      ></path>
+      <circle
+        cx="19.5"
+        cy="4.5"
+        r="1.6"
+        fill="currentColor"
+      ></circle>
+    </svg>
+    <svg class="book-floating-toolbox__toggle-icon-close" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        d="M6.5 6.5l11 11M17.5 6.5l-11 11"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.8"
+        stroke-linecap="round"
+      ></path>
+    </svg>
+  </button>
+</div>
+
+<script>
+  (function () {
+    var root = document.querySelector("[data-book-floating-toolbox]");
+    if (!root) {
+      return;
+    }
+    var toggle = root.querySelector("[data-book-toolbox-toggle]");
+    var items = root.querySelector(".book-floating-toolbox__items");
+    if (!toggle || !items) {
+      return;
+    }
+
+    var isOpen = function () {
+      return root.classList.contains("is-open");
+    };
+
+    var open = function () {
+      root.classList.add("is-open");
+      items.hidden = false;
+      toggle.setAttribute("aria-expanded", "true");
+    };
+
+    var close = function () {
+      root.classList.remove("is-open");
+      items.hidden = true;
+      toggle.setAttribute("aria-expanded", "false");
+    };
+
+    toggle.addEventListener("click", function (event) {
+      event.stopPropagation();
+      if (isOpen()) {
+        close();
+      } else {
+        open();
+      }
+    });
+
+    document.addEventListener("click", function (event) {
+      if (!isOpen()) {
+        return;
+      }
+      if (root.contains(event.target)) {
+        return;
+      }
+      close();
+    });
+
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape" && isOpen()) {
+        close();
+        toggle.focus();
+      }
+    });
+
+    items.addEventListener("click", function (event) {
+      if (event.target.closest("a")) {
+        close();
+      }
+    });
+
+    window.addEventListener("pageshow", close);
+  })();
+</script>
+
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

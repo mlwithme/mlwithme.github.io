@@ -1,0 +1,4591 @@
+<!DOCTYPE html>
+<html lang="zh_CN" dir="ltr">
+<head>
+  <!--
+Made with Book Theme
+https://github.com/alex-shpak/hugo-book
+--><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="本文是 Transformer 精读系列第3讲，详细讲解如何用 PyTorch 一步步实现 MultiHeadAttention 模块。先回顾多层 Transformer 与单层 Encoder-Decoder 结构，再系统拆解自注意力实现中三处关键 Mask：Attention …">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="index,follow,max-image-preview:large">
+
+
+
+
+
+<meta property="og:url" content="https://mlwithme.github.io/tutorials/transformer/self-attention/">
+<meta property="og:site_name" content="《从零学AI指南手册》">
+<meta property="og:title" content="第3讲 Multi-Head Attention 代码实现教程：基于 PyTorch 手写多头注意力与掩码">
+<meta property="og:description" content="本文是 Transformer 精读系列第3讲，详细讲解如何用 PyTorch 一步步实现 MultiHeadAttention 模块。先回顾多层 Transformer 与单层 Encoder-Decoder 结构，再系统拆解自注意力实现中三处关键 Mask：Attention …">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:type" content="article">
+<meta property="og:image" content="https://mlwithme.github.io/share-cover.png">
+<meta property="og:image:url" content="https://mlwithme.github.io/share-cover.png">
+<meta property="og:image:secure_url" content="https://mlwithme.github.io/share-cover.png">
+<meta property="og:image:width" content="759">
+<meta property="og:image:height" content="759">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:alt" content="《从零学AI指南手册》 - 第3讲 Multi-Head Attention 代码实现教程：基于 PyTorch 手写多头注意力与掩码">
+
+  <meta property="article:section" content="tutorials">
+  
+    <meta property="article:published_time" content="2026-07-08T20:52:28&#43;08:00">
+  
+  
+    <meta property="article:modified_time" content="2026-07-12T14:43:51&#43;08:00">
+  
+  
+
+
+<script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"WebSite","description":"面向机器学习、深度学习与 AI Agent 的中文系统化学习手册，包含原理讲解、代码示例与实战案例。","inLanguage":"zh_CN","name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
+  </script>
+  <script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.github.io/share-cover.png"},"name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
+  </script><script type="application/ld+json">
+      {"@context":"https://schema.org","@type":"Article","articleSection":"tutorials","author":{"@type":"Person","name":"WangCheng","url":"https://mlwithme.github.ioauthor/"},"dateModified":"2026-07-12T14:43:51+08:00","datePublished":"2026-07-08T20:52:28+08:00","description":"本文是 Transformer 精读系列第3讲，详细讲解如何用 PyTorch 一步步实现 MultiHeadAttention 模块。先回顾多层 Transformer 与单层 Encoder-Decoder 结构，再系统拆解自注意力实现中三处关键 Mask：Attention …","headline":"第3讲 Multi-Head Attention 代码实现教程：基于 PyTorch 手写多头注意力与掩码","image":["https://mlwithme.github.io/share-cover.png"],"inLanguage":"zh_CN","mainEntityOfPage":"https://mlwithme.github.io/tutorials/transformer/self-attention/","publisher":{"@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.github.io/share-cover.png"},"name":"《从零学AI指南手册》"},"url":"https://mlwithme.github.io/tutorials/transformer/self-attention/"}
+    </script><script type="application/ld+json">
+        {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","item":"https://mlwithme.github.io/","name":"首页","position":1},{"@type":"ListItem","item":"https://mlwithme.github.io/tutorials/","name":"专栏文章","position":2},{"@type":"ListItem","item":"https://mlwithme.github.io/tutorials/transformer/","name":"图解 Transformer 入门指南教程","position":3},{"@type":"ListItem","item":"https://mlwithme.github.io/tutorials/transformer/self-attention/","name":"第3讲 Multi-Head Attention 代码实现教程：基于 PyTorch 手写多头注意力与掩码","position":4}]}
+      </script>
+
+<title>第3讲 Multi-Head Attention 代码实现教程：基于 PyTorch 手写多头注意力与掩码 • 《从零学AI指南手册》</title>
+<link rel="icon" href="https://mlwithme.github.io/favicon.png" type="image/png">
+<link rel="shortcut icon" href="https://mlwithme.github.io/favicon.png" type="image/png">
+<link rel="apple-touch-icon" href="https://mlwithme.github.io/favicon.png">
+
+<link rel="manifest" href="/manifest.json">
+<link rel="canonical" href="https://mlwithme.github.io/tutorials/transformer/self-attention/">
+<link rel="stylesheet" href="/book.min.f6a0d10e1ebfedb446c42559024d340c2bf535391c02340b45233f7f70d21212.css" integrity="sha256-9qDRDh6/7bRGxCVZAk00DCv1NTkcAjQLRSM/f3DSEhI=" crossorigin="anonymous">
+  <script defer type="module" src="/zh-cn.search.min.dfd1fe31bc2a2e217cb690a6a708cf8dd323737c55fe0f592d70a19806537dc4.js" integrity="sha256-39H&#43;MbwqLiF8tpCmpwjPjdMjc3xV/g9ZLXChmAZTfcQ=" crossorigin="anonymous"></script>
+
+  
+
+
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="第3讲 Multi-Head Attention 代码实现教程：基于 PyTorch 手写多头注意力与掩码">
+<meta name="twitter:description" content="本文是 Transformer 精读系列第3讲，详细讲解如何用 PyTorch 一步步实现 MultiHeadAttention 模块。先回顾多层 Transformer 与单层 Encoder-Decoder 结构，再系统拆解自注意力实现中三处关键 Mask：Attention …">
+<meta name="twitter:url" content="https://mlwithme.github.io/tutorials/transformer/self-attention/">
+<meta name="twitter:image" content="https://mlwithme.github.io/share-cover.png">
+<meta name="twitter:image:alt" content="《从零学AI指南手册》 - 第3讲 Multi-Head Attention 代码实现教程：基于 PyTorch 手写多头注意力与掩码">
+<script>
+  var _hmt = _hmt || [];
+  (function() {
+    var hm = document.createElement("script");
+    hm.src = "https://hm.baidu.com/hm.js?74a336dd47fbbab3ceb99d4ad8afcb76";
+    var s = document.getElementsByTagName("script")[0];
+    s.parentNode.insertBefore(hm, s);
+  })();
+</script>
+<script async src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
+
+</head>
+<body dir="ltr" class="book-kind-page book-type-tutorials">
+  <input type="checkbox" class="hidden toggle" id="menu-control" />
+  <input type="checkbox" class="hidden toggle" id="toc-control" />
+  <main class="container flex">
+    
+<aside class="book-menu">
+  <div class="book-menu-content">
+    
+  <nav>
+<h2 class="book-brand">
+  <a class="flex align-center" href="/"><svg xmlns="http://www.w3.org/2000/svg" height="20" width="20" viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true" class="book-brand-icon" style="margin-right:.35em;flex:none">
+      <path d="M240-200h120v-240h240v240h120v-360L480-740 240-560v360Zm-80 80q-33 0-56.5-23.5T80-200v-360q0-27 11-49t31-39l280-220q21-17 47-25t51-8q25 0 51 8t47 25l280 220q20 17 31 39t11 49v360q0 33-23.5 56.5T840-120H600q-17 0-28.5-11.5T560-160v-200H400v200q0 17-11.5 28.5T360-120H160Zm320-280Z"/>
+    </svg>
+
+    <span>返回主页</span>
+
+  </a>
+</h2>
+
+
+<div class="book-search hidden">
+  <input id="book-search-input" type="text" 
+    placeholder="Search"
+    aria-label="Search"
+    maxlength="64" />
+  <div class="book-search-spinner hidden"></div>
+  <ul id="book-search-results"></ul>
+</div>
+<script>document.querySelector(".book-search").classList.remove("hidden")</script>
+
+
+
+
+
+
+
+
+
+
+
+  
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/featured/" class="">
+      <span class="book-menu-link-title">精选文章</span>
+</a>
+  
+
+          
+  <ul>
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bb7497cb5e222579131ad9ad959011cb" class="toggle" checked />
+    <label for="section-bb7497cb5e222579131ad9ad959011cb" class="flex">
+      <a href="/tutorials/" class="">
+        <span class="book-menu-link-title">专栏文章</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/tutorials/transformer/" class="">
+      <span class="book-menu-link-title">图解 Transformer 入门指南教程</span>
+</a>
+  
+
+          
+  <ul>
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/tutorials/bert/" class="">
+      <span class="book-menu-link-title">从零玩转 Bert 详解6大下游任务</span>
+</a>
+  
+
+          
+  <ul>
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/" class="">
+      <span class="book-menu-link-title">大模型Agent开发（更新中……）</span>
+</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-279cf10e5100caa4f65ba3f7dd8888a4" class="toggle"  />
+    <label for="section-279cf10e5100caa4f65ba3f7dd8888a4" class="flex">
+      <a href="/agent/chapter01/" class="">
+        <span class="book-menu-link-title">第 1 章 RAG 基础概念</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/what-is-rag/" class="">
+      <span class="book-menu-link-title">1.1 RAG 提出背景</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/rag-pipeline-overview/" class="">
+      <span class="book-menu-link-title">1.2 RAG 流程概览</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-83c662c2764f1c19f8005eab77fee110" class="toggle"  />
+    <label for="section-83c662c2764f1c19f8005eab77fee110" class="flex">
+      <a href="/agent/chapter02/" class="">
+        <span class="book-menu-link-title">第 2 章 大模型接入与使用</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/intro-to-llm-sdk/" class="">
+      <span class="book-menu-link-title">2.1 SDK 介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/modern-llm-sdk/" class="">
+      <span class="book-menu-link-title">2.2 现代大模型中的 SDK</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/dashscope-api-overview/" class="">
+      <span class="book-menu-link-title">2.3 DashScope 接口体系</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/qwen-onboarding/" class="">
+      <span class="book-menu-link-title">2.4 千问大模型接入与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-1e583d7a26333453241d87c5c16592bd" class="toggle"  />
+    <label for="section-1e583d7a26333453241d87c5c16592bd" class="flex">
+      <a href="/agent/chapter03/" class="">
+        <span class="book-menu-link-title">第 3 章 文档标准化与语义检索</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/document-loading-and-preprocessing/" class="">
+      <span class="book-menu-link-title">3.1 文档加载与标准化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/text-splitting-strategies/" class="">
+      <span class="book-menu-link-title">3.2 常见文本切分策略</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/vector-database-selection/" class="">
+      <span class="book-menu-link-title">3.3 向量数据库选择</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/qwen-embedding-model/" class="">
+      <span class="book-menu-link-title">3.4 Qwen3 Embedding 模型介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/semantic-retrieval-pipeline/" class="">
+      <span class="book-menu-link-title">3.5 语义搜索引擎构建</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/milvus-tutorial/" class="">
+      <span class="book-menu-link-title">3.6  Milvus 模块解析</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="toggle"  />
+    <label for="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="flex">
+      <a href="/agent/chapter04/" class="">
+        <span class="book-menu-link-title">第 4 章 RAG 与 Agent</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/two-step-rag/" class="">
+      <span class="book-menu-link-title">4.1 两步式 RAG 搭建</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/function-calling-basics/" class="">
+      <span class="book-menu-link-title">4.2 Function Calling 概念介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/langchain-tool-decorator/" class="">
+      <span class="book-menu-link-title">4.3 LangChain 中的 Tool 修饰器</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/rag-agent-essentials/" class="">
+      <span class="book-menu-link-title">4.4 RAG Agent 原理与搭建</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/react-framework/" class="">
+      <span class="book-menu-link-title">4.5 复杂问题拆解与ReAct框架</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/two-stage-indexing/" class="">
+      <span class="book-menu-link-title">4.6 RAG 中的两阶段索引</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/qwen3-reranking/" class="">
+      <span class="book-menu-link-title">4.7 Qwen3 Reranking 原理与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/two-stage-rag-agent/" class="">
+      <span class="book-menu-link-title">4.8 基于两阶段索引的 RAG Agent</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/langgraph-basics/" class="">
+      <span class="book-menu-link-title">4.9 LangGraph 基本概念介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/langgraph-custom-rag-agent/" class="">
+      <span class="book-menu-link-title">4.10  基于 LangGraph 构建自定义 RAG Agent</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bf5130286ff0eee8f362b632167a5e6b" class="toggle"  />
+    <label for="section-bf5130286ff0eee8f362b632167a5e6b" class="flex">
+      <a href="/agent/chapter05/" class="">
+        <span class="book-menu-link-title">第 5 章 Agent 记忆机制与管理</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/agent-memory-overview/" class="">
+      <span class="book-menu-link-title">5.1 Agent 记忆机制概览</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/langchain-short-term-memory/" class="">
+      <span class="book-menu-link-title">5.2 短期记忆持久化与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/short-term-memory-management/" class="">
+      <span class="book-menu-link-title">5.3 短期记忆管理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/short-term-memory-rag-agent/" class="">
+      <span class="book-menu-link-title">5.4 拥有短期记忆的 RAG Agent</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/long-term-memory-strategies/" class="">
+      <span class="book-menu-link-title">5.5 长期记忆管理与持久化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/mini-chatgpt-from-scratch/" class="">
+      <span class="book-menu-link-title">5.6 从零实现 Mini ChatGPT 助手</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/pgvector-setup/" class="">
+      <span class="book-menu-link-title">5.7 pgvector 配置安装</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/long-term-memory-retrieval-and-forgetting/" class="">
+      <span class="book-menu-link-title">5.8 长期记忆检索与遗忘</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/langgraph-mini-chatgpt/" class="">
+      <span class="book-menu-link-title">5.9 基于 LangGraph 的Mini ChatGPT 助手</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/create-agent-mini-chatgpt/" class="">
+      <span class="book-menu-link-title">5.10 使用 create_agent 搭建 Mini ChatGPT</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/" class="">
+      <span class="book-menu-link-title">深度学习</span>
+</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/mindmap/" class="">
+      <span class="book-menu-link-title">目录思维导图</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-cf7621e8efb1f3153eaca44a113dcdb9" class="toggle"  />
+    <label for="section-cf7621e8efb1f3153eaca44a113dcdb9" class="flex">
+      <a href="/dl/chapter01/" class="">
+        <span class="book-menu-link-title">第 1 章 深度学习简介</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/dl-development-stages/" class="">
+      <span class="book-menu-link-title">1.1 深度学习的发展阶段</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/dl-key-figures/" class="">
+      <span class="book-menu-link-title">1.2 深度学习中的关键人物</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/mainstream-dl-frameworks/" class="">
+      <span class="book-menu-link-title">1.3 深度学习框架介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f9bf1a68c19405769f9c4a1495708a55" class="toggle"  />
+    <label for="section-f9bf1a68c19405769f9c4a1495708a55" class="flex">
+      <a href="/dl/chapter02/" class="">
+        <span class="book-menu-link-title">第 2 章 环境配置</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/dl-dev-environment-architecture/" class="">
+      <span class="book-menu-link-title">2.1 体系结构介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/dl-cuda-pytorch-install/" class="">
+      <span class="book-menu-link-title">2.2 深度学习环境安装</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/dl-cuda-training-env-setup/" class="">
+      <span class="book-menu-link-title">2.3 开发环境安装配置</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="toggle"  />
+    <label for="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="flex">
+      <a href="/dl/chapter03/" class="">
+        <span class="book-menu-link-title">第 3 章 深度学习基础</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/linear-regression-basics/" class="">
+      <span class="book-menu-link-title">3.1 线性回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/linear-regression-implementation/" class="">
+      <span class="book-menu-link-title">3.2 线性回归简洁实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/backpropagation-and-gradient-descent/" class="">
+      <span class="book-menu-link-title">3.3 梯度下降与反向传播</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/regression-from-scratch/" class="">
+      <span class="book-menu-link-title">3.4 从零实现回归模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/softmax-regression-basics/" class="">
+      <span class="book-menu-link-title">3.5 从逻辑回归到Softmax回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/softmax-regression-implementation/" class="">
+      <span class="book-menu-link-title">3.6 Softmax回归简洁实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/softmax-regression-from-scratch/" class="">
+      <span class="book-menu-link-title">3.7 从零实现分类模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/regression-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">3.8 回归模型评估指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/classification-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">3.9 分类模型评估指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/overfitting-and-regularization/" class="">
+      <span class="book-menu-link-title">3.10 过拟合与正则化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/hyperparameters-and-cross-validation/" class="">
+      <span class="book-menu-link-title">3.11 超参数与交叉验证</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/activation-functions/" class="">
+      <span class="book-menu-link-title">3.12 激活函数</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/multi-label-classification/" class="">
+      <span class="book-menu-link-title">3.13 多标签分类</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-7a12cee83820a928df00362d70804a97" class="toggle"  />
+    <label for="section-7a12cee83820a928df00362d70804a97" class="flex">
+      <a href="/dl/chapter04/" class="">
+        <span class="book-menu-link-title">第 4 章 卷积神经网络</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/cnn-basics/" class="">
+      <span class="book-menu-link-title">4.1 卷积的概念</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/convolution-operation/" class="">
+      <span class="book-menu-link-title">4.2 卷积的计算过程</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/convolution-and-pooling/" class="">
+      <span class="book-menu-link-title">4.3 填充和池化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/lenet5/" class="">
+      <span class="book-menu-link-title">4.4 LeNet5网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/alexnet/" class="">
+      <span class="book-menu-link-title">4.5 AlexNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/vgg/" class="">
+      <span class="book-menu-link-title">4.6 VGG网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/nin/" class="">
+      <span class="book-menu-link-title">4.7 NIN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/googlenet/" class="">
+      <span class="book-menu-link-title">4.8 GoogLeNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/resnet/" class="">
+      <span class="book-menu-link-title">4.9 ResNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/densenet/" class="">
+      <span class="book-menu-link-title">4.10 DenseNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-be9addfd3a15c372d609d09cabb94159" class="toggle"  />
+    <label for="section-be9addfd3a15c372d609d09cabb94159" class="flex">
+      <a href="/dl/chapter05/" class="">
+        <span class="book-menu-link-title">第 5 章 模型训练与复用</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/training-logs-management/" class="">
+      <span class="book-menu-link-title">5.1 参数及日志管理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/tensorboard-tutorial/" class="">
+      <span class="book-menu-link-title">5.2 Tensorboard可视化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/pytorch-model-save-load/" class="">
+      <span class="book-menu-link-title">5.3 模型的保存与复用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/transfer-learning-tutorial/" class="">
+      <span class="book-menu-link-title">5.4 模型的迁移学习</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/pretrained-model-reuse/" class="">
+      <span class="book-menu-link-title">5.5 开源模型复用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/multi-gpu-training/" class="">
+      <span class="book-menu-link-title">5.6 多GPU训练</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/training-data-preprocessing-cache/" class="">
+      <span class="book-menu-link-title">5.7 数据预处理与缓存</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="toggle"  />
+    <label for="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="flex">
+      <a href="/dl/chapter06/" class="">
+        <span class="book-menu-link-title">第 6 章 模型优化方法</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/learning-rate-scheduler/" class="">
+      <span class="book-menu-link-title">6.1 学习率调度器</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/gradient-clipping/" class="">
+      <span class="book-menu-link-title">6.2 梯度裁剪</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/batch-norm/" class="">
+      <span class="book-menu-link-title">6.3 批归一化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/layer-norm/" class="">
+      <span class="book-menu-link-title">6.4 层归一化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/group-norm/" class="">
+      <span class="book-menu-link-title">6.5 组归一化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/momentum/" class="">
+      <span class="book-menu-link-title">6.6 动量法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/ada-grad/" class="">
+      <span class="book-menu-link-title">6.7 AdaGrad算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/ada-delta/" class="">
+      <span class="book-menu-link-title">6.8 AdaDelta算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/adam/" class="">
+      <span class="book-menu-link-title">6.9 Adam算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/weight-initialization/" class="">
+      <span class="book-menu-link-title">6.10 初始化方法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-517b751d7c44a7ac77d25d295ed44271" class="toggle"  />
+    <label for="section-517b751d7c44a7ac77d25d295ed44271" class="flex">
+      <a href="/dl/chapter07/" class="">
+        <span class="book-menu-link-title">第 7 章 循环神经网络</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/rnn-basics/" class="">
+      <span class="book-menu-link-title">7.1 RNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/time-series-modeling/" class="">
+      <span class="book-menu-link-title">7.2 时序数据</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/lstm/" class="">
+      <span class="book-menu-link-title">7.3 LSTM网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/gru/" class="">
+      <span class="book-menu-link-title">7.4 GRU网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/bi-rnn/" class="">
+      <span class="book-menu-link-title">7.5 BiRNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/char-rnn/" class="">
+      <span class="book-menu-link-title">7.6 CharRNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-b9b861f64ba32bc68dfb977497de37d9" class="toggle"  />
+    <label for="section-b9b861f64ba32bc68dfb977497de37d9" class="flex">
+      <a href="/dl/chapter08/" class="">
+        <span class="book-menu-link-title">第 8 章 时序与模型融合</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/textcnn/" class="">
+      <span class="book-menu-link-title">8.1 TextCNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/textrnn/" class="">
+      <span class="book-menu-link-title">8.2 TextRNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/cnn-rnn/" class="">
+      <span class="book-menu-link-title">8.3 CNN-RNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/convlstm/" class="">
+      <span class="book-menu-link-title">8.4 ConvLSTM网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/3dcnn/" class="">
+      <span class="book-menu-link-title">8.5 3DCNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/stresnet/" class="">
+      <span class="book-menu-link-title">8.6 STResNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-e54a1e28b1438b8266637bcb8dac1a44" class="toggle"  />
+    <label for="section-e54a1e28b1438b8266637bcb8dac1a44" class="flex">
+      <a href="/dl/chapter09/" class="">
+        <span class="book-menu-link-title">第 9 章 自然语言处理</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/nlp-basics/" class="">
+      <span class="book-menu-link-title">9.1 自然语言处理介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/word2vec-principle/" class="">
+      <span class="book-menu-link-title">9.2 Word2Vec词向量</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/word2vec-training-and-usage/" class="">
+      <span class="book-menu-link-title">9.3 Word2Vec训练与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/glove/" class="">
+      <span class="book-menu-link-title">9.4 GloVe词向量</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/word-vector-finetuning/" class="">
+      <span class="book-menu-link-title">9.5 词向量的微调使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/fasttext/" class="">
+      <span class="book-menu-link-title">9.6 fastText网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/seq2seq-tutorial/" class="">
+      <span class="book-menu-link-title">9.7 Seq2Seq网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/seq-model-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">9.8 序列模型评价指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/nmt-seq2seq/" class="">
+      <span class="book-menu-link-title">9.9 NMT网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/attention-mechanism/" class="">
+      <span class="book-menu-link-title">9.10 注意力机制</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/nmt-with-attention/" class="">
+      <span class="book-menu-link-title">9.11 含注意力的NMT网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/rnn-with-attention/" class="">
+      <span class="book-menu-link-title">9.12 含注意力的RNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f6636b2f9dc1df93b9fa64dd201716d9" class="toggle"  />
+    <label for="section-f6636b2f9dc1df93b9fa64dd201716d9" class="flex">
+      <a href="/dl/chapter10/" class="">
+        <span class="book-menu-link-title">第 10 章 现代神经网络</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/elmo/" class="">
+      <span class="book-menu-link-title">10.1 ELMo网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-principle/" class="">
+      <span class="book-menu-link-title">10.2 Transformer网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-architecture/" class="">
+      <span class="book-menu-link-title">10.3 Transformer结构</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-implementation/" class="">
+      <span class="book-menu-link-title">10.4 Transformer实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-couplet-model/" class="">
+      <span class="book-menu-link-title">10.5 Transformer对联模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-principle/" class="">
+      <span class="book-menu-link-title">10.6 BERT网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-from-scratch/" class="">
+      <span class="book-menu-link-title">10.7 从零实现BERT</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-text-classification/" class="">
+      <span class="book-menu-link-title">10.8 BERT文本分类模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-sentence-pair-matching/" class="">
+      <span class="book-menu-link-title">10.9 BERT问题选择模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-question-answering/" class="">
+      <span class="book-menu-link-title">10.10 BERT问题回答模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-ner/" class="">
+      <span class="book-menu-link-title">10.11 BERT命名体识别模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-pretraining/" class="">
+      <span class="book-menu-link-title">10.12 BERT从零训练</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-1/" class="">
+      <span class="book-menu-link-title">10.13 GPT-1模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-2-and-gpt-3/" class="">
+      <span class="book-menu-link-title">10.14 GPT-2与GPT-3模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-2-chinese-pretraining/" class="">
+      <span class="book-menu-link-title">10.15 基于GPT-2的中文预训练模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/instructgpt-and-chatgpt/" class="">
+      <span class="book-menu-link-title">10.16 InstructGPT与ChatGPT</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/chatgpt-prompt-engineering/" class="">
+      <span class="book-menu-link-title">10.17 ChatGPT与提示词工程</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/baichuan-usage/" class="">
+      <span class="book-menu-link-title">10.18 百川大模型使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/baichuan-implementation/" class="">
+      <span class="book-menu-link-title">10.19 百川大模型实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-4-and-gpts/" class="">
+      <span class="book-menu-link-title">10.20 GPT-4与GPTs使用</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/" class="">
+      <span class="book-menu-link-title">机器学习</span>
+</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/mindmap/" class="">
+      <span class="book-menu-link-title">目录思维导图</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-48f56957e94e3cf66f3022103a7dd0ff" class="toggle"  />
+    <label for="section-48f56957e94e3cf66f3022103a7dd0ff" class="flex">
+      <a href="/ml/chapter01/" class="">
+        <span class="book-menu-link-title">第 1 章 环境配置</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/conda-install-tutorial/" class="">
+      <span class="book-menu-link-title">1.1 安装使用Conda</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/ml-conda-env-setup/" class="">
+      <span class="book-menu-link-title">1.2 开发环境安装配置</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-56a896338a1c41249d22a3efa0e0063c" class="toggle"  />
+    <label for="section-56a896338a1c41249d22a3efa0e0063c" class="flex">
+      <a href="/ml/chapter02/" class="">
+        <span class="book-menu-link-title">第 2 章 线性回归</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/linear-regression-basics/" class="">
+      <span class="book-menu-link-title">2.1 模型的建立与求解</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/multivariate-linear-regression/" class="">
+      <span class="book-menu-link-title">2.2 多变量线性回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/polynomial-regression/" class="">
+      <span class="book-menu-link-title">2.3 多项式回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/regression-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">2.4 回归模型评估</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/gradient-descent-derivation/" class="">
+      <span class="book-menu-link-title">2.5 梯度下降</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/normal-distribution/" class="">
+      <span class="book-menu-link-title">2.6 正态分布</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/linear-regression-loss-derivation/" class="">
+      <span class="book-menu-link-title">2.7 目标函数推导</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ccd0dc9386ea80613d4cedf91b30058d" class="toggle"  />
+    <label for="section-ccd0dc9386ea80613d4cedf91b30058d" class="flex">
+      <a href="/ml/chapter03/" class="">
+        <span class="book-menu-link-title">第 3 章 逻辑回归</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/logistic-regression-basics/" class="">
+      <span class="book-menu-link-title">3.1 模型的建立与求解</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/logistic-regression-multiclass/" class="">
+      <span class="book-menu-link-title">3.2 多分类任务</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/classification-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">3.3 常见的分类评估指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/logistic-regression-loss-derivation/" class="">
+      <span class="book-menu-link-title">3.4 目标函数推导</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="toggle"  />
+    <label for="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="flex">
+      <a href="/ml/chapter04/" class="">
+        <span class="book-menu-link-title">第 4 章 模型的改善与泛化</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/generalization-basics/" class="">
+      <span class="book-menu-link-title">4.1 基本概念</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/feature-scaling/" class="">
+      <span class="book-menu-link-title">4.2 特征标准化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/overfitting-solutions/" class="">
+      <span class="book-menu-link-title">4.3过拟合</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/l1-l2-regularization/" class="">
+      <span class="book-menu-link-title">4.4 正则化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/bias-and-variance/" class="">
+      <span class="book-menu-link-title">4.5 偏差、方差与交叉验证</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/handwritten-digit-recognition-case/" class="">
+      <span class="book-menu-link-title">4.6 实例分析手写体识别</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-40f463d9d502d24b86ea6120b7030123" class="toggle"  />
+    <label for="section-40f463d9d502d24b86ea6120b7030123" class="flex">
+      <a href="/ml/chapter05/" class="">
+        <span class="book-menu-link-title">第 5 章 K近邻</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/knn-principle/" class="">
+      <span class="book-menu-link-title">5.1 K近邻思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/knn-algorithm-details/" class="">
+      <span class="book-menu-link-title">5.2 K近邻原理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/sklearn-knn-example/" class="">
+      <span class="book-menu-link-title">5.3 sklearn接口与示例代码</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/kd-tree-knn/" class="">
+      <span class="book-menu-link-title">5.4 kd树构建与搜索</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/knn-from-scratch/" class="">
+      <span class="book-menu-link-title">5.5 从零实现K近邻</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-5a460dc18f1e79253296cf2cd0498446" class="toggle"  />
+    <label for="section-5a460dc18f1e79253296cf2cd0498446" class="flex">
+      <a href="/ml/chapter06/" class="">
+        <span class="book-menu-link-title">第 6 章 文本特征与模型复用</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/bag-of-words/" class="">
+      <span class="book-menu-link-title">6.1 词袋模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/knn-spam-classification/" class="">
+      <span class="book-menu-link-title">6 .2 基于K近邻算法的垃圾邮件分类</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/tf-idf/" class="">
+      <span class="book-menu-link-title">6.3 考虑权重的词袋模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/wordcloud-generation/" class="">
+      <span class="book-menu-link-title">6.4 词云图</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-96f45a8b8c8b75adc70c78026d93dbf6" class="toggle"  />
+    <label for="section-96f45a8b8c8b75adc70c78026d93dbf6" class="flex">
+      <a href="/ml/chapter07/" class="">
+        <span class="book-menu-link-title">第 7 章 朴素贝叶斯</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/naive-bayes-basics/" class="">
+      <span class="book-menu-link-title">7.1 朴素贝叶斯算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/bayes-estimation/" class="">
+      <span class="book-menu-link-title">7.2 贝叶斯估计</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/naive-bayes-implementation/" class="">
+      <span class="book-menu-link-title">7.3 朴素贝叶斯实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/multinomial-naive-bayes/" class="">
+      <span class="book-menu-link-title">7.4 多项式朴素贝叶斯原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/gaussian-naive-bayes/" class="">
+      <span class="book-menu-link-title">7.5 高斯朴素贝叶斯原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-22476e49d5058c3e5e7e7366b7ab676f" class="toggle"  />
+    <label for="section-22476e49d5058c3e5e7e7366b7ab676f" class="flex">
+      <a href="/ml/chapter08/" class="">
+        <span class="book-menu-link-title">第 8 章 决策树</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-principle/" class="">
+      <span class="book-menu-link-title">8.1 决策树的基本思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-sklearn/" class="">
+      <span class="book-menu-link-title">8.2 决策树建模与可视化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/id3-vs-c45/" class="">
+      <span class="book-menu-link-title">8.3 决策树生成之ID3与C4.5</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-pruning/" class="">
+      <span class="book-menu-link-title">8.4 决策树剪枝过程</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-from-scratch/" class="">
+      <span class="book-menu-link-title">8.5 从零实现ID3与C4.5算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-continuous-features/" class="">
+      <span class="book-menu-link-title">8.6 连续型特征变量下决策树实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/cart-algorithm/" class="">
+      <span class="book-menu-link-title">8.7 CART生成与剪枝算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/cart-from-scratch/" class="">
+      <span class="book-menu-link-title">8.8 从零实现CART算法及剪枝示例</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-2feb6a51cabb61dba860f45c1881386b" class="toggle"  />
+    <label for="section-2feb6a51cabb61dba860f45c1881386b" class="flex">
+      <a href="/ml/chapter09/" class="">
+        <span class="book-menu-link-title">第 9 章 集成学习与提升算法</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/ensemble-learning-basics/" class="">
+      <span class="book-menu-link-title">9.1 集成学习算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/random-forest-principle/" class="">
+      <span class="book-menu-link-title">9.2 随机森林</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/random-forest-titanic/" class="">
+      <span class="book-menu-link-title">9.3 泰坦尼克号生还预测</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/adaboost/" class="">
+      <span class="book-menu-link-title">9.4 AdaBoost原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/multi-adaboost/" class="">
+      <span class="book-menu-link-title">9.5 MultiAdaBoost原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/gradient-boost/" class="">
+      <span class="book-menu-link-title">9.6 Gradient Boost 原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-938ae119c3849b03ccb6f91cef4243dd" class="toggle"  />
+    <label for="section-938ae119c3849b03ccb6f91cef4243dd" class="flex">
+      <a href="/ml/chapter10/" class="">
+        <span class="book-menu-link-title">第 10 章 支持向量机</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-principle/" class="">
+      <span class="book-menu-link-title">10.1 SVM思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-nonlinear-kernel/" class="">
+      <span class="book-menu-link-title">10.2 SVM线性不可分</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-max-margin/" class="">
+      <span class="book-menu-link-title">10.3 SVM原理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-soft-margin/" class="">
+      <span class="book-menu-link-title">10.4 SVM中的软间隔</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/lagrange-multipliers/" class="">
+      <span class="book-menu-link-title">10.5 拉格朗日乘数法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/kkt-conditions/" class="">
+      <span class="book-menu-link-title">10.6 对偶性与KKT条件</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-optimization/" class="">
+      <span class="book-menu-link-title">10.7 SVM优化问题</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-kernel-functions/" class="">
+      <span class="book-menu-link-title">10.8 SVM核函数原理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/smo-algorithm/" class="">
+      <span class="book-menu-link-title">10.9 SMO算法求解SVM</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-from-scratch/" class="">
+      <span class="book-menu-link-title">10.10 从零实现SVM分类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-9f4d9786d4ab755fde42c64d09b0d026" class="toggle"  />
+    <label for="section-9f4d9786d4ab755fde42c64d09b0d026" class="flex">
+      <a href="/ml/chapter11/" class="">
+        <span class="book-menu-link-title">第 11 章 聚类分析</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/clustering-basics/" class="">
+      <span class="book-menu-link-title">11.1 聚类算法的思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-principle/" class="">
+      <span class="book-menu-link-title">11.2 Kmeans聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-iteration/" class="">
+      <span class="book-menu-link-title">11.3 Kmeans算法求解</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-from-scratch/" class="">
+      <span class="book-menu-link-title">11.4 从零实现Kmeans聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-plus-plus/" class="">
+      <span class="book-menu-link-title">11.5 Kmeans&#43;&#43;聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/clustering-external-metrics/" class="">
+      <span class="book-menu-link-title">11.6 聚类外部评价指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/weighted-kmeans/" class="">
+      <span class="book-menu-link-title">11.7 加权Kmeans聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/clustering-internal-metrics/" class="">
+      <span class="book-menu-link-title">11.8 聚类内部评价指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-k-selection/" class="">
+      <span class="book-menu-link-title">11.9 聚类K值选取与分析</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/dbscan/" class="">
+      <span class="book-menu-link-title">11.10 基于密度的聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/hierarchical-clustering/" class="">
+      <span class="book-menu-link-title">11.11 基于层次的聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-d5e78c45312818bb3abd5c19c858f7e5" class="toggle"  />
+    <label for="section-d5e78c45312818bb3abd5c19c858f7e5" class="flex">
+      <a href="/ml/chapter12/" class="">
+        <span class="book-menu-link-title">第 12 章 降维算法</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/pca-principle/" class="">
+      <span class="book-menu-link-title">12.1 主成分分析</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/kpca/" class="">
+      <span class="book-menu-link-title">12.2 基于核函数的主成分分析</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-a82b41bb7eb95af72bc11e8a3d668acd" class="toggle"  />
+    <label for="section-a82b41bb7eb95af72bc11e8a3d668acd" class="flex">
+      <a href="/ml/chapter13/" class="">
+        <span class="book-menu-link-title">第 13 章 自训练与标签传播</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/self-training/" class="">
+      <span class="book-menu-link-title">13.1 Self-Training 自训练算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/label-propagation/" class="">
+      <span class="book-menu-link-title">13.2 Label Propagation算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/label-spreading/" class="">
+      <span class="book-menu-link-title">13.3 Label Spreading 算法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</nav>
+
+
+
+
+  <script>(function(){var e=document.querySelector("aside .book-menu-content");addEventListener("beforeunload",function(){localStorage.setItem("menu.scrollTop",e.scrollTop)}),e.scrollTop=localStorage.getItem("menu.scrollTop")})()</script>
+
+
+
+  </div>
+</aside>
+ 
+
+    <div class="book-page">
+      <header class="book-header hidden">
+        
+  <div class="flex align-center justify-between">
+  <label for="menu-control">
+    <img src="/icons/menu.svg" class="book-icon" alt="Menu" />
+  </label>
+
+  <h3>第3讲 Multi-Head Attention 代码实现教程：基于 PyTorch 手写多头注意力与掩码</h3>
+
+  <label for="toc-control">
+    
+    <img src="/icons/toc.svg" class="book-icon" alt="Table of Contents" />
+    
+  </label>
+</div>
+
+
+  
+  <aside class="hidden">
+    
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#31多层transformer">3.1多层Transformer</a></li>
+    <li><a href="#32-transformer中的掩码">3.2 Transformer中的掩码</a>
+      <ul>
+        <li><a href="#321-attention-mask">3.2.1 Attention Mask</a></li>
+        <li><a href="#322-padding-mask">3.2.2 Padding Mask</a></li>
+        <li><a href="#323-行padding与列padding">3.2.3 行Padding与列Padding</a></li>
+      </ul>
+    </li>
+    <li><a href="#33-实现多头注意力机制">3.3 实现多头注意力机制</a>
+      <ul>
+        <li><a href="#331-多头注意力机制">3.3.1 多头注意力机制</a></li>
+        <li><a href="#332-定义类-mymultiheadattention">3.3.2 定义类 <code>MyMultiHeadAttention</code></a></li>
+        <li><a href="#333-定义前向传播过程">3.3.3 定义前向传播过程</a></li>
+        <li><a href="#334-多头注意力计算过程">3.3.4 多头注意力计算过程</a></li>
+        <li><a href="#335-示例代码">3.3.5 示例代码</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+
+
+
+
+  </aside>
+  
+ 
+      </header>
+
+      
+      
+  <article class="markdown book-article"><nav class="book-breadcrumbs text-small book-breadcrumbs--page" aria-label="面包屑导航">
+    <ol class="book-breadcrumbs__list"><li class="book-breadcrumbs__item"><a class="book-breadcrumbs__link" href="https://mlwithme.github.io/">首页</a></li><li class="book-breadcrumbs__item"><a class="book-breadcrumbs__link" href="https://mlwithme.github.io/tutorials/">专栏文章</a></li><li class="book-breadcrumbs__item"><a class="book-breadcrumbs__link" href="https://mlwithme.github.io/tutorials/transformer/">图解 Transformer 入门指南教程</a></li><li class="book-breadcrumbs__item"><span class="book-breadcrumbs__current" aria-current="page">第3节 网络结构与自注意力实现</span></li></ol>
+  </nav><div class="book-article-lastmod text-small">
+        <span class="book-article-lastmod-label">更新于</span>
+        <span class="book-article-lastmod-value">2026年7月12日</span>
+      </div><h1 id="第3节-网络结构与自注意力实现">第3节 网络结构与自注意力实现<a class="anchor" href="#%e7%ac%ac3%e8%8a%82-%e7%bd%91%e7%bb%9c%e7%bb%93%e6%9e%84%e4%b8%8e%e8%87%aa%e6%b3%a8%e6%84%8f%e5%8a%9b%e5%ae%9e%e7%8e%b0">#</a></h1>
+<p>在通过前面几部分内容详细介绍完Transformer网络结构的原理后，接下来就让我们来看一看如何借用Pytorch框架来实现 MultiHeadAttention 这一结构。同时，需要说明的一点是，下面所有的实现代码都是直接从 Pytorch 1.4 版本中 <code>torch.nn.Transformer</code> 模块里摘取出来的简略版，目的就是为了让大家对于整个实现过程有一个清晰的认识。并且为了使得大家在阅读完以下内容后也能够对Pytorch中的相关模块有一定的了解，所以下面的代码在变量名方面也与Pytorch保持了一致。</p>
+<p>代码仓库见：<a href="https://github.com/mlwithme/TransformerTranslation">https://github.com/mlwithme/TransformerTranslation</a></p>
+<h2 id="31多层transformer">3.1多层Transformer<a class="anchor" href="#31%e5%a4%9a%e5%b1%82transformer">#</a></h2>
+<p>在第2部分中，我们详细介绍了单层Transformer网络结构中的各个组成部分。尽管多层Transformer就是在此基础上堆叠而来，不过还是有必要在这里稍微提及一下。</p>
+<div align=center><img width="400" src="/images/tutorials/202607082106.png" alt="图 3-1. 单层Transformer网络结构图"/> </div><center>图 3-1. 单层Transformer网络结构图</center>
+<p>如图3-1所示便是一个单层Transformer网络结构图，左边是编码器右边是解码器。而多层的Transformer网络就是在两边分别堆叠了多个编码器和解码器的网络模型，如图3-2所示。</p>
+<div align=center><img width="350" src="/images/tutorials/202607112029.png" alt="图 3-2. 多层Transformer网络结构图"/> </div><center>图 3-2. 多层Transformer网络结构图</center>
+<p>如图3-2所示便是一个多层的Transformer网络结构图（原论文中采用了6个编码器和6个解码器），其中的每一个Encoder都是图3-1中左边所示的网络结构（Decoder同理）。可以发现，它真的就是图3-1堆叠后的形式。不过需要注意的是其整个解码过程。</p>
+<p>在多层Transformer中，多层编码器先对输入序列进行编码，然后得到最后一个Encoder的输出Memory；解码器先通过Masked Multi-Head Attention对输入序列进行编码，然后将输出结果同Memory通过Encoder-Decoder Attention后得到第1层解码器的输出；接着再将第1层Decoder的输出通过Masked Multi-Head Attention进行编码，最后再将编码后的结果同Memory通过Encoder-Decoder Attention后得到第2层解码器的输出，以此类推得到最后一个Decoder的输出。</p>
+<p>值得注意的是，在多层Transformer的解码过程中，每一个Decoder在Encoder-Decoder Attention中所使用的Memory均是同一个。</p>
+<h2 id="32-transformer中的掩码">3.2 Transformer中的掩码<a class="anchor" href="#32-transformer%e4%b8%ad%e7%9a%84%e6%8e%a9%e7%a0%81">#</a></h2>
+<p>由于在实现多头注意力时需要考虑到各种情况下的掩码，因此在这里需要先对这部分内容进行介绍。在Transformer中，主要有两个地方会用到掩码这一机制。第1个地方就是在2.2.4节中介绍到的Attention Mask，只用于在训练过程中解码阶段时掩盖掉当前时刻之后的信息；第2个地方便是对一个batch中不同长度的序列在Padding到相同长度后，对Padding部分的信息进行掩盖，这在编码器和解码器中均会用到。下面分别就这两种情况进行介绍。</p>
+<h3 id="321-attention-mask">3.2.1 Attention Mask<a class="anchor" href="#321-attention-mask">#</a></h3>
+<p>如图3-3所示，在训练过程中对于每一个样本来说都需要这样一个对称矩阵来掩盖掉当前时刻之后所有位置的信息。</p>
+<div align=center><img width="520" src="/images/tutorials/202607102142.png" alt="图 3-3. 解码器自注意力计算过程图"/> </div><center>图 3-3. 解码器自注意力计算过程图</center>
+<p>从图3-3可以看出，这个注意力掩码矩阵的形状为 <code>[tgt_len,tgt_len]</code>，其具体Mask原理在2.2.4节中已经介绍过了，这里就不再赘述。在后续实现过程中，我们将通过 <code>generate_square_subsequent_mask</code> 方法来生成这样一个矩阵。同时，在后续多头注意力机制实现中，将通过attn_mask这一变量名来指代这个矩阵。</p>
+<h3 id="322-padding-mask">3.2.2 Padding Mask<a class="anchor" href="#322-padding-mask">#</a></h3>
+<p>在Transformer中，使用到掩码的第2个地方便是Padding Mask。由于在网络的训练过程中同一个batch会包含有多个文本序列，而不同的序列长度并不一致。因此在数据集生成时，就需要将同一个batch中的序列Padding到相同的长度。但是，这样就会导致在注意力的计算过程中会考虑到Padding位置上的信息。</p>
+<div align=center><img width="520" src="/images/tutorials/202607112034.png" alt="图 3-4. Padding时注意力计算过程图"/> </div><center>图 3-4. Padding时注意力计算过程图</center>
+<p>如图3-4所示，P表示Padding位置，右边的矩阵表示注意力权重矩阵。从图中可以看到，此时注意力权重对于Padding位置上的信息也会加以考虑。因此在Transformer中，作者通过在生成训练集的过程中记录下每个样本Padding的实际位置；然后再将注意力权重矩阵中对应位置的权重替换成负无穷，经softmax操作后对应Padding位置上的权重就变成了0，从而达到了忽略Padding位置信息的目的。这种做法也是Encoder-Decoder网络结构中通用的一种办法。</p>
+<div align=center><img width="520" src="/images/tutorials/202607112035.png" alt="图 3-5. Padding掩码计算过程图"/> </div><center>图 3-5. Padding掩码计算过程图</center>
+<p>如图3-5所示，对于 <code>&quot;我 是 谁 P P&quot;</code> 这个序列来说，前3个字符是正常的，后2个字符是Padding后的结果。因此，其Mask向量便为 <code>[True, True, True, False, False]</code> 。通过这个Mask向量可知，需要将权重矩阵的最后两列替换成负无穷，在后续我们会通过 <code>torch.masked_fill</code> 这个方法来完成这一步，并且在实现时将使用 <code>key_padding_mask</code> 来指代这一向量。</p>
+<h3 id="323-行padding与列padding">3.2.3 行Padding与列Padding<a class="anchor" href="#323-%e8%a1%8cpadding%e4%b8%8e%e5%88%97padding">#</a></h3>
+<p>在3.2.2节中我们介绍到可以通过 mask fill 操作来忽略掉注意力权重矩阵中padding部分的信息，即图3-5中的示例。但此时有好事者发出疑问，图3-5中注意力权重的最后两行为什么没有进行mask操作？这两行对应的不也是padding部分的信息吗？此时，问题就来了，为什么不对注意力权重矩阵中的最后两行也进行mask处理（如图3-6右所示），它代表的不也是padding部分的信息吗？</p>
+<div align=center><img width="520" src="/images/tutorials/202607112036.png" alt="图 3-6. 行padding与列padding对比图"/> </div><center>图 3-6. 行padding与列padding对比图</center>
+<p>这里之所以不用对最后两行的padding进行mask处理，是因为权重矩阵与V作用后得到的结果Memory在与Decoder中Multi-Head Attention交互时，最后两行padding部分的内容在那里进行了mask处理。下面，我们就用图示来一步一步还原整个过程，以便大家能够清楚地理解。</p>
+<p>假如图3-6中左边的权重矩阵与V作用后的结果如图3-7所示，此时可以知道Z中最后两行的信息本质上也是属于padding部分的内容，按道理来说如果权重矩阵的最后两行全为0 ，那么Z中最后两行的结果也将全部为0而被忽略掉。</p>
+<div align=center><img width="520" src="/images/tutorials/202607112038.png" alt="图 3-7. encoder中单头注意力权重计算过程图"/> </div><center>图 3-7. encoder中单头注意力权重计算过程图</center>
+<p>进一步，假定解码器的输入经过图3-1中Masked Multi-Head Attention处理后的输出为tgt(Q)，与编码器的输出Memory（图3-7中Z经过线性变换后的结果）作用后得到权重矩阵如图3-8最右边所示。按道理，如果图3-7中Z的最后两行均为0，那么图3-8中权重矩阵的最后两列将会全部为0。</p>
+<div align=center><img width="520" src="/images/tutorials/202607112039.png" alt="图 3-8. decoder中单头注意力权重矩阵计算过程图"/> </div><center>图 3-8. decoder中单头注意力权重矩阵计算过程图</center>
+<p>接着，图3-8中的注意力矩阵将会进行类似图3-5中的mask操作，而此时encoder-decoder交互部分的maks向量就是图3-5中的mask向量。因此，整个mask过程如图3-9所示。</p>
+<div align=center><img width="520" src="/images/tutorials/202607112040.png" alt="图 3-9. encoder-decoder单头注意力mask计算过程图"/> </div><center>图 3-9. encoder-decoder单头注意力mask计算过程图</center>
+<p>如图3-9所示，图3-8中的注意力矩阵在经过mask操作后，注意力矩阵的最后两列全部变成了0，从而也就达到了后面可以忽略掉图3-7里Z中最后两行信息的目的，如图3-10所示。</p>
+<div align=center><img width="520" src="/images/tutorials/202607112041.png" alt="图 3-10. encoder-decoder单头注意力计算过程图"/> </div><center>图 3-10. encoder-decoder单头注意力计算过程图</center>
+<p>如图3-10所示，由于此时注意力矩阵的最后两列均为0，那么其在与encoder输出部分memory作用时，memory中最后两行padding部分的信息自然就得到了忽略。此时可以看出，即使在encoder里图3-7中权重矩阵的最后两行没有进行mask，但是在encoder-decoder交互时的mask操作中却得到了体现。不过，假如图3-7中权重矩阵的最后两行也进行了mask，那又会是一个什么样的结果呢？</p>
+<div align=center><img width="520" src="/images/tutorials/202607112043.png" alt="图 3-11. encoder中单头注意力计算过程图"/> </div><center>图 3-11. encoder中单头注意力计算过程图</center>
+<p>如图3-11所示，假如此时权重矩阵的最后两行也进行了padding处理，那么此时encoder单头注意力的输出结果将形如Z的形式，即padding部分的信息全为0。进一步，图3-11中Z经线性变换得到memory(K)后，与解码器的输入经过Masked Multi-Head Attention处理后的输出tgt(Q)作用后的结果将如图3-12所示。</p>
+<div align=center><img width="520" src="/images/tutorials/202607112044.png" alt="图3-12. decoder中单头注意力权重矩阵计算过程图"/> </div><center>图3-12. decoder中单头注意力权重矩阵计算过程图</center>
+<p>如图3-12所示，由于此时memory中最后两行的信息也进行了mask处理，所以计算得到的注意力权重矩阵最后两列便直接变成了0，从而也直接得到了图3-9中mask操作后的结果，后续便再是图3-10所示的过程。</p>
+<p>到此可以得出的结论便是，在encoder中无论是否要在行上注意力权重矩阵进行mask操作，都不会影响模型最后的输出结果。因为即使在encoder中注意力权重矩阵行上的padding信息没有被mask，但是在encoder-decoder交互部分的注意力权重矩阵计算过程中也会对这部分信息进行mask处理。</p>
+<p>不过最后的最后，还要再提出一个类似的问题，在解码器的Masked Multi-Head Attention中，注意力权重矩阵同样也只是在列上进行了mask处理，那为什么同样没有在行上进行mask操作呢？或者说后续阶段哪个操作等价于行上的mask操作呢？如果想不明白可以公众号后台回复“行padding”获取答案。</p>
+<p>到此，对于Transformer中所要用到Mask的地方就介绍完了，下面正式来看如何实现多头注意力机制。</p>
+<h2 id="33-实现多头注意力机制">3.3 实现多头注意力机制<a class="anchor" href="#33-%e5%ae%9e%e7%8e%b0%e5%a4%9a%e5%a4%b4%e6%b3%a8%e6%84%8f%e5%8a%9b%e6%9c%ba%e5%88%b6">#</a></h2>
+<h3 id="331-多头注意力机制">3.3.1 多头注意力机制<a class="anchor" href="#331-%e5%a4%9a%e5%a4%b4%e6%b3%a8%e6%84%8f%e5%8a%9b%e6%9c%ba%e5%88%b6">#</a></h3>
+<p>根据前面的介绍可以知道，多头注意力机制中最为重要的就是自注意力机制，也就是需要前计算得到Q、K和V，如图3-13所示。</p>
+<div align=center><img width="450" src="/images/tutorials/202607082116.png" alt="图 3-13. Q、K和V计算过程"/> </div><center>图 3-13. Q、K和V计算过程</center>
+<p>然后再根据Q、K、V来计算得到最终的注意力编码，如图3-14所示。</p>
+<div align=center><img width="500" src="/images/tutorials/202607092045.png" alt="图 3-14. 注意力编码计算图"/> </div><center>图 3-14. 注意力编码计算图</center>
+<p>同时，为了避免单个自注意力机制计算得到的注意力权重过度集中于当前编码位置自己所在的位置（同时更应该关注于其它位置），所以作者在论文中提到通过采用多头注意力机制来解决这一问题，如图3-15所示。</p>
+<div align=center><img width="600" src="/images/tutorials/202607091957.png" alt="图 3-15. 多头注意力计算图（2 个头）"/> </div><center>图 3-15. 多头注意力计算图（2 个头）</center>
+<h3 id="332-定义类-mymultiheadattention">3.3.2 定义类 <code>MyMultiHeadAttention</code><a class="anchor" href="#332-%e5%ae%9a%e4%b9%89%e7%b1%bb-mymultiheadattention">#</a></h3>
+<p>综上所述，我们可以给出类 <code>MyMultiHeadAttentiond</code> 的定义为</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">MyMultiheadAttention</span>(nn<span style="color:#666">.</span>Module):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">__init__</span>(<span style="color:#007020">self</span>,embed_dim, num_heads, dropout<span style="color:#666">=</span><span style="color:#40a070">0.</span>,bias<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">True</span>):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>         <span style="color:#007020">super</span>(MyMultiheadAttention, <span style="color:#007020">self</span>)<span style="color:#666">.</span><span style="color:#06287e">__init__</span>()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>         <span style="color:#4070a0">&#34;&#34;&#34;
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0"> 5        :param embed_dim: 词嵌入的维度，也就是前面的d_model参数,论文中的默认值为512
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0"> 6        :param num_heads:多头注意力中多头的数量,也就是前面的nhead参数,论文默认值为 8
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0"> 7        :param bias:   最后对多头的注意力（组合）输出进行线性变换时，是否使用偏置
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0"> 8         &#34;&#34;&#34;</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>embed_dim <span style="color:#666">=</span> embed_dim  <span style="color:#60a0b0;font-style:italic"># 前面的d_model参数</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>head_dim <span style="color:#666">=</span> embed_dim <span style="color:#666">//</span>num_heads <span style="color:#60a0b0;font-style:italic"># head_dim 指的就是d_k,d_v</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>kdim <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>head_dim
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>vdim <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>head_dim
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>num_heads <span style="color:#666">=</span> num_heads  <span style="color:#60a0b0;font-style:italic"># 多头个数</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>dropout <span style="color:#666">=</span> dropout
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>         <span style="color:#007020;font-weight:bold">assert</span> <span style="color:#007020">self</span><span style="color:#666">.</span>head_dim <span style="color:#666">*</span> num_heads <span style="color:#666">==</span> <span style="color:#007020">self</span><span style="color:#666">.</span>embed_dim,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span> 					 <span style="color:#4070a0">&#34;embed_dim 除以 num_heads必须为整数&#34;</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>         <span style="color:#60a0b0;font-style:italic"># 上面的限制条件就是论文中的  d_k = d_v = d_model/n_head 条件</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>q_proj_weight <span style="color:#666">=</span> Parameter(torch<span style="color:#666">.</span>Tensor(embed_dim, embed_dim))  
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span>         <span style="color:#60a0b0;font-style:italic"># embed_dim = kdim * num_heads</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span>         <span style="color:#60a0b0;font-style:italic"># 这里第二个维度之所以是embed_dim，实际上这里是同时初始化了num_heads个W_q 堆叠起来的, 也就是num_heads个头</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">21</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>k_proj_weight <span style="color:#666">=</span> Parameter(torch<span style="color:#666">.</span>Tensor(embed_dim, embed_dim))  
+</span></span><span style="display:flex;"><span><span style="color:#40a070">22</span>         <span style="color:#60a0b0;font-style:italic"># W_k,  embed_dim = kdim * num_heads</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">23</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>v_proj_weight <span style="color:#666">=</span> Parameter(torch<span style="color:#666">.</span>Tensor(embed_dim, embed_dim))  
+</span></span><span style="display:flex;"><span><span style="color:#40a070">24</span>         <span style="color:#60a0b0;font-style:italic"># W_v,  embed_dim = vdim * num_heads</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">25</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>out_proj <span style="color:#666">=</span> nn<span style="color:#666">.</span>Linear(embed_dim, embed_dim, bias<span style="color:#666">=</span>bias)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">26</span>         <span style="color:#60a0b0;font-style:italic"># 最后将所有的Z组合起来的时候，也是一次性完成， embed_dim = vdim * num_heads</span></span></span></code></pre></div><p>在上述代码中，embed_dim表示模型的维度（图3-15中的d_m）；num_heads表示多头的个数；bias表示是否在多头线性组合时使用偏置。同时，为了使得实现代码更加高效，所以Pytorch在实现的时候是多个头注意力机制一起进行的计算，也就上面代码的第17~22行，分别用来初始化了多个头的权重值（这一过程从图3-15也可以看出）。当多头注意力机制计算完成后，将会得到一个形状为[src_len,embed_dim]的矩阵，也就是图3-15中多个 水平堆叠后的结果。因此，第24行代码将会初始化一个线性层来对这一结果进行一个线性变换。</p>
+<h3 id="333-定义前向传播过程">3.3.3 定义前向传播过程<a class="anchor" href="#333-%e5%ae%9a%e4%b9%89%e5%89%8d%e5%90%91%e4%bc%a0%e6%92%ad%e8%bf%87%e7%a8%8b">#</a></h3>
+<p>在定义完初始化函数后，便可以定义如下所示的多头注意力前向传播的过程</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">forward</span>(<span style="color:#007020">self</span>, query,key,value,attn_mask <span style="color:#666">=</span> <span style="color:#007020;font-weight:bold">None</span>, key_padding_mask<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>         <span style="color:#4070a0">&#34;&#34;&#34;
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0"> 3         在论文中，编码时query, key, value 都是同一个输入， 
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0"> 4         解码时 输入的部分也都是同一个输入， 
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0"> 5         解码和编码交互时 key,value指的是 memory, query指的是tgt
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0"> 6         :param query: [tgt_len,batch_size,embed_dim],tgt_len 表示目标序列长度
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0"> 7         :param key:   [src_len, batch_size,embed_dim], src_len表示源序列长度
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0"> 8         :param value: [src_len, batch_size,embed_dim], src_len表示源序列长度
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0"> 9         :param attn_mask:[tgt_len,src_len] or [num_heads*batch_size,tgt_len, src_len] 一般只在解码时使用，为了并行一次喂入所有解码部分的输入，
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">10                       所以要用mask来进行掩盖当前时刻之后的位置信息
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">11         :param key_padding_mask: [batch_size, src_len], src_len 表示源序列长度
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">12         :return:
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">13         attn_output: [tgt_len, batch_size, embed_dim]
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">14         attn_output_weights: # [batch_size, tgt_len, src_len]
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">15         &#34;&#34;&#34;</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>      <span style="color:#007020;font-weight:bold">return</span> multi_head_attention_forward(query, key,value,<span style="color:#007020">self</span><span style="color:#666">.</span>num_heads,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>                            <span style="color:#007020">self</span><span style="color:#666">.</span>dropout,<span style="color:#007020">self</span><span style="color:#666">.</span>out_proj<span style="color:#666">.</span>weight, 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span> 			<span style="color:#007020">self</span><span style="color:#666">.</span>out_proj<span style="color:#666">.</span>bias, training<span style="color:#666">=</span><span style="color:#007020">self</span><span style="color:#666">.</span>training,   
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span>                            key_padding_mask<span style="color:#666">=</span>key_padding_mask,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span>                            q_proj_weight<span style="color:#666">=</span><span style="color:#007020">self</span><span style="color:#666">.</span>q_proj_weight,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">21</span>                            k_proj_weight<span style="color:#666">=</span><span style="color:#007020">self</span><span style="color:#666">.</span>k_proj_weight,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">22</span>                            v_proj_weight<span style="color:#666">=</span><span style="color:#007020">self</span><span style="color:#666">.</span>v_proj_weight,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">23</span>                            attn_mask<span style="color:#666">=</span>attn_mask)</span></span></code></pre></div><p>在上述代码中，query、key、value指的并不是图3-13中的Q、K和V，而是没有经过线性变换前的输入。例如在编码时三者均是指原始输入序列src；在解码时的Mask Multi-Head Attention中三者指的均是目标输入序列tgt；在解码时的Encoder-Decoder Attention中三者分别指的是Mask Multi-Head Attention的输出、Memory和Memory。key_padding_mask指的是编码或解码部分，输入序列的Padding情况，形状为 [batch_size,src_len] 或者[batch_size,tgt_len];attn_mask指的就是注意力掩码矩阵，形状为 [tgt_len,src_len]，它只会在解码时使用。</p>
+<p>注意，在上面的这些维度中，tgt_len本质上指的其实是query_len；src_len本质上指的是key_len。只是在不同情况下两者可能会是一样，也可能会是不一样。</p>
+<h3 id="334-多头注意力计算过程">3.3.4 多头注意力计算过程<a class="anchor" href="#334-%e5%a4%9a%e5%a4%b4%e6%b3%a8%e6%84%8f%e5%8a%9b%e8%ae%a1%e7%ae%97%e8%bf%87%e7%a8%8b">#</a></h3>
+<p>在定义完类 <code>MyMultiHeadAttentiond</code> 后，就需要定义出多头注意力的实际计算过程。由于这部分代码较长，所以就分层次进行介绍。</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">multi_head_attention_forward</span>(
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     query,  <span style="color:#60a0b0;font-style:italic"># [tgt_len,batch_size, embed_dim]</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>     key,    <span style="color:#60a0b0;font-style:italic"># [src_len, batch_size, embed_dim]</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>     value,  <span style="color:#60a0b0;font-style:italic"># [src_len, batch_size, embed_dim]</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>     num_heads,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>     dropout_p,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>     out_proj_weight, <span style="color:#60a0b0;font-style:italic"># [embed_dim = vdim * num_heads, embed_dim]</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>     out_proj_bias,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>     training<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">True</span>,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>     key_padding_mask<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>,  <span style="color:#60a0b0;font-style:italic"># [batch_size,src_len/tgt_len]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>     q_proj_weight<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>,  <span style="color:#60a0b0;font-style:italic"># [embed_dim,kdim * num_heads]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>     k_proj_weight<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>,  <span style="color:#60a0b0;font-style:italic"># [embed_dim, kdim * num_heads]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>     v_proj_weight<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>,  <span style="color:#60a0b0;font-style:italic"># [embed_dim, vdim * num_heads]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>     attn_mask<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>,  <span style="color:#60a0b0;font-style:italic"># [tgt_len,src_len] </span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>     ):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>     <span style="color:#60a0b0;font-style:italic"># 第一阶段： 计算得到Q、K、V</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>     q <span style="color:#666">=</span> F<span style="color:#666">.</span>linear(query, q_proj_weight)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>     <span style="color:#60a0b0;font-style:italic">#  [tgt_len,batch_size,embed_dim] x [embed_dim,kdim * num_heads] </span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span>     <span style="color:#60a0b0;font-style:italic">#  = [tgt_len,batch_size,kdim * num_heads]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span>     k <span style="color:#666">=</span> F<span style="color:#666">.</span>linear(key, k_proj_weight)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">21</span>     <span style="color:#60a0b0;font-style:italic"># [src_len, batch_size,embed_dim] x [embed_dim,kdim * num_heads]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">22</span>     <span style="color:#60a0b0;font-style:italic"># = [src_len,batch_size,kdim * num_heads]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">23</span>     v <span style="color:#666">=</span> F<span style="color:#666">.</span>linear(value, v_proj_weight)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">24</span>     <span style="color:#60a0b0;font-style:italic"># [src_len, batch_size,embed_dim] x [embed_dim,vdim * num_heads] </span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">25</span>      <span style="color:#60a0b0;font-style:italic"># = [src_len,batch_size,vdim * num_heads]</span></span></span></code></pre></div><p>在上述代码中，第17~23行所做的就是根据输入进行线性变换得到图3-13中的Q、K和V。</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span>     <span style="color:#60a0b0;font-style:italic"># 第二阶段： 缩放，以及attn_mask维度判断</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     tgt_len, bsz, embed_dim <span style="color:#666">=</span> query<span style="color:#666">.</span>size()<span style="color:#60a0b0;font-style:italic"># [tgt_len,batch_size,embed_dim]</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>     src_len <span style="color:#666">=</span> key<span style="color:#666">.</span>size(<span style="color:#40a070">0</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>     head_dim <span style="color:#666">=</span> embed_dim <span style="color:#666">//</span> num_heads  <span style="color:#60a0b0;font-style:italic"># num_heads * head_dim = embed_dim</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>     scaling <span style="color:#666">=</span> <span style="color:#007020">float</span>(head_dim) <span style="color:#666">**</span> <span style="color:#666">-</span><span style="color:#40a070">0.5</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>     q <span style="color:#666">=</span> q <span style="color:#666">*</span> scaling  <span style="color:#60a0b0;font-style:italic"># [query_len,batch_size,kdim * num_heads]</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>     <span style="color:#007020;font-weight:bold">if</span> attn_mask <span style="color:#007020;font-weight:bold">is</span> <span style="color:#007020;font-weight:bold">not</span> <span style="color:#007020;font-weight:bold">None</span>:  
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>       <span style="color:#60a0b0;font-style:italic"># [tgt_len,src_len] or [num_heads*batch_size,tgt_len, src_len]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>         <span style="color:#007020;font-weight:bold">if</span> attn_mask<span style="color:#666">.</span>dim() <span style="color:#666">==</span> <span style="color:#40a070">2</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>             attn_mask <span style="color:#666">=</span>attn_mask<span style="color:#666">.</span>unsqueeze(<span style="color:#40a070">0</span>)<span style="color:#60a0b0;font-style:italic">#[1,tgt_len,src_len]扩充维度</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>             <span style="color:#007020;font-weight:bold">if</span> <span style="color:#007020">list</span>(attn_mask<span style="color:#666">.</span>size()) <span style="color:#666">!=</span> [<span style="color:#40a070">1</span>, query<span style="color:#666">.</span>size(<span style="color:#40a070">0</span>), key<span style="color:#666">.</span>size(<span style="color:#40a070">0</span>)]:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>                 <span style="color:#007020;font-weight:bold">raise</span> <span style="color:#007020">RuntimeError</span>(<span style="color:#4070a0">&#39;The size of the 2D attn_mask is not correct.&#39;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>         <span style="color:#007020;font-weight:bold">elif</span> attn_mask<span style="color:#666">.</span>dim() <span style="color:#666">==</span> <span style="color:#40a070">3</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>             <span style="color:#007020;font-weight:bold">if</span> <span style="color:#007020">list</span>(attn_mask<span style="color:#666">.</span>size()) <span style="color:#666">!=</span> [bsz <span style="color:#666">*</span> num_heads, query<span style="color:#666">.</span>size(<span style="color:#40a070">0</span>),key<span style="color:#666">.</span>size(<span style="color:#40a070">0</span>)]:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>                 <span style="color:#007020;font-weight:bold">raise</span> <span style="color:#007020">RuntimeError</span>(<span style="color:#4070a0">&#39;The size of the 3D attn_mask is not correct.&#39;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>         <span style="color:#60a0b0;font-style:italic"># 现在 atten_mask 的维度就变成了3D</span></span></span></code></pre></div><p>接着，在上述代码中第5~6行所完成的就是图3-14中的缩放过程；第8~16行用来判断或修改attn_mask的维度，当然这几行代码只会在解码器中的Masked Multi-Head Attention中用到。</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span>     <span style="color:#60a0b0;font-style:italic"># 第三阶段： 计算得到注意力权重矩阵</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     q <span style="color:#666">=</span>q<span style="color:#666">.</span>contiguous()<span style="color:#666">.</span>view(tgt_len, bsz<span style="color:#666">*</span>num_heads,head_dim)<span style="color:#666">.</span>transpose(<span style="color:#40a070">0</span>, <span style="color:#40a070">1</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>     <span style="color:#60a0b0;font-style:italic"># [batch_size * num_heads,tgt_len,kdim]</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>     <span style="color:#60a0b0;font-style:italic"># 因为前面是num_heads个头一起参与的计算，所以这里要进行一下变形，以便于 后面计算。且同时交换了0，1两个维度     </span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>     k <span style="color:#666">=</span> k<span style="color:#666">.</span>contiguous()<span style="color:#666">.</span>view(<span style="color:#666">-</span><span style="color:#40a070">1</span>, bsz<span style="color:#666">*</span>num_heads, head_dim)<span style="color:#666">.</span>transpose(<span style="color:#40a070">0</span>,<span style="color:#40a070">1</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>     <span style="color:#60a0b0;font-style:italic">#[batch_size * num_heads,src_len,kdim]</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>     v <span style="color:#666">=</span> v<span style="color:#666">.</span>contiguous()<span style="color:#666">.</span>view(<span style="color:#666">-</span><span style="color:#40a070">1</span>, bsz<span style="color:#666">*</span>num_heads, head_dim)<span style="color:#666">.</span>transpose(<span style="color:#40a070">0</span>,<span style="color:#40a070">1</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>     <span style="color:#60a0b0;font-style:italic">#[batch_size * num_heads,src_len,vdim]</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>     attn_output_weights <span style="color:#666">=</span> torch<span style="color:#666">.</span>bmm(q, k<span style="color:#666">.</span>transpose(<span style="color:#40a070">1</span>, <span style="color:#40a070">2</span>))
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>     <span style="color:#60a0b0;font-style:italic"># [batch_size * num_heads,tgt_len,kdim] x [batch_size * num_heads, kdim, src_len] = [batch_size*num_heads, tgt_len, src_len]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>     <span style="color:#60a0b0;font-style:italic">#  这就num_heads个QK相乘后的注意力矩阵</span></span></span></code></pre></div><p>继续，在上述代码中第1~7行所做的就是交换Q、K、V中的维度，以便于多个样本同时进行计算；第9行代码便是用来计算注意力权重矩阵；其中上contiguous()方法是将变量放到一块连续的物理内存中；bmm的作用是用来计算两个三维矩阵的乘法操作[4]。</p>
+<p>需要提示的是，大家在看代码的时候，最好是仔细观察一下各个变量维度的变化过程，我们也在每次运算后进行了批注。</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span>     <span style="color:#60a0b0;font-style:italic"># 第四阶段： 进行相关掩码操作</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">if</span> attn_mask <span style="color:#007020;font-weight:bold">is</span> <span style="color:#007020;font-weight:bold">not</span> <span style="color:#007020;font-weight:bold">None</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>         attn_output_weights <span style="color:#666">+=</span> attn_mask  <span style="color:#60a0b0;font-style:italic">#[batch_size*num_heads,tgt_len,src_len]</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>     <span style="color:#007020;font-weight:bold">if</span> key_padding_mask <span style="color:#007020;font-weight:bold">is</span> <span style="color:#007020;font-weight:bold">not</span> <span style="color:#007020;font-weight:bold">None</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>         attn_output_weights <span style="color:#666">=</span> attn_output_weights<span style="color:#666">.</span>view(bsz, num_heads, tgt_len, src_len)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>         <span style="color:#60a0b0;font-style:italic"># 变成 [batch_size, num_heads, tgt_len, src_len]的形状</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>         attn_output_weights <span style="color:#666">=</span> attn_output_weights<span style="color:#666">.</span>masked_fill(
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>              key_padding_mask<span style="color:#666">.</span>unsqueeze(<span style="color:#40a070">1</span>)<span style="color:#666">.</span>unsqueeze(<span style="color:#40a070">2</span>),<span style="color:#007020">float</span>(<span style="color:#4070a0">&#39;-inf&#39;</span>))
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>          <span style="color:#60a0b0;font-style:italic"># 扩展维度，从[batch_size,src_len]变成[batch_size,1,1,src_len]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>         attn_output_weights <span style="color:#666">=</span> attn_output_weights<span style="color:#666">.</span>view(bsz <span style="color:#666">*</span> num_heads, tgt_len,src_len)  
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>         <span style="color:#60a0b0;font-style:italic"># [batch_size * num_heads, tgt_len, src_len]</span></span></span></code></pre></div><p>进一步，在上述代码中第2~3行便是用来执行图3-3中的步骤；第4~8行便是用来执行图3-5中的步骤，同时还进行了维度扩充。</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span>     attn_output_weights <span style="color:#666">=</span> F<span style="color:#666">.</span>softmax(attn_output_weights, dim<span style="color:#666">=-</span><span style="color:#40a070">1</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     <span style="color:#60a0b0;font-style:italic"># [batch_size * num_heads, tgt_len, src_len]</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>     attn_output_weights<span style="color:#666">=</span>F<span style="color:#666">.</span>dropout(attn_output_weights,p<span style="color:#666">=</span>dropout_p, training<span style="color:#666">=</span>training)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>     attn_output <span style="color:#666">=</span> torch<span style="color:#666">.</span>bmm(attn_output_weights, v)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>     <span style="color:#60a0b0;font-style:italic"># Z = [batch_size*num_heads,tgt_len, src_len]@[batch_size * num_heads, src_len,vdim] = [batch_size * num_heads,tgt_len,vdim] </span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>     
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>     <span style="color:#60a0b0;font-style:italic"># 这就num_heads个Attention(Q,K,V)结果</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>     attn_output <span style="color:#666">=</span> attn_output<span style="color:#666">.</span>transpose(<span style="color:#40a070">0</span>,<span style="color:#40a070">1</span>)<span style="color:#666">.</span>contiguous()<span style="color:#666">.</span>view(tgt_len,bsz, embed_dim)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>      <span style="color:#60a0b0;font-style:italic"># 先transpose成 [tgt_len, batch_size* num_heads ,kdim]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>      <span style="color:#60a0b0;font-style:italic"># 再view成 [tgt_len,batch_size,num_heads*kdim]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>     attn_output_weights <span style="color:#666">=</span> attn_output_weights<span style="color:#666">.</span>view(bsz, num_heads, tgt_len,src_len)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>     Z <span style="color:#666">=</span> F<span style="color:#666">.</span>linear(attn_output, out_proj_weight, out_proj_bias)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>     <span style="color:#60a0b0;font-style:italic"># 这里就是多个z  线性组合成Z  [tgt_len,batch_size,embed_dim]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>     <span style="color:#007020;font-weight:bold">return</span> Z, attn_output_weights<span style="color:#666">.</span>sum(dim<span style="color:#666">=</span><span style="color:#40a070">1</span>) <span style="color:#666">/</span> num_heads <span style="color:#60a0b0;font-style:italic">#将num_heads个注意  </span>
+</span></span><span style="display:flex;"><span><span style="color:#60a0b0;font-style:italic"># 力权重矩阵按对应维度取平均</span></span></span></code></pre></div><p>最后，在上述代码中第1~4行便是用来对权重矩阵进行归一化操作，以及计算得到多头注意力机制的输出；第13行代码便是用来对多个注意力的输出结果进行线性组合；第15行代码用来返回线性组合后的结果，以及多个注意力权重矩阵的平均值。</p>
+<h3 id="335-示例代码">3.3.5 示例代码<a class="anchor" href="#335-%e7%a4%ba%e4%be%8b%e4%bb%a3%e7%a0%81">#</a></h3>
+<p>在实现完类MyMultiHeadAttention的全部代码后，便可以通过类似如下的方式进行使用。</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">if</span> <span style="color:#bb60d5">__name__</span> <span style="color:#666">==</span> <span style="color:#4070a0">&#39;__main__&#39;</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     src_len <span style="color:#666">=</span> <span style="color:#40a070">5</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>     batch_size <span style="color:#666">=</span> <span style="color:#40a070">2</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>     dmodel <span style="color:#666">=</span> <span style="color:#40a070">32</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>     num_head <span style="color:#666">=</span> <span style="color:#40a070">1</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>     src <span style="color:#666">=</span> torch<span style="color:#666">.</span>rand((src_len, batch_size, dmodel))  
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>       <span style="color:#60a0b0;font-style:italic"># shape: [src_len,   batch_size, embed_dim]</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>     src_key_padding_mask <span style="color:#666">=</span> torch<span style="color:#666">.</span>tensor([
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>              [<span style="color:#007020;font-weight:bold">True</span>, <span style="color:#007020;font-weight:bold">True</span>, <span style="color:#007020;font-weight:bold">True</span>, <span style="color:#007020;font-weight:bold">False</span>, <span style="color:#007020;font-weight:bold">False</span>],
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>              [<span style="color:#007020;font-weight:bold">True</span>, <span style="color:#007020;font-weight:bold">True</span>, <span style="color:#007020;font-weight:bold">True</span>, <span style="color:#007020;font-weight:bold">True</span>, <span style="color:#007020;font-weight:bold">False</span>]])<span style="color:#60a0b0;font-style:italic"># shape:[src_len,src_len]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>     my_mh <span style="color:#666">=</span> MyMultiheadAttention(embed_dim<span style="color:#666">=</span>dmodel, num_heads<span style="color:#666">=</span>num_head)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>     r <span style="color:#666">=</span> my_mh(src,src,src,key_padding_mask <span style="color:#666">=</span> src_key_padding_mask)</span></span></code></pre></div><p>在上述代码中，第6~10行其实也就是Encoder中多头注意力机制的实现过程。同时，在计算过程中还可以打印出各个变量的维度变化信息：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> 进入多头注意力计算
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>      多头num_heads <span style="color:#666">=</span> <span style="color:#40a070">1</span>, d_model<span style="color:#666">=</span><span style="color:#40a070">32</span>, d_k <span style="color:#666">=</span> d_v <span style="color:#666">=</span> d_model<span style="color:#666">/</span>num_heads<span style="color:#666">=</span><span style="color:#40a070">32</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>      query 的shape([tgt_len, batch_size, embed_dim]):torch<span style="color:#666">.</span>Size([<span style="color:#40a070">5</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">32</span>])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>       W_q 的shape([embed_dim,kdim <span style="color:#666">*</span> num_heads]):torch<span style="color:#666">.</span>Size([<span style="color:#40a070">32</span>, <span style="color:#40a070">32</span>])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>       Q的shape([tgt_len, batch_size,kdim <span style="color:#666">*</span> num_heads]):torch<span style="color:#666">.</span>Size([<span style="color:#40a070">5</span>,<span style="color:#40a070">2</span>,<span style="color:#40a070">32</span>])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>     <span style="color:#666">----------------------------------------------------------------------</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>       key 的shape([src_len,batch_size, embed_dim]):torch<span style="color:#666">.</span>Size([<span style="color:#40a070">5</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">32</span>])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>       W_k 的shape([embed_dim,kdim <span style="color:#666">*</span> num_heads]):torch<span style="color:#666">.</span>Size([<span style="color:#40a070">32</span>, <span style="color:#40a070">32</span>])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>       K 的shape([src_len,batch_size,kdim <span style="color:#666">*</span> num_heads]):torch<span style="color:#666">.</span>Size([<span style="color:#40a070">5</span>,<span style="color:#40a070">2</span>,<span style="color:#40a070">32</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>     <span style="color:#666">----------------------------------------------------------------------</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>      value的shape([src_len,batch_size, embed_dim]):torch<span style="color:#666">.</span>Size([<span style="color:#40a070">5</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">32</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>       W_v 的shape([embed_dim,vdim <span style="color:#666">*</span> num_heads]):torch<span style="color:#666">.</span>Size([<span style="color:#40a070">32</span>, <span style="color:#40a070">32</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>       V 的shape([src_len,batch_size,vdim <span style="color:#666">*</span> num_heads]):torch<span style="color:#666">.</span>Size([<span style="color:#40a070">5</span>,<span style="color:#40a070">2</span>,<span style="color:#40a070">32</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>     <span style="color:#666">----------------------------------------------------------------------</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>      <span style="color:#666">*****</span> 注意<span style="">，</span>这里的W_q, W_k, W_v是多个head同时进行计算的<span style="color:#666">.</span> 因此Q,K,V分别也是包含了多个head的 q,k,v堆叠起来的结果 <span style="color:#666">*****</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>      多头注意力中<span style="">，</span>多头计算结束后的形状<span style="">（</span>堆叠<span style="">）</span>为([tgt_len,batch_size, num_heads<span style="color:#666">*</span> kdim]) torch<span style="color:#666">.</span>Size([<span style="color:#40a070">5</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">32</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>      多头计算结束后<span style="">，</span>再进行线性变换时的权重W_o的形状为([num_heads<span style="color:#666">*</span>vdim, num_heads<span style="color:#666">*</span>   vdim ])torch<span style="color:#666">.</span>Size([<span style="color:#40a070">32</span>, <span style="color:#40a070">32</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>      多头线性变化后的形状为([tgt_len,batch_size,embed_dim])torch<span style="color:#666">.</span>Size([<span style="color:#40a070">5</span>,<span style="color:#40a070">2</span>,<span style="color:#40a070">32</span>])</span></span></code></pre></div><div class="book-page-pv text-small" id="busuanzi_container_page_pv">
+      <span class="book-page-pv-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" focusable="false">
+          <path d="M1.5 12s3.9-6.5 10.5-6.5S22.5 12 22.5 12s-3.9 6.5-10.5 6.5S1.5 12 1.5 12Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7"/>
+          <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.7"/>
+        </svg>
+      </span>
+      <span class="book-page-pv-label">阅读</span>
+      <span class="book-page-pv-value" id="busuanzi_value_page_pv">--</span>
+    </div><section class="book-article-index book-related-articles" aria-labelledby="related-articles-title">
+    <h2 id="related-articles-title">相关阅读</h2>
+    <div class="book-article-grid"><article class="book-article-card book-related-article-card">
+              <h3 class="book-article-card-title">
+                <a href="/tutorials/transformer/multi-head-attention/">第1节 多头注意力机制原理</a>
+              </h3><p class="book-article-card-desc">本文是《Attention Is All You Need》精读系列第1讲，从 RNN 串行瓶颈出发讲清 Transformer 为什么必须引入自注意力，再用图解与公式拆解 Scaled Dot-Product …</p></article><article class="book-article-card book-related-article-card">
+              <h3 class="book-article-card-title">
+                <a href="/tutorials/transformer/positional-encoding/">第2节 位置编码与编码解码过程</a>
+              </h3><p class="book-article-card-desc">本文是 Transformer 精读系列第2讲，用图解与对比示例讲清 Transformer 为什么必须加入位置编码，并拆解正弦 Positional Encoding 公式与高低频维度直觉。随后通过可视化方式演示 …</p></article></div>
+  </section></article>
+ 
+      
+
+
+      <footer class="book-footer">
+        
+  <div class="flex flex-wrap justify-between">
+
+<div>
+
+</div>
+
+<div>
+
+</div>
+
+</div>
+
+
+
+ 
+        
+  
+  <div class="book-comments"><div class="giscus"></div>
+<script src="https://giscus.app/client.js"
+        data-repo="mlwithme/mlwithme.github.io"
+        data-repo-id="R_kgDOTBt94Q"
+        data-category="Announcements"
+        data-category-id="DIC_kwDOTBt94c4C_21V"
+        data-mapping="pathname"
+        data-strict="1"
+        data-reactions-enabled="1"
+        data-emit-metadata="0"
+        data-input-position="top"
+        data-theme="preferred_color_scheme"
+        data-lang="zh-CN"
+        data-loading="lazy"
+        crossorigin="anonymous"
+        async>
+</script>
+</div>
+  
+ 
+        
+  <link rel="stylesheet" href="https://mlwithme.github.io/katex/katex.min.css" />
+  <script defer src="https://mlwithme.github.io/katex/katex.min.js"></script>
+  <script defer src="https://mlwithme.github.io/katex/auto-render.min.js"></script>
+  
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        if (window.renderMathInElement) {
+          renderMathInElement(
+            document.querySelector(".book-page"),
+            Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
+          );
+        }
+      });
+    </script>
+  
+
+        
+  
+ 
+        
+  
+    <script>(function(){document.querySelectorAll("pre:has(code)").forEach(e=>{e.addEventListener("click",e.focus),e.addEventListener("copy",function(t){if(t.preventDefault(),navigator.clipboard){const t=window.getSelection().toString()||e.textContent;navigator.clipboard.writeText(t)}})})})()</script>
+  
+
+      </footer>
+
+      <label for="menu-control" class="hidden book-menu-overlay"></label>
+    </div>
+
+    
+  
+  <aside class="book-toc">
+    <div class="book-toc-content">
+      
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#31多层transformer">3.1多层Transformer</a></li>
+    <li><a href="#32-transformer中的掩码">3.2 Transformer中的掩码</a>
+      <ul>
+        <li><a href="#321-attention-mask">3.2.1 Attention Mask</a></li>
+        <li><a href="#322-padding-mask">3.2.2 Padding Mask</a></li>
+        <li><a href="#323-行padding与列padding">3.2.3 行Padding与列Padding</a></li>
+      </ul>
+    </li>
+    <li><a href="#33-实现多头注意力机制">3.3 实现多头注意力机制</a>
+      <ul>
+        <li><a href="#331-多头注意力机制">3.3.1 多头注意力机制</a></li>
+        <li><a href="#332-定义类-mymultiheadattention">3.3.2 定义类 <code>MyMultiHeadAttention</code></a></li>
+        <li><a href="#333-定义前向传播过程">3.3.3 定义前向传播过程</a></li>
+        <li><a href="#334-多头注意力计算过程">3.3.4 多头注意力计算过程</a></li>
+        <li><a href="#335-示例代码">3.3.5 示例代码</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+
+
+
+
+    </div>
+  </aside>
+  
+ 
+  </main>
+
+  <button
+  type="button"
+  class="book-back-to-top"
+  aria-label="回到顶部"
+  title="回到顶部"
+>
+  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <path
+      d="M12 5.5l-5.25 5.25 1.5 1.5 2.7-2.7V18.5h2.1V9.55l2.7 2.7 1.5-1.5L12 5.5z"
+      fill="currentColor"
+    ></path>
+  </svg>
+</button>
+
+<script>
+  (function () {
+    var button = document.querySelector(".book-back-to-top");
+    if (!button) {
+      return;
+    }
+
+    var toggleButton = function () {
+      if (window.scrollY > 360) {
+        button.classList.add("is-visible");
+      } else {
+        button.classList.remove("is-visible");
+      }
+    };
+
+    button.addEventListener("click", function () {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+
+    toggleButton();
+    window.addEventListener("scroll", toggleButton, { passive: true });
+  })();
+</script>
+
+<div class="book-floating-toolbox" data-book-floating-toolbox>
+  <ul
+    class="book-floating-toolbox__items"
+    id="book-floating-toolbox-items"
+    role="menu"
+    aria-label="工具箱"
+    hidden
+  >
+    <li class="book-floating-toolbox__item" role="none" style="--book-toolbox-index: 0; --book-toolbox-count: 3;">
+      <a
+        class="book-floating-toolbox__action"
+        role="menuitem"
+        href="/glossary/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="术语百科"
+      >
+        <span class="book-floating-toolbox__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path
+              d="M5 4.5h11.5a2.5 2.5 0 0 1 2.5 2.5V20l-4-2.5L11 20l-4-2.5L3 20V7a2.5 2.5 0 0 1 2-2.5z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linejoin="round"
+            ></path>
+            <path
+              d="M7.5 9.5h7M7.5 12.5h5"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+            ></path>
+          </svg>
+        </span>
+      </a>
+      <span class="book-floating-toolbox__tip" aria-hidden="true">术语百科</span>
+    </li>
+    <li class="book-floating-toolbox__item" role="none" style="--book-toolbox-index: 1; --book-toolbox-count: 3;">
+      <a
+        class="book-floating-toolbox__action"
+        role="menuitem"
+        href="/code-templates/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="代码模板"
+      >
+        <span class="book-floating-toolbox__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path
+              d="M8.5 7.5 4 12l4.5 4.5M15.5 7.5 20 12l-4.5 4.5M13.5 5l-3 14"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            ></path>
+          </svg>
+        </span>
+      </a>
+      <span class="book-floating-toolbox__tip" aria-hidden="true">代码模板</span>
+    </li>
+    <li class="book-floating-toolbox__item" role="none" style="--book-toolbox-index: 2; --book-toolbox-count: 3;">
+      <a
+        class="book-floating-toolbox__action"
+        role="menuitem"
+        href="https://www.machinelearningwithme.com"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="开发中……"
+      >
+        <span class="book-floating-toolbox__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path
+              d="M9 3.5h6a1.5 1.5 0 0 1 1.5 1.5V7h2.25A1.75 1.75 0 0 1 20.5 8.75v9A1.75 1.75 0 0 1 18.75 19.5H5.25A1.75 1.75 0 0 1 3.5 17.75v-9A1.75 1.75 0 0 1 5.25 7H7.5V5A1.5 1.5 0 0 1 9 3.5z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linejoin="round"
+            ></path>
+            <path
+              d="M9 7h6"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+            ></path>
+            <circle cx="12" cy="13" r="3" fill="none" stroke="currentColor" stroke-width="1.6"></circle>
+          </svg>
+        </span>
+      </a>
+      <span class="book-floating-toolbox__tip" aria-hidden="true">开发中……</span>
+    </li>
+  </ul>
+  <button
+    type="button"
+    class="book-floating-toolbox__toggle"
+    aria-label="工具箱"
+    aria-haspopup="menu"
+    aria-expanded="false"
+    aria-controls="book-floating-toolbox-items"
+    title="工具箱"
+    data-book-toolbox-toggle
+  >
+    <svg class="book-floating-toolbox__toggle-icon-open" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        d="M14.7 6.3a4 4 0 0 0-5.4 5.4l-6.3 6.3a1 1 0 0 0 0 1.4l2 2a1 1 0 0 0 1.4 0l6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-2.4z"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linejoin="round"
+        stroke-linecap="round"
+      ></path>
+      <circle
+        cx="19.5"
+        cy="4.5"
+        r="1.6"
+        fill="currentColor"
+      ></circle>
+    </svg>
+    <svg class="book-floating-toolbox__toggle-icon-close" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        d="M6.5 6.5l11 11M17.5 6.5l-11 11"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.8"
+        stroke-linecap="round"
+      ></path>
+    </svg>
+  </button>
+</div>
+
+<script>
+  (function () {
+    var root = document.querySelector("[data-book-floating-toolbox]");
+    if (!root) {
+      return;
+    }
+    var toggle = root.querySelector("[data-book-toolbox-toggle]");
+    var items = root.querySelector(".book-floating-toolbox__items");
+    if (!toggle || !items) {
+      return;
+    }
+
+    var isOpen = function () {
+      return root.classList.contains("is-open");
+    };
+
+    var open = function () {
+      root.classList.add("is-open");
+      items.hidden = false;
+      toggle.setAttribute("aria-expanded", "true");
+    };
+
+    var close = function () {
+      root.classList.remove("is-open");
+      items.hidden = true;
+      toggle.setAttribute("aria-expanded", "false");
+    };
+
+    toggle.addEventListener("click", function (event) {
+      event.stopPropagation();
+      if (isOpen()) {
+        close();
+      } else {
+        open();
+      }
+    });
+
+    document.addEventListener("click", function (event) {
+      if (!isOpen()) {
+        return;
+      }
+      if (root.contains(event.target)) {
+        return;
+      }
+      close();
+    });
+
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape" && isOpen()) {
+        close();
+        toggle.focus();
+      }
+    });
+
+    items.addEventListener("click", function (event) {
+      if (event.target.closest("a")) {
+        close();
+      }
+    });
+
+    window.addEventListener("pageshow", close);
+  })();
+</script>
+
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

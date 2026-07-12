@@ -6,7 +6,7 @@ Made with Book Theme
 https://github.com/alex-shpak/hugo-book
 --><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="description" content="本文详细介绍了RMSNorm归一化原理与实现过程，并对比了与LayerNorm层归一化的区别。">
+<meta name="description" content="本文从 LLaMA 1 论文与 DeepSeek 模型改造出发，系统讲清 RMSNorm 归一化的提出动机、数学公式、PyTorch 从零实现，以及它与 LayerNorm 在去均值操作、训练稳定性、推理速度上的关键差异，并给出机器翻译、图像分类、图文检索、问答四类任务的对比实验 …">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
 <meta name="color-scheme" content="light dark">
@@ -18,8 +18,8 @@ https://github.com/alex-shpak/hugo-book
 
 <meta property="og:url" content="https://mlwithme.github.io/featured/rmsnorm-layernorm/">
 <meta property="og:site_name" content="《从零学AI指南手册》">
-<meta property="og:title" content="RMSNorm归一化原理与实现过程，与LayerNorm层归一化有何区别？">
-<meta property="og:description" content="本文详细介绍了RMSNorm归一化原理与实现过程，并对比了与LayerNorm层归一化的区别。">
+<meta property="og:title" content="RMSNorm 归一化原理与 PyTorch 实现：详解与 LayerNorm 的区别及在 LLaMA/DeepSeek 中的应用">
+<meta property="og:description" content="本文从 LLaMA 1 论文与 DeepSeek 模型改造出发，系统讲清 RMSNorm 归一化的提出动机、数学公式、PyTorch 从零实现，以及它与 LayerNorm 在去均值操作、训练稳定性、推理速度上的关键差异，并给出机器翻译、图像分类、图文检索、问答四类任务的对比实验 …">
 <meta property="og:locale" content="zh_CN">
 <meta property="og:type" content="article">
 <meta property="og:image" content="https://mlwithme.github.io/share-cover.png">
@@ -28,14 +28,14 @@ https://github.com/alex-shpak/hugo-book
 <meta property="og:image:width" content="759">
 <meta property="og:image:height" content="759">
 <meta property="og:image:type" content="image/png">
-<meta property="og:image:alt" content="《从零学AI指南手册》 - RMSNorm归一化原理与实现过程，与LayerNorm层归一化有何区别？">
+<meta property="og:image:alt" content="《从零学AI指南手册》 - RMSNorm 归一化原理与 PyTorch 实现：详解与 LayerNorm 的区别及在 LLaMA/DeepSeek 中的应用">
 
   <meta property="article:section" content="featured">
   
     <meta property="article:published_time" content="2026-07-05T10:50:22&#43;08:00">
   
   
-    <meta property="article:modified_time" content="2026-07-07T21:46:14&#43;08:00">
+    <meta property="article:modified_time" content="2026-07-12T13:55:31&#43;08:00">
   
   
 
@@ -46,31 +46,31 @@ https://github.com/alex-shpak/hugo-book
   <script type="application/ld+json">
     {"@context":"https://schema.org","@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.github.io/share-cover.png"},"name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
   </script><script type="application/ld+json">
-      {"@context":"https://schema.org","@type":"Article","articleSection":"featured","author":{"@type":"Person","name":"WangCheng","url":"https://mlwithme.github.io/author/"},"dateModified":"2026-07-07T21:46:14+08:00","datePublished":"2026-07-05T10:50:22+08:00","description":"本文详细介绍了RMSNorm归一化原理与实现过程，并对比了与LayerNorm层归一化的区别。","headline":"RMSNorm归一化原理与实现过程，与LayerNorm层归一化有何区别？","image":["https://mlwithme.github.io/share-cover.png"],"inLanguage":"zh_CN","mainEntityOfPage":"https://mlwithme.github.io/featured/rmsnorm-layernorm/","publisher":{"@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.github.io/share-cover.png"},"name":"《从零学AI指南手册》"},"url":"https://mlwithme.github.io/featured/rmsnorm-layernorm/"}
+      {"@context":"https://schema.org","@type":"Article","articleSection":"featured","author":{"@type":"Person","name":"WangCheng","url":"https://mlwithme.github.ioauthor/"},"dateModified":"2026-07-12T13:55:31+08:00","datePublished":"2026-07-05T10:50:22+08:00","description":"本文从 LLaMA 1 论文与 DeepSeek 模型改造出发，系统讲清 RMSNorm 归一化的提出动机、数学公式、PyTorch 从零实现，以及它与 LayerNorm 在去均值操作、训练稳定性、推理速度上的关键差异，并给出机器翻译、图像分类、图文检索、问答四类任务的对比实验 …","headline":"RMSNorm 归一化原理与 PyTorch 实现：详解与 LayerNorm 的区别及在 LLaMA/DeepSeek 中的应用","image":["https://mlwithme.github.io/share-cover.png"],"inLanguage":"zh_CN","mainEntityOfPage":"https://mlwithme.github.io/featured/rmsnorm-layernorm/","publisher":{"@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.github.io/share-cover.png"},"name":"《从零学AI指南手册》"},"url":"https://mlwithme.github.io/featured/rmsnorm-layernorm/"}
     </script><script type="application/ld+json">
-        {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","item":"https://mlwithme.github.io/","name":"首页","position":1},{"@type":"ListItem","item":"https://mlwithme.github.io/featured/","name":"精选文章","position":2},{"@type":"ListItem","item":"https://mlwithme.github.io/featured/rmsnorm-layernorm/","name":"RMSNorm归一化原理与实现过程，与LayerNorm层归一化有何区别？","position":3}]}
+        {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","item":"https://mlwithme.github.io/","name":"首页","position":1},{"@type":"ListItem","item":"https://mlwithme.github.io/featured/","name":"精选文章","position":2},{"@type":"ListItem","item":"https://mlwithme.github.io/featured/rmsnorm-layernorm/","name":"RMSNorm 归一化原理与 PyTorch 实现：详解与 LayerNorm 的区别及在 LLaMA/DeepSeek 中的应用","position":3}]}
       </script>
 
-<title>RMSNorm归一化原理与实现过程，与LayerNorm层归一化有何区别？ • 《从零学AI指南手册》</title>
+<title>RMSNorm 归一化原理与 PyTorch 实现：详解与 LayerNorm 的区别及在 LLaMA/DeepSeek 中的应用 • 《从零学AI指南手册》</title>
 <link rel="icon" href="https://mlwithme.github.io/favicon.png" type="image/png">
 <link rel="shortcut icon" href="https://mlwithme.github.io/favicon.png" type="image/png">
 <link rel="apple-touch-icon" href="https://mlwithme.github.io/favicon.png">
 
 <link rel="manifest" href="/manifest.json">
 <link rel="canonical" href="https://mlwithme.github.io/featured/rmsnorm-layernorm/">
-<link rel="stylesheet" href="/book.min.2fd817d1622490f072effe4b46bd4c6435a31d063020815ffa28399938aa1e64.css" integrity="sha256-L9gX0WIkkPBy7/5LRr1MZDWjHQYwIIFf&#43;ig5mTiqHmQ=" crossorigin="anonymous">
-  <script defer type="module" src="/zh-cn.search.min.3cbf32778763a063b9631ffd1bd39d172a121967d4e39a19c6f24fa30fb18ce1.js" integrity="sha256-PL8yd4djoGO5Yx/9G9OdFyoSGWfU45oZxvJPow&#43;xjOE=" crossorigin="anonymous"></script>
+<link rel="stylesheet" href="/book.min.f6a0d10e1ebfedb446c42559024d340c2bf535391c02340b45233f7f70d21212.css" integrity="sha256-9qDRDh6/7bRGxCVZAk00DCv1NTkcAjQLRSM/f3DSEhI=" crossorigin="anonymous">
+  <script defer type="module" src="/zh-cn.search.min.dfd1fe31bc2a2e217cb690a6a708cf8dd323737c55fe0f592d70a19806537dc4.js" integrity="sha256-39H&#43;MbwqLiF8tpCmpwjPjdMjc3xV/g9ZLXChmAZTfcQ=" crossorigin="anonymous"></script>
 
   
 
 
 
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="RMSNorm归一化原理与实现过程，与LayerNorm层归一化有何区别？">
-<meta name="twitter:description" content="本文详细介绍了RMSNorm归一化原理与实现过程，并对比了与LayerNorm层归一化的区别。">
+<meta name="twitter:title" content="RMSNorm 归一化原理与 PyTorch 实现：详解与 LayerNorm 的区别及在 LLaMA/DeepSeek 中的应用">
+<meta name="twitter:description" content="本文从 LLaMA 1 论文与 DeepSeek 模型改造出发，系统讲清 RMSNorm 归一化的提出动机、数学公式、PyTorch 从零实现，以及它与 LayerNorm 在去均值操作、训练稳定性、推理速度上的关键差异，并给出机器翻译、图像分类、图文检索、问答四类任务的对比实验 …">
 <meta name="twitter:url" content="https://mlwithme.github.io/featured/rmsnorm-layernorm/">
 <meta name="twitter:image" content="https://mlwithme.github.io/share-cover.png">
-<meta name="twitter:image:alt" content="《从零学AI指南手册》 - RMSNorm归一化原理与实现过程，与LayerNorm层归一化有何区别？">
+<meta name="twitter:image:alt" content="《从零学AI指南手册》 - RMSNorm 归一化原理与 PyTorch 实现：详解与 LayerNorm 的区别及在 LLaMA/DeepSeek 中的应用">
 <script>
   var _hmt = _hmt || [];
   (function() {
@@ -173,7 +173,27 @@ https://github.com/alex-shpak/hugo-book
 
   
     <a href="/tutorials/transformer/" class="">
-      <span class="book-menu-link-title">Transformer 入门指南</span>
+      <span class="book-menu-link-title">图解 Transformer 入门指南教程</span>
+</a>
+  
+
+          
+  <ul>
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/tutorials/bert/" class="">
+      <span class="book-menu-link-title">从零玩转 Bert 详解6大下游任务</span>
 </a>
   
 
@@ -3914,7 +3934,7 @@ https://github.com/alex-shpak/hugo-book
     <img src="/icons/menu.svg" class="book-icon" alt="Menu" />
   </label>
 
-  <h3>RMSNorm归一化原理与实现过程，与LayerNorm层归一化有何区别？</h3>
+  <h3>RMSNorm 归一化原理与 PyTorch 实现：详解与 LayerNorm 的区别及在 LLaMA/DeepSeek 中的应用</h3>
 
   <label for="toc-control">
     
@@ -3969,7 +3989,7 @@ https://github.com/alex-shpak/hugo-book
     <ol class="book-breadcrumbs__list"><li class="book-breadcrumbs__item"><a class="book-breadcrumbs__link" href="https://mlwithme.github.io/">首页</a></li><li class="book-breadcrumbs__item"><a class="book-breadcrumbs__link" href="https://mlwithme.github.io/featured/">精选文章</a></li><li class="book-breadcrumbs__item"><span class="book-breadcrumbs__current" aria-current="page">RMSNorm 是一个 LLaMA 、DeepSeek 模型都在用的归一化方法！为何？</span></li></ol>
   </nav><div class="book-article-lastmod text-small">
         <span class="book-article-lastmod-label">更新于</span>
-        <span class="book-article-lastmod-value">2026年7月7日</span>
+        <span class="book-article-lastmod-value">2026年7月12日</span>
       </div><p>在前面两篇文章<a href="/featured/llm-distillation-from-scratch">「模型蒸馏的原理是什么？温度有什么用？起底LLM中的蒸馏技术！」</a>和<a href="/featured/bert-distillation">「更小、更快、更便宜，DistilBERT 模型迁移与模型蒸馏的结合！」</a>中我们陆续介绍了大模型中频繁用到的模型蒸馏技术，包括其原理动机和从零实现。</p>
 <p>本以为介绍完模型蒸馏以后就可以介绍了 DeepSeek 了，结果没想到刚读没两页就发现 DeepSeek 的第一代模型 DeepSeek LLM 是基于 LLaMA 1 结构训练而来，于是又开始去看 LLaMA 1。 然而看到 LLaMA 1 的网络结构部分，说是使用 RMSNorm 来替代了原有的 LayerNorm 归一化。</p>
 <p>于是我们就开始深扒了一下，发现  LLaMA 1、 LLaMA 2、 LLaMA 3、DeepSeek LLM、DeepSeek V3 、百川大模型等等都使用了 RMSNorm 来替代了原有的 LayerNorm 。好家伙，整个一改天换面了 ，那必须要给大家介绍一下。</p>
@@ -4172,10 +4192,7 @@ $$<p>
     <div class="book-article-grid"><article class="book-article-card book-related-article-card">
               <h3 class="book-article-card-title">
                 <a href="/featured/bert-distillation/">更小、更快、更便宜，DistilBERT 模型迁移与模型蒸馏的结合！</a>
-              </h3><p class="book-article-card-desc">本文详细介绍蒸馏技术在BERT上的运用，即DistilBERT的原理及实现过程。</p></article><article class="book-article-card book-related-article-card">
-              <h3 class="book-article-card-title">
-                <a href="/featured/rmsnorm-layernorm/">RMSNorm 是一个 LLaMA 、DeepSeek 模型都在用的归一化方法！为何？</a>
-              </h3><p class="book-article-card-desc">本文详细介绍了RMSNorm归一化原理与实现过程，并对比了与LayerNorm层归一化的区别。</p></article><article class="book-article-card book-related-article-card">
+              </h3><p class="book-article-card-desc">本文是知识蒸馏在 BERT 上的工程实践教程，系统讲清 DistilBERT 提出的动机、三重损失函数设计（蒸馏损失 + 学生损失 + 余弦相似损失）、Teacher-Student 初始化策略，以及如何用 PyTorch 从零实现模型结构 …</p></article><article class="book-article-card book-related-article-card">
               <h3 class="book-article-card-title">
                 <a href="/dl/chapter06/batch-norm/">6.3 批归一化</a>
               </h3><p class="book-article-card-desc">在本节内容中，我们首先介绍了批归一化算法提出的原因和动机；然后详细介绍了批归一化的原理及过程，包括训练时的归一化和预测时的归一化等；进一步，介绍了如何从零开始在PyTorch框架中实现批归一化算法的计算过程；最后，以LeNet5模型为例对批 …</p></article><article class="book-article-card book-related-article-card">
@@ -4245,7 +4262,7 @@ $$<p>
       });
     </script>
   
-<link rel="stylesheet" href="/sections/featured-pagination.min.4a86ddcca792a0e5f2cf5be523f61e29bac98d76c4136686b7c1ab9eda0c1ef5.css" integrity="sha256-SobdzKeSoOXyz1vlI/YeKbrJjXbEE2aGt8GrntoMHvU=" crossorigin="anonymous">
+
         
   
  
@@ -4347,7 +4364,7 @@ $$<p>
     aria-label="工具箱"
     hidden
   >
-    <li class="book-floating-toolbox__item" role="none" style="--book-toolbox-index: 0; --book-toolbox-count: 2;">
+    <li class="book-floating-toolbox__item" role="none" style="--book-toolbox-index: 0; --book-toolbox-count: 3;">
       <a
         class="book-floating-toolbox__action"
         role="menuitem"
@@ -4377,7 +4394,31 @@ $$<p>
       </a>
       <span class="book-floating-toolbox__tip" aria-hidden="true">术语百科</span>
     </li>
-    <li class="book-floating-toolbox__item" role="none" style="--book-toolbox-index: 1; --book-toolbox-count: 2;">
+    <li class="book-floating-toolbox__item" role="none" style="--book-toolbox-index: 1; --book-toolbox-count: 3;">
+      <a
+        class="book-floating-toolbox__action"
+        role="menuitem"
+        href="/code-templates/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="代码模板"
+      >
+        <span class="book-floating-toolbox__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path
+              d="M8.5 7.5 4 12l4.5 4.5M15.5 7.5 20 12l-4.5 4.5M13.5 5l-3 14"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            ></path>
+          </svg>
+        </span>
+      </a>
+      <span class="book-floating-toolbox__tip" aria-hidden="true">代码模板</span>
+    </li>
+    <li class="book-floating-toolbox__item" role="none" style="--book-toolbox-index: 2; --book-toolbox-count: 3;">
       <a
         class="book-floating-toolbox__action"
         role="menuitem"

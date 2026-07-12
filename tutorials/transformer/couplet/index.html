@@ -1,0 +1,4737 @@
+<!DOCTYPE html>
+<html lang="zh_CN" dir="ltr">
+<head>
+  <!--
+Made with Book Theme
+https://github.com/alex-shpak/hugo-book
+--><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="本文是 Transformer 精读系列第7讲，使用 GitHub 上 70 万条公开对联数据集（couplet-dataset）训练一个中文对联生成模型。系统讲解对联生成与机器翻译在模型结构上的异同（共用中文词表、上下联对应 src/tgt），并以 PyTorch 完整实现从分 …">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="index,follow,max-image-preview:large">
+
+
+
+
+
+<meta property="og:url" content="https://mlwithme.github.io/tutorials/transformer/couplet/">
+<meta property="og:site_name" content="《从零学AI指南手册》">
+<meta property="og:title" content="第7讲 Transformer 对联生成模型实战教程：用 70 万对联数据训练中文 Seq2Seq">
+<meta property="og:description" content="本文是 Transformer 精读系列第7讲，使用 GitHub 上 70 万条公开对联数据集（couplet-dataset）训练一个中文对联生成模型。系统讲解对联生成与机器翻译在模型结构上的异同（共用中文词表、上下联对应 src/tgt），并以 PyTorch 完整实现从分 …">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:type" content="article">
+<meta property="og:image" content="https://mlwithme.github.io/share-cover.png">
+<meta property="og:image:url" content="https://mlwithme.github.io/share-cover.png">
+<meta property="og:image:secure_url" content="https://mlwithme.github.io/share-cover.png">
+<meta property="og:image:width" content="759">
+<meta property="og:image:height" content="759">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:alt" content="《从零学AI指南手册》 - 第7讲 Transformer 对联生成模型实战教程：用 70 万对联数据训练中文 Seq2Seq">
+
+  <meta property="article:section" content="tutorials">
+  
+    <meta property="article:published_time" content="2026-07-10T21:11:28&#43;08:00">
+  
+  
+    <meta property="article:modified_time" content="2026-07-12T15:05:13&#43;08:00">
+  
+  
+
+
+<script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"WebSite","description":"面向机器学习、深度学习与 AI Agent 的中文系统化学习手册，包含原理讲解、代码示例与实战案例。","inLanguage":"zh_CN","name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
+  </script>
+  <script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.github.io/share-cover.png"},"name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
+  </script><script type="application/ld+json">
+      {"@context":"https://schema.org","@type":"Article","articleSection":"tutorials","author":{"@type":"Person","name":"WangCheng","url":"https://mlwithme.github.ioauthor/"},"dateModified":"2026-07-12T15:05:13+08:00","datePublished":"2026-07-10T21:11:28+08:00","description":"本文是 Transformer 精读系列第7讲，使用 GitHub 上 70 万条公开对联数据集（couplet-dataset）训练一个中文对联生成模型。系统讲解对联生成与机器翻译在模型结构上的异同（共用中文词表、上下联对应 src/tgt），并以 PyTorch 完整实现从分 …","headline":"第7讲 Transformer 对联生成模型实战教程：用 70 万对联数据训练中文 Seq2Seq","image":["https://mlwithme.github.io/share-cover.png"],"inLanguage":"zh_CN","mainEntityOfPage":"https://mlwithme.github.io/tutorials/transformer/couplet/","publisher":{"@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.github.io/share-cover.png"},"name":"《从零学AI指南手册》"},"url":"https://mlwithme.github.io/tutorials/transformer/couplet/"}
+    </script><script type="application/ld+json">
+        {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","item":"https://mlwithme.github.io/","name":"首页","position":1},{"@type":"ListItem","item":"https://mlwithme.github.io/tutorials/","name":"专栏文章","position":2},{"@type":"ListItem","item":"https://mlwithme.github.io/tutorials/transformer/","name":"图解 Transformer 入门指南教程","position":3},{"@type":"ListItem","item":"https://mlwithme.github.io/tutorials/transformer/couplet/","name":"第7讲 Transformer 对联生成模型实战教程：用 70 万对联数据训练中文 Seq2Seq","position":4}]}
+      </script>
+
+<title>第7讲 Transformer 对联生成模型实战教程：用 70 万对联数据训练中文 Seq2Seq • 《从零学AI指南手册》</title>
+<link rel="icon" href="https://mlwithme.github.io/favicon.png" type="image/png">
+<link rel="shortcut icon" href="https://mlwithme.github.io/favicon.png" type="image/png">
+<link rel="apple-touch-icon" href="https://mlwithme.github.io/favicon.png">
+
+<link rel="manifest" href="/manifest.json">
+<link rel="canonical" href="https://mlwithme.github.io/tutorials/transformer/couplet/">
+<link rel="stylesheet" href="/book.min.f6a0d10e1ebfedb446c42559024d340c2bf535391c02340b45233f7f70d21212.css" integrity="sha256-9qDRDh6/7bRGxCVZAk00DCv1NTkcAjQLRSM/f3DSEhI=" crossorigin="anonymous">
+  <script defer type="module" src="/zh-cn.search.min.dfd1fe31bc2a2e217cb690a6a708cf8dd323737c55fe0f592d70a19806537dc4.js" integrity="sha256-39H&#43;MbwqLiF8tpCmpwjPjdMjc3xV/g9ZLXChmAZTfcQ=" crossorigin="anonymous"></script>
+
+  
+
+
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="第7讲 Transformer 对联生成模型实战教程：用 70 万对联数据训练中文 Seq2Seq">
+<meta name="twitter:description" content="本文是 Transformer 精读系列第7讲，使用 GitHub 上 70 万条公开对联数据集（couplet-dataset）训练一个中文对联生成模型。系统讲解对联生成与机器翻译在模型结构上的异同（共用中文词表、上下联对应 src/tgt），并以 PyTorch 完整实现从分 …">
+<meta name="twitter:url" content="https://mlwithme.github.io/tutorials/transformer/couplet/">
+<meta name="twitter:image" content="https://mlwithme.github.io/share-cover.png">
+<meta name="twitter:image:alt" content="《从零学AI指南手册》 - 第7讲 Transformer 对联生成模型实战教程：用 70 万对联数据训练中文 Seq2Seq">
+<script>
+  var _hmt = _hmt || [];
+  (function() {
+    var hm = document.createElement("script");
+    hm.src = "https://hm.baidu.com/hm.js?74a336dd47fbbab3ceb99d4ad8afcb76";
+    var s = document.getElementsByTagName("script")[0];
+    s.parentNode.insertBefore(hm, s);
+  })();
+</script>
+<script async src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
+
+</head>
+<body dir="ltr" class="book-kind-page book-type-tutorials">
+  <input type="checkbox" class="hidden toggle" id="menu-control" />
+  <input type="checkbox" class="hidden toggle" id="toc-control" />
+  <main class="container flex">
+    
+<aside class="book-menu">
+  <div class="book-menu-content">
+    
+  <nav>
+<h2 class="book-brand">
+  <a class="flex align-center" href="/"><svg xmlns="http://www.w3.org/2000/svg" height="20" width="20" viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true" class="book-brand-icon" style="margin-right:.35em;flex:none">
+      <path d="M240-200h120v-240h240v240h120v-360L480-740 240-560v360Zm-80 80q-33 0-56.5-23.5T80-200v-360q0-27 11-49t31-39l280-220q21-17 47-25t51-8q25 0 51 8t47 25l280 220q20 17 31 39t11 49v360q0 33-23.5 56.5T840-120H600q-17 0-28.5-11.5T560-160v-200H400v200q0 17-11.5 28.5T360-120H160Zm320-280Z"/>
+    </svg>
+
+    <span>返回主页</span>
+
+  </a>
+</h2>
+
+
+<div class="book-search hidden">
+  <input id="book-search-input" type="text" 
+    placeholder="Search"
+    aria-label="Search"
+    maxlength="64" />
+  <div class="book-search-spinner hidden"></div>
+  <ul id="book-search-results"></ul>
+</div>
+<script>document.querySelector(".book-search").classList.remove("hidden")</script>
+
+
+
+
+
+
+
+
+
+
+
+  
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/featured/" class="">
+      <span class="book-menu-link-title">精选文章</span>
+</a>
+  
+
+          
+  <ul>
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bb7497cb5e222579131ad9ad959011cb" class="toggle" checked />
+    <label for="section-bb7497cb5e222579131ad9ad959011cb" class="flex">
+      <a href="/tutorials/" class="">
+        <span class="book-menu-link-title">专栏文章</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/tutorials/transformer/" class="">
+      <span class="book-menu-link-title">图解 Transformer 入门指南教程</span>
+</a>
+  
+
+          
+  <ul>
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/tutorials/bert/" class="">
+      <span class="book-menu-link-title">从零玩转 Bert 详解6大下游任务</span>
+</a>
+  
+
+          
+  <ul>
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/" class="">
+      <span class="book-menu-link-title">大模型Agent开发（更新中……）</span>
+</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-279cf10e5100caa4f65ba3f7dd8888a4" class="toggle"  />
+    <label for="section-279cf10e5100caa4f65ba3f7dd8888a4" class="flex">
+      <a href="/agent/chapter01/" class="">
+        <span class="book-menu-link-title">第 1 章 RAG 基础概念</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/what-is-rag/" class="">
+      <span class="book-menu-link-title">1.1 RAG 提出背景</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/rag-pipeline-overview/" class="">
+      <span class="book-menu-link-title">1.2 RAG 流程概览</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-83c662c2764f1c19f8005eab77fee110" class="toggle"  />
+    <label for="section-83c662c2764f1c19f8005eab77fee110" class="flex">
+      <a href="/agent/chapter02/" class="">
+        <span class="book-menu-link-title">第 2 章 大模型接入与使用</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/intro-to-llm-sdk/" class="">
+      <span class="book-menu-link-title">2.1 SDK 介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/modern-llm-sdk/" class="">
+      <span class="book-menu-link-title">2.2 现代大模型中的 SDK</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/dashscope-api-overview/" class="">
+      <span class="book-menu-link-title">2.3 DashScope 接口体系</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/qwen-onboarding/" class="">
+      <span class="book-menu-link-title">2.4 千问大模型接入与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-1e583d7a26333453241d87c5c16592bd" class="toggle"  />
+    <label for="section-1e583d7a26333453241d87c5c16592bd" class="flex">
+      <a href="/agent/chapter03/" class="">
+        <span class="book-menu-link-title">第 3 章 文档标准化与语义检索</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/document-loading-and-preprocessing/" class="">
+      <span class="book-menu-link-title">3.1 文档加载与标准化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/text-splitting-strategies/" class="">
+      <span class="book-menu-link-title">3.2 常见文本切分策略</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/vector-database-selection/" class="">
+      <span class="book-menu-link-title">3.3 向量数据库选择</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/qwen-embedding-model/" class="">
+      <span class="book-menu-link-title">3.4 Qwen3 Embedding 模型介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/semantic-retrieval-pipeline/" class="">
+      <span class="book-menu-link-title">3.5 语义搜索引擎构建</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/milvus-tutorial/" class="">
+      <span class="book-menu-link-title">3.6  Milvus 模块解析</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="toggle"  />
+    <label for="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="flex">
+      <a href="/agent/chapter04/" class="">
+        <span class="book-menu-link-title">第 4 章 RAG 与 Agent</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/two-step-rag/" class="">
+      <span class="book-menu-link-title">4.1 两步式 RAG 搭建</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/function-calling-basics/" class="">
+      <span class="book-menu-link-title">4.2 Function Calling 概念介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/langchain-tool-decorator/" class="">
+      <span class="book-menu-link-title">4.3 LangChain 中的 Tool 修饰器</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/rag-agent-essentials/" class="">
+      <span class="book-menu-link-title">4.4 RAG Agent 原理与搭建</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/react-framework/" class="">
+      <span class="book-menu-link-title">4.5 复杂问题拆解与ReAct框架</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/two-stage-indexing/" class="">
+      <span class="book-menu-link-title">4.6 RAG 中的两阶段索引</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/qwen3-reranking/" class="">
+      <span class="book-menu-link-title">4.7 Qwen3 Reranking 原理与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/two-stage-rag-agent/" class="">
+      <span class="book-menu-link-title">4.8 基于两阶段索引的 RAG Agent</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/langgraph-basics/" class="">
+      <span class="book-menu-link-title">4.9 LangGraph 基本概念介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/langgraph-custom-rag-agent/" class="">
+      <span class="book-menu-link-title">4.10  基于 LangGraph 构建自定义 RAG Agent</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bf5130286ff0eee8f362b632167a5e6b" class="toggle"  />
+    <label for="section-bf5130286ff0eee8f362b632167a5e6b" class="flex">
+      <a href="/agent/chapter05/" class="">
+        <span class="book-menu-link-title">第 5 章 Agent 记忆机制与管理</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/agent-memory-overview/" class="">
+      <span class="book-menu-link-title">5.1 Agent 记忆机制概览</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/langchain-short-term-memory/" class="">
+      <span class="book-menu-link-title">5.2 短期记忆持久化与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/short-term-memory-management/" class="">
+      <span class="book-menu-link-title">5.3 短期记忆管理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/short-term-memory-rag-agent/" class="">
+      <span class="book-menu-link-title">5.4 拥有短期记忆的 RAG Agent</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/long-term-memory-strategies/" class="">
+      <span class="book-menu-link-title">5.5 长期记忆管理与持久化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/mini-chatgpt-from-scratch/" class="">
+      <span class="book-menu-link-title">5.6 从零实现 Mini ChatGPT 助手</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/pgvector-setup/" class="">
+      <span class="book-menu-link-title">5.7 pgvector 配置安装</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/long-term-memory-retrieval-and-forgetting/" class="">
+      <span class="book-menu-link-title">5.8 长期记忆检索与遗忘</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/langgraph-mini-chatgpt/" class="">
+      <span class="book-menu-link-title">5.9 基于 LangGraph 的Mini ChatGPT 助手</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/create-agent-mini-chatgpt/" class="">
+      <span class="book-menu-link-title">5.10 使用 create_agent 搭建 Mini ChatGPT</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/" class="">
+      <span class="book-menu-link-title">深度学习</span>
+</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/mindmap/" class="">
+      <span class="book-menu-link-title">目录思维导图</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-cf7621e8efb1f3153eaca44a113dcdb9" class="toggle"  />
+    <label for="section-cf7621e8efb1f3153eaca44a113dcdb9" class="flex">
+      <a href="/dl/chapter01/" class="">
+        <span class="book-menu-link-title">第 1 章 深度学习简介</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/dl-development-stages/" class="">
+      <span class="book-menu-link-title">1.1 深度学习的发展阶段</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/dl-key-figures/" class="">
+      <span class="book-menu-link-title">1.2 深度学习中的关键人物</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/mainstream-dl-frameworks/" class="">
+      <span class="book-menu-link-title">1.3 深度学习框架介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f9bf1a68c19405769f9c4a1495708a55" class="toggle"  />
+    <label for="section-f9bf1a68c19405769f9c4a1495708a55" class="flex">
+      <a href="/dl/chapter02/" class="">
+        <span class="book-menu-link-title">第 2 章 环境配置</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/dl-dev-environment-architecture/" class="">
+      <span class="book-menu-link-title">2.1 体系结构介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/dl-cuda-pytorch-install/" class="">
+      <span class="book-menu-link-title">2.2 深度学习环境安装</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/dl-cuda-training-env-setup/" class="">
+      <span class="book-menu-link-title">2.3 开发环境安装配置</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="toggle"  />
+    <label for="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="flex">
+      <a href="/dl/chapter03/" class="">
+        <span class="book-menu-link-title">第 3 章 深度学习基础</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/linear-regression-basics/" class="">
+      <span class="book-menu-link-title">3.1 线性回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/linear-regression-implementation/" class="">
+      <span class="book-menu-link-title">3.2 线性回归简洁实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/backpropagation-and-gradient-descent/" class="">
+      <span class="book-menu-link-title">3.3 梯度下降与反向传播</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/regression-from-scratch/" class="">
+      <span class="book-menu-link-title">3.4 从零实现回归模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/softmax-regression-basics/" class="">
+      <span class="book-menu-link-title">3.5 从逻辑回归到Softmax回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/softmax-regression-implementation/" class="">
+      <span class="book-menu-link-title">3.6 Softmax回归简洁实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/softmax-regression-from-scratch/" class="">
+      <span class="book-menu-link-title">3.7 从零实现分类模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/regression-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">3.8 回归模型评估指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/classification-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">3.9 分类模型评估指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/overfitting-and-regularization/" class="">
+      <span class="book-menu-link-title">3.10 过拟合与正则化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/hyperparameters-and-cross-validation/" class="">
+      <span class="book-menu-link-title">3.11 超参数与交叉验证</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/activation-functions/" class="">
+      <span class="book-menu-link-title">3.12 激活函数</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/multi-label-classification/" class="">
+      <span class="book-menu-link-title">3.13 多标签分类</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-7a12cee83820a928df00362d70804a97" class="toggle"  />
+    <label for="section-7a12cee83820a928df00362d70804a97" class="flex">
+      <a href="/dl/chapter04/" class="">
+        <span class="book-menu-link-title">第 4 章 卷积神经网络</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/cnn-basics/" class="">
+      <span class="book-menu-link-title">4.1 卷积的概念</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/convolution-operation/" class="">
+      <span class="book-menu-link-title">4.2 卷积的计算过程</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/convolution-and-pooling/" class="">
+      <span class="book-menu-link-title">4.3 填充和池化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/lenet5/" class="">
+      <span class="book-menu-link-title">4.4 LeNet5网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/alexnet/" class="">
+      <span class="book-menu-link-title">4.5 AlexNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/vgg/" class="">
+      <span class="book-menu-link-title">4.6 VGG网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/nin/" class="">
+      <span class="book-menu-link-title">4.7 NIN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/googlenet/" class="">
+      <span class="book-menu-link-title">4.8 GoogLeNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/resnet/" class="">
+      <span class="book-menu-link-title">4.9 ResNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/densenet/" class="">
+      <span class="book-menu-link-title">4.10 DenseNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-be9addfd3a15c372d609d09cabb94159" class="toggle"  />
+    <label for="section-be9addfd3a15c372d609d09cabb94159" class="flex">
+      <a href="/dl/chapter05/" class="">
+        <span class="book-menu-link-title">第 5 章 模型训练与复用</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/training-logs-management/" class="">
+      <span class="book-menu-link-title">5.1 参数及日志管理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/tensorboard-tutorial/" class="">
+      <span class="book-menu-link-title">5.2 Tensorboard可视化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/pytorch-model-save-load/" class="">
+      <span class="book-menu-link-title">5.3 模型的保存与复用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/transfer-learning-tutorial/" class="">
+      <span class="book-menu-link-title">5.4 模型的迁移学习</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/pretrained-model-reuse/" class="">
+      <span class="book-menu-link-title">5.5 开源模型复用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/multi-gpu-training/" class="">
+      <span class="book-menu-link-title">5.6 多GPU训练</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/training-data-preprocessing-cache/" class="">
+      <span class="book-menu-link-title">5.7 数据预处理与缓存</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="toggle"  />
+    <label for="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="flex">
+      <a href="/dl/chapter06/" class="">
+        <span class="book-menu-link-title">第 6 章 模型优化方法</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/learning-rate-scheduler/" class="">
+      <span class="book-menu-link-title">6.1 学习率调度器</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/gradient-clipping/" class="">
+      <span class="book-menu-link-title">6.2 梯度裁剪</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/batch-norm/" class="">
+      <span class="book-menu-link-title">6.3 批归一化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/layer-norm/" class="">
+      <span class="book-menu-link-title">6.4 层归一化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/group-norm/" class="">
+      <span class="book-menu-link-title">6.5 组归一化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/momentum/" class="">
+      <span class="book-menu-link-title">6.6 动量法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/ada-grad/" class="">
+      <span class="book-menu-link-title">6.7 AdaGrad算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/ada-delta/" class="">
+      <span class="book-menu-link-title">6.8 AdaDelta算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/adam/" class="">
+      <span class="book-menu-link-title">6.9 Adam算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/weight-initialization/" class="">
+      <span class="book-menu-link-title">6.10 初始化方法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-517b751d7c44a7ac77d25d295ed44271" class="toggle"  />
+    <label for="section-517b751d7c44a7ac77d25d295ed44271" class="flex">
+      <a href="/dl/chapter07/" class="">
+        <span class="book-menu-link-title">第 7 章 循环神经网络</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/rnn-basics/" class="">
+      <span class="book-menu-link-title">7.1 RNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/time-series-modeling/" class="">
+      <span class="book-menu-link-title">7.2 时序数据</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/lstm/" class="">
+      <span class="book-menu-link-title">7.3 LSTM网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/gru/" class="">
+      <span class="book-menu-link-title">7.4 GRU网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/bi-rnn/" class="">
+      <span class="book-menu-link-title">7.5 BiRNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/char-rnn/" class="">
+      <span class="book-menu-link-title">7.6 CharRNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-b9b861f64ba32bc68dfb977497de37d9" class="toggle"  />
+    <label for="section-b9b861f64ba32bc68dfb977497de37d9" class="flex">
+      <a href="/dl/chapter08/" class="">
+        <span class="book-menu-link-title">第 8 章 时序与模型融合</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/textcnn/" class="">
+      <span class="book-menu-link-title">8.1 TextCNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/textrnn/" class="">
+      <span class="book-menu-link-title">8.2 TextRNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/cnn-rnn/" class="">
+      <span class="book-menu-link-title">8.3 CNN-RNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/convlstm/" class="">
+      <span class="book-menu-link-title">8.4 ConvLSTM网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/3dcnn/" class="">
+      <span class="book-menu-link-title">8.5 3DCNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/stresnet/" class="">
+      <span class="book-menu-link-title">8.6 STResNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-e54a1e28b1438b8266637bcb8dac1a44" class="toggle"  />
+    <label for="section-e54a1e28b1438b8266637bcb8dac1a44" class="flex">
+      <a href="/dl/chapter09/" class="">
+        <span class="book-menu-link-title">第 9 章 自然语言处理</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/nlp-basics/" class="">
+      <span class="book-menu-link-title">9.1 自然语言处理介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/word2vec-principle/" class="">
+      <span class="book-menu-link-title">9.2 Word2Vec词向量</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/word2vec-training-and-usage/" class="">
+      <span class="book-menu-link-title">9.3 Word2Vec训练与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/glove/" class="">
+      <span class="book-menu-link-title">9.4 GloVe词向量</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/word-vector-finetuning/" class="">
+      <span class="book-menu-link-title">9.5 词向量的微调使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/fasttext/" class="">
+      <span class="book-menu-link-title">9.6 fastText网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/seq2seq-tutorial/" class="">
+      <span class="book-menu-link-title">9.7 Seq2Seq网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/seq-model-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">9.8 序列模型评价指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/nmt-seq2seq/" class="">
+      <span class="book-menu-link-title">9.9 NMT网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/attention-mechanism/" class="">
+      <span class="book-menu-link-title">9.10 注意力机制</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/nmt-with-attention/" class="">
+      <span class="book-menu-link-title">9.11 含注意力的NMT网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/rnn-with-attention/" class="">
+      <span class="book-menu-link-title">9.12 含注意力的RNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f6636b2f9dc1df93b9fa64dd201716d9" class="toggle"  />
+    <label for="section-f6636b2f9dc1df93b9fa64dd201716d9" class="flex">
+      <a href="/dl/chapter10/" class="">
+        <span class="book-menu-link-title">第 10 章 现代神经网络</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/elmo/" class="">
+      <span class="book-menu-link-title">10.1 ELMo网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-principle/" class="">
+      <span class="book-menu-link-title">10.2 Transformer网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-architecture/" class="">
+      <span class="book-menu-link-title">10.3 Transformer结构</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-implementation/" class="">
+      <span class="book-menu-link-title">10.4 Transformer实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-couplet-model/" class="">
+      <span class="book-menu-link-title">10.5 Transformer对联模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-principle/" class="">
+      <span class="book-menu-link-title">10.6 BERT网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-from-scratch/" class="">
+      <span class="book-menu-link-title">10.7 从零实现BERT</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-text-classification/" class="">
+      <span class="book-menu-link-title">10.8 BERT文本分类模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-sentence-pair-matching/" class="">
+      <span class="book-menu-link-title">10.9 BERT问题选择模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-question-answering/" class="">
+      <span class="book-menu-link-title">10.10 BERT问题回答模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-ner/" class="">
+      <span class="book-menu-link-title">10.11 BERT命名体识别模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-pretraining/" class="">
+      <span class="book-menu-link-title">10.12 BERT从零训练</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-1/" class="">
+      <span class="book-menu-link-title">10.13 GPT-1模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-2-and-gpt-3/" class="">
+      <span class="book-menu-link-title">10.14 GPT-2与GPT-3模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-2-chinese-pretraining/" class="">
+      <span class="book-menu-link-title">10.15 基于GPT-2的中文预训练模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/instructgpt-and-chatgpt/" class="">
+      <span class="book-menu-link-title">10.16 InstructGPT与ChatGPT</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/chatgpt-prompt-engineering/" class="">
+      <span class="book-menu-link-title">10.17 ChatGPT与提示词工程</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/baichuan-usage/" class="">
+      <span class="book-menu-link-title">10.18 百川大模型使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/baichuan-implementation/" class="">
+      <span class="book-menu-link-title">10.19 百川大模型实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-4-and-gpts/" class="">
+      <span class="book-menu-link-title">10.20 GPT-4与GPTs使用</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/" class="">
+      <span class="book-menu-link-title">机器学习</span>
+</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/mindmap/" class="">
+      <span class="book-menu-link-title">目录思维导图</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-48f56957e94e3cf66f3022103a7dd0ff" class="toggle"  />
+    <label for="section-48f56957e94e3cf66f3022103a7dd0ff" class="flex">
+      <a href="/ml/chapter01/" class="">
+        <span class="book-menu-link-title">第 1 章 环境配置</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/conda-install-tutorial/" class="">
+      <span class="book-menu-link-title">1.1 安装使用Conda</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/ml-conda-env-setup/" class="">
+      <span class="book-menu-link-title">1.2 开发环境安装配置</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-56a896338a1c41249d22a3efa0e0063c" class="toggle"  />
+    <label for="section-56a896338a1c41249d22a3efa0e0063c" class="flex">
+      <a href="/ml/chapter02/" class="">
+        <span class="book-menu-link-title">第 2 章 线性回归</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/linear-regression-basics/" class="">
+      <span class="book-menu-link-title">2.1 模型的建立与求解</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/multivariate-linear-regression/" class="">
+      <span class="book-menu-link-title">2.2 多变量线性回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/polynomial-regression/" class="">
+      <span class="book-menu-link-title">2.3 多项式回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/regression-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">2.4 回归模型评估</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/gradient-descent-derivation/" class="">
+      <span class="book-menu-link-title">2.5 梯度下降</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/normal-distribution/" class="">
+      <span class="book-menu-link-title">2.6 正态分布</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/linear-regression-loss-derivation/" class="">
+      <span class="book-menu-link-title">2.7 目标函数推导</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ccd0dc9386ea80613d4cedf91b30058d" class="toggle"  />
+    <label for="section-ccd0dc9386ea80613d4cedf91b30058d" class="flex">
+      <a href="/ml/chapter03/" class="">
+        <span class="book-menu-link-title">第 3 章 逻辑回归</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/logistic-regression-basics/" class="">
+      <span class="book-menu-link-title">3.1 模型的建立与求解</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/logistic-regression-multiclass/" class="">
+      <span class="book-menu-link-title">3.2 多分类任务</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/classification-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">3.3 常见的分类评估指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/logistic-regression-loss-derivation/" class="">
+      <span class="book-menu-link-title">3.4 目标函数推导</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="toggle"  />
+    <label for="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="flex">
+      <a href="/ml/chapter04/" class="">
+        <span class="book-menu-link-title">第 4 章 模型的改善与泛化</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/generalization-basics/" class="">
+      <span class="book-menu-link-title">4.1 基本概念</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/feature-scaling/" class="">
+      <span class="book-menu-link-title">4.2 特征标准化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/overfitting-solutions/" class="">
+      <span class="book-menu-link-title">4.3过拟合</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/l1-l2-regularization/" class="">
+      <span class="book-menu-link-title">4.4 正则化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/bias-and-variance/" class="">
+      <span class="book-menu-link-title">4.5 偏差、方差与交叉验证</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/handwritten-digit-recognition-case/" class="">
+      <span class="book-menu-link-title">4.6 实例分析手写体识别</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-40f463d9d502d24b86ea6120b7030123" class="toggle"  />
+    <label for="section-40f463d9d502d24b86ea6120b7030123" class="flex">
+      <a href="/ml/chapter05/" class="">
+        <span class="book-menu-link-title">第 5 章 K近邻</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/knn-principle/" class="">
+      <span class="book-menu-link-title">5.1 K近邻思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/knn-algorithm-details/" class="">
+      <span class="book-menu-link-title">5.2 K近邻原理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/sklearn-knn-example/" class="">
+      <span class="book-menu-link-title">5.3 sklearn接口与示例代码</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/kd-tree-knn/" class="">
+      <span class="book-menu-link-title">5.4 kd树构建与搜索</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/knn-from-scratch/" class="">
+      <span class="book-menu-link-title">5.5 从零实现K近邻</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-5a460dc18f1e79253296cf2cd0498446" class="toggle"  />
+    <label for="section-5a460dc18f1e79253296cf2cd0498446" class="flex">
+      <a href="/ml/chapter06/" class="">
+        <span class="book-menu-link-title">第 6 章 文本特征与模型复用</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/bag-of-words/" class="">
+      <span class="book-menu-link-title">6.1 词袋模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/knn-spam-classification/" class="">
+      <span class="book-menu-link-title">6 .2 基于K近邻算法的垃圾邮件分类</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/tf-idf/" class="">
+      <span class="book-menu-link-title">6.3 考虑权重的词袋模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/wordcloud-generation/" class="">
+      <span class="book-menu-link-title">6.4 词云图</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-96f45a8b8c8b75adc70c78026d93dbf6" class="toggle"  />
+    <label for="section-96f45a8b8c8b75adc70c78026d93dbf6" class="flex">
+      <a href="/ml/chapter07/" class="">
+        <span class="book-menu-link-title">第 7 章 朴素贝叶斯</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/naive-bayes-basics/" class="">
+      <span class="book-menu-link-title">7.1 朴素贝叶斯算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/bayes-estimation/" class="">
+      <span class="book-menu-link-title">7.2 贝叶斯估计</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/naive-bayes-implementation/" class="">
+      <span class="book-menu-link-title">7.3 朴素贝叶斯实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/multinomial-naive-bayes/" class="">
+      <span class="book-menu-link-title">7.4 多项式朴素贝叶斯原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/gaussian-naive-bayes/" class="">
+      <span class="book-menu-link-title">7.5 高斯朴素贝叶斯原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-22476e49d5058c3e5e7e7366b7ab676f" class="toggle"  />
+    <label for="section-22476e49d5058c3e5e7e7366b7ab676f" class="flex">
+      <a href="/ml/chapter08/" class="">
+        <span class="book-menu-link-title">第 8 章 决策树</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-principle/" class="">
+      <span class="book-menu-link-title">8.1 决策树的基本思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-sklearn/" class="">
+      <span class="book-menu-link-title">8.2 决策树建模与可视化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/id3-vs-c45/" class="">
+      <span class="book-menu-link-title">8.3 决策树生成之ID3与C4.5</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-pruning/" class="">
+      <span class="book-menu-link-title">8.4 决策树剪枝过程</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-from-scratch/" class="">
+      <span class="book-menu-link-title">8.5 从零实现ID3与C4.5算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-continuous-features/" class="">
+      <span class="book-menu-link-title">8.6 连续型特征变量下决策树实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/cart-algorithm/" class="">
+      <span class="book-menu-link-title">8.7 CART生成与剪枝算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/cart-from-scratch/" class="">
+      <span class="book-menu-link-title">8.8 从零实现CART算法及剪枝示例</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-2feb6a51cabb61dba860f45c1881386b" class="toggle"  />
+    <label for="section-2feb6a51cabb61dba860f45c1881386b" class="flex">
+      <a href="/ml/chapter09/" class="">
+        <span class="book-menu-link-title">第 9 章 集成学习与提升算法</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/ensemble-learning-basics/" class="">
+      <span class="book-menu-link-title">9.1 集成学习算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/random-forest-principle/" class="">
+      <span class="book-menu-link-title">9.2 随机森林</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/random-forest-titanic/" class="">
+      <span class="book-menu-link-title">9.3 泰坦尼克号生还预测</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/adaboost/" class="">
+      <span class="book-menu-link-title">9.4 AdaBoost原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/multi-adaboost/" class="">
+      <span class="book-menu-link-title">9.5 MultiAdaBoost原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/gradient-boost/" class="">
+      <span class="book-menu-link-title">9.6 Gradient Boost 原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-938ae119c3849b03ccb6f91cef4243dd" class="toggle"  />
+    <label for="section-938ae119c3849b03ccb6f91cef4243dd" class="flex">
+      <a href="/ml/chapter10/" class="">
+        <span class="book-menu-link-title">第 10 章 支持向量机</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-principle/" class="">
+      <span class="book-menu-link-title">10.1 SVM思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-nonlinear-kernel/" class="">
+      <span class="book-menu-link-title">10.2 SVM线性不可分</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-max-margin/" class="">
+      <span class="book-menu-link-title">10.3 SVM原理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-soft-margin/" class="">
+      <span class="book-menu-link-title">10.4 SVM中的软间隔</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/lagrange-multipliers/" class="">
+      <span class="book-menu-link-title">10.5 拉格朗日乘数法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/kkt-conditions/" class="">
+      <span class="book-menu-link-title">10.6 对偶性与KKT条件</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-optimization/" class="">
+      <span class="book-menu-link-title">10.7 SVM优化问题</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-kernel-functions/" class="">
+      <span class="book-menu-link-title">10.8 SVM核函数原理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/smo-algorithm/" class="">
+      <span class="book-menu-link-title">10.9 SMO算法求解SVM</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-from-scratch/" class="">
+      <span class="book-menu-link-title">10.10 从零实现SVM分类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-9f4d9786d4ab755fde42c64d09b0d026" class="toggle"  />
+    <label for="section-9f4d9786d4ab755fde42c64d09b0d026" class="flex">
+      <a href="/ml/chapter11/" class="">
+        <span class="book-menu-link-title">第 11 章 聚类分析</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/clustering-basics/" class="">
+      <span class="book-menu-link-title">11.1 聚类算法的思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-principle/" class="">
+      <span class="book-menu-link-title">11.2 Kmeans聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-iteration/" class="">
+      <span class="book-menu-link-title">11.3 Kmeans算法求解</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-from-scratch/" class="">
+      <span class="book-menu-link-title">11.4 从零实现Kmeans聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-plus-plus/" class="">
+      <span class="book-menu-link-title">11.5 Kmeans&#43;&#43;聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/clustering-external-metrics/" class="">
+      <span class="book-menu-link-title">11.6 聚类外部评价指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/weighted-kmeans/" class="">
+      <span class="book-menu-link-title">11.7 加权Kmeans聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/clustering-internal-metrics/" class="">
+      <span class="book-menu-link-title">11.8 聚类内部评价指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-k-selection/" class="">
+      <span class="book-menu-link-title">11.9 聚类K值选取与分析</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/dbscan/" class="">
+      <span class="book-menu-link-title">11.10 基于密度的聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/hierarchical-clustering/" class="">
+      <span class="book-menu-link-title">11.11 基于层次的聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-d5e78c45312818bb3abd5c19c858f7e5" class="toggle"  />
+    <label for="section-d5e78c45312818bb3abd5c19c858f7e5" class="flex">
+      <a href="/ml/chapter12/" class="">
+        <span class="book-menu-link-title">第 12 章 降维算法</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/pca-principle/" class="">
+      <span class="book-menu-link-title">12.1 主成分分析</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/kpca/" class="">
+      <span class="book-menu-link-title">12.2 基于核函数的主成分分析</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-a82b41bb7eb95af72bc11e8a3d668acd" class="toggle"  />
+    <label for="section-a82b41bb7eb95af72bc11e8a3d668acd" class="flex">
+      <a href="/ml/chapter13/" class="">
+        <span class="book-menu-link-title">第 13 章 自训练与标签传播</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/self-training/" class="">
+      <span class="book-menu-link-title">13.1 Self-Training 自训练算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/label-propagation/" class="">
+      <span class="book-menu-link-title">13.2 Label Propagation算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/label-spreading/" class="">
+      <span class="book-menu-link-title">13.3 Label Spreading 算法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</nav>
+
+
+
+
+  <script>(function(){var e=document.querySelector("aside .book-menu-content");addEventListener("beforeunload",function(){localStorage.setItem("menu.scrollTop",e.scrollTop)}),e.scrollTop=localStorage.getItem("menu.scrollTop")})()</script>
+
+
+
+  </div>
+</aside>
+ 
+
+    <div class="book-page">
+      <header class="book-header hidden">
+        
+  <div class="flex align-center justify-between">
+  <label for="menu-control">
+    <img src="/icons/menu.svg" class="book-icon" alt="Menu" />
+  </label>
+
+  <h3>第7讲 Transformer 对联生成模型实战教程：用 70 万对联数据训练中文 Seq2Seq</h3>
+
+  <label for="toc-control">
+    
+    <img src="/icons/toc.svg" class="book-icon" alt="Table of Contents" />
+    
+  </label>
+</div>
+
+
+  
+  <aside class="hidden">
+    
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#71--数据预处理">7.1  数据预处理</a>
+      <ul>
+        <li><a href="#711-语料介绍">7.1.1 语料介绍</a></li>
+        <li><a href="#712-数据集构建">7.1.2 数据集构建</a></li>
+      </ul>
+    </li>
+    <li><a href="#72-对联生成模型">7.2 对联生成模型</a>
+      <ul>
+        <li><a href="#721-网络结构">7.2.1 网络结构</a></li>
+        <li><a href="#722-模型训练">7.2.2 模型训练</a></li>
+        <li><a href="#723-模型预测">7.2.3 模型预测</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+
+
+
+
+  </aside>
+  
+ 
+      </header>
+
+      
+      
+  <article class="markdown book-article"><nav class="book-breadcrumbs text-small book-breadcrumbs--page" aria-label="面包屑导航">
+    <ol class="book-breadcrumbs__list"><li class="book-breadcrumbs__item"><a class="book-breadcrumbs__link" href="https://mlwithme.github.io/">首页</a></li><li class="book-breadcrumbs__item"><a class="book-breadcrumbs__link" href="https://mlwithme.github.io/tutorials/">专栏文章</a></li><li class="book-breadcrumbs__item"><a class="book-breadcrumbs__link" href="https://mlwithme.github.io/tutorials/transformer/">图解 Transformer 入门指南教程</a></li><li class="book-breadcrumbs__item"><span class="book-breadcrumbs__current" aria-current="page">第7节 基于Transformer的对联生成模型</span></li></ol>
+  </nav><div class="book-article-lastmod text-small">
+        <span class="book-article-lastmod-label">更新于</span>
+        <span class="book-article-lastmod-value">2026年7月12日</span>
+      </div><h1 id="第7节-基于-transformer-的对联生成模型">第7节 基于 Transformer 的对联生成模型<a class="anchor" href="#%e7%ac%ac7%e8%8a%82-%e5%9f%ba%e4%ba%8e-transformer-%e7%9a%84%e5%af%b9%e8%81%94%e7%94%9f%e6%88%90%e6%a8%a1%e5%9e%8b">#</a></h1>
+<p>经过前面6节内容的介绍，对于Transformer相信大家都应该理解得差不多了。不过要想做到灵活运用Transformer结构，那就还得多看看其它场景下的运用。在接下来的这部分内容中，将会以一个含有70余万条的对联数据集为例，来搭建一个基于Transformer结构的对联生成模型。</p>
+<p>如图7-1所示便是一个基于Transformer的对联生成模型。可以看出，其实它与前面介绍的基于Transformer结构的翻译模型没有特别的变化，唯一不同的可能就是在对联生成模型中解码器和编码器共用同一个词表（因为两者都是中文）。</p>
+<div align=center><img width="400" src="/images/tutorials/202607082106.png" alt="图 7-1. Transformer网络结构图"/> </div><center>图 7-1. Transformer网络结构图</center>
+<h2 id="71--数据预处理">7.1  数据预处理<a class="anchor" href="#71--%e6%95%b0%e6%8d%ae%e9%a2%84%e5%a4%84%e7%90%86">#</a></h2>
+<h3 id="711-语料介绍">7.1.1 语料介绍<a class="anchor" href="#711-%e8%af%ad%e6%96%99%e4%bb%8b%e7%bb%8d">#</a></h3>
+<p>按老规矩，在正式介绍模型搭建之前我们还是先来看看数据集都长什么样。本次所使用到的数据集是一个网上公开的对联数据集，在github中搜索&quot;couplet-dataset”就能找到，其一共包含有770491条训练样本，4000条测试样本。和翻译数据集类似，对联数据集也包含上下两句：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-shell" data-lang="shell"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#60a0b0;font-style:italic"># 上联 in.txt</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span> 风 弦 未 拨 心 先 乱 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span> 花 梦 粘 于 春 袖 口 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span> 晋 世 文 章 昌 二 陆
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#60a0b0;font-style:italic"># 下联 out.txt</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span> 夜 幕 已 沉 梦 更 闲 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span> 莺 声 溅 落 柳 枝 头 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span> 魏 家 词 赋 重 三 曹</span></span></code></pre></div><p>如上所示便是3条样本，分别存放在in.txt和out.txt这两个文件中。可以看出，原始数据已经做了分字这步操作，所有后续我们只需要进行简单的split操作即可。</p>
+<h3 id="712-数据集构建">7.1.2 数据集构建<a class="anchor" href="#712-%e6%95%b0%e6%8d%ae%e9%9b%86%e6%9e%84%e5%bb%ba">#</a></h3>
+<p>总体上来说对联生成模型的数据集构建过程和翻译模型的数据集构建过程基本上没有太大差别，主要步骤同样也是：①构建字典；②将文本中的每一个词（字）转换为Token序列；③对不同长度的样本序列按照某个标准进行padding处理；④构建DataLoader类。</p>
+<p><strong>第1步：定义tokenize</strong></p>
+<p>由于原始数据每个字已经被空格隔开了，所以这里tokenizer的定义只需要进行split操作即可，代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">my_tokenizer</span>(s):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">return</span> s<span style="color:#666">.</span>split()</span></span></code></pre></div><p>可以看到，其实也非常简单。例如对于如下文本来说</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-shell" data-lang="shell"><span style="display:flex;"><span>腾 飞 上 铁 ， 锐 意 改 革 谋 发 展 ， 勇 当 千 里 马 </span></span></code></pre></div><p>其tokenize后的结果为：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-shell" data-lang="shell"><span style="display:flex;"><span><span style="color:#666">[</span><span style="color:#4070a0">&#39;腾&#39;</span>, <span style="color:#4070a0">&#39;飞&#39;</span>, <span style="color:#4070a0">&#39;上&#39;</span>, <span style="color:#4070a0">&#39;铁&#39;</span>, <span style="color:#4070a0">&#39;，&#39;</span>, <span style="color:#4070a0">&#39;锐&#39;</span>, <span style="color:#4070a0">&#39;意&#39;</span>, <span style="color:#4070a0">&#39;改&#39;</span>, <span style="color:#4070a0">&#39;革&#39;</span>, <span style="color:#4070a0">&#39;谋&#39;</span>, <span style="color:#4070a0">&#39;发&#39;</span>, <span style="color:#4070a0">&#39;展&#39;</span>, <span style="color:#4070a0">&#39;，
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">&#39;</span>, <span style="color:#4070a0">&#39;勇&#39;</span>, <span style="color:#4070a0">&#39;当&#39;</span>, <span style="color:#4070a0">&#39;千&#39;</span>, <span style="color:#4070a0">&#39;里&#39;</span>, <span style="color:#4070a0">&#39;马&#39;</span><span style="color:#666">]</span></span></span></code></pre></div><p><strong>第2步：建立词表</strong></p>
+<p>在介绍完tokenize的实现方法后，我们就可以正式通过 <code>torchtext.vocab</code> 中的 <code>Vocab</code> 方法来构建词典了，代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">build_vocab</span>(tokenizer, filepath, min_freq<span style="color:#666">=</span><span style="color:#40a070">1</span>, specials<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">if</span> specials <span style="color:#007020;font-weight:bold">is</span> <span style="color:#007020;font-weight:bold">None</span>: 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>         specials <span style="color:#666">=</span> [<span style="color:#4070a0">&#39;&lt;unk&gt;&#39;</span>, <span style="color:#4070a0">&#39;&lt;pad&gt;&#39;</span>, <span style="color:#4070a0">&#39;&lt;bos&gt;&#39;</span>, <span style="color:#4070a0">&#39;&lt;eos&gt;&#39;</span>]
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>     counter <span style="color:#666">=</span> Counter()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>     <span style="color:#007020;font-weight:bold">with</span> <span style="color:#007020">open</span>(filepath[<span style="color:#40a070">0</span>], encoding<span style="color:#666">=</span><span style="color:#4070a0">&#39;utf8&#39;</span>) <span style="color:#007020;font-weight:bold">as</span> f:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>         <span style="color:#007020;font-weight:bold">for</span> string_ <span style="color:#007020;font-weight:bold">in</span> f:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>             counter<span style="color:#666">.</span>update(tokenizer(string_))
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>     <span style="color:#007020;font-weight:bold">with</span> <span style="color:#007020">open</span>(filepath[<span style="color:#40a070">1</span>], encoding<span style="color:#666">=</span><span style="color:#4070a0">&#39;utf8&#39;</span>) <span style="color:#007020;font-weight:bold">as</span> f:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>         <span style="color:#007020;font-weight:bold">for</span> string_ <span style="color:#007020;font-weight:bold">in</span> f:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>             counter<span style="color:#666">.</span>update(tokenizer(string_))
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>     <span style="color:#007020;font-weight:bold">return</span> Vocab(counter, specials<span style="color:#666">=</span>specials, min_freq<span style="color:#666">=</span>min_freq)</span></span></code></pre></div><p>在上述代码中，第3行代码用来指定特殊的字符；第5~10行分别用来遍历in.txt文件和out.txt文件中的每一个样本（每行一个）并进行tokenize和计数，其中对于 <code>counter.update</code> 进行介绍可以参考[10]；第8行则是返回最后得到词典。值得注意的是，由于在对联生成这一场景中编码器和解码器共用的是一个词表，所以这里同时对in.txt和out.txt文件进行了遍历。</p>
+<p>在完成上述过程后，我们将得到一个Vocab类的实例化对象，即：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span>{<span style="color:#4070a0">&#39;&lt;unk&gt;&#39;</span>: <span style="color:#40a070">0</span>, <span style="color:#4070a0">&#39;&lt;pad&gt;&#39;</span>: <span style="color:#40a070">1</span>, <span style="color:#4070a0">&#39;&lt;bos&gt;&#39;</span>: <span style="color:#40a070">2</span>, <span style="color:#4070a0">&#39;&lt;eos&gt;&#39;</span>: <span style="color:#40a070">3</span>, <span style="color:#4070a0">&#39;，&#39;</span>: <span style="color:#40a070">4</span>, <span style="color:#4070a0">&#39;风&#39;</span>: <span style="color:#40a070">5</span>, <span style="color:#4070a0">&#39;春&#39;</span>: <span style="color:#40a070">6</span>, <span style="color:#4070a0">&#39;</span>
+</span></span><span style="display:flex;"><span>一<span style="color:#4070a0">&#39;: 7, &#39;</span>人<span style="color:#4070a0">&#39;: 8, &#39;</span>月<span style="color:#4070a0">&#39;: 9, &#39;</span>山<span style="color:#4070a0">&#39;: 10, &#39;</span>心<span style="color:#4070a0">&#39;: 11, &#39;</span>花<span style="color:#4070a0">&#39;: 12, &#39;</span>天<span style="color:#4070a0">&#39;: 13, ...}</span></span></span></code></pre></div><p>此时，我们就需要定义一个类，并在类的初始化过程中根据训练语料完成字典的构建，代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">LoadCoupletDataset</span>():
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">__init__</span>(<span style="color:#007020">self</span>, train_file_paths<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>, tokenizer<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>                  batch_size<span style="color:#666">=</span><span style="color:#40a070">2</span>, min_freq<span style="color:#666">=</span><span style="color:#40a070">1</span>):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>         <span style="color:#60a0b0;font-style:italic"># 根据训练预料建立字典，由于都是中文，所以共用一个即可</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>tokenizer <span style="color:#666">=</span> tokenizer
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>vocab <span style="color:#666">=</span> build_vocab(<span style="color:#007020">self</span><span style="color:#666">.</span>tokenizer, filepath<span style="color:#666">=</span>train_file_paths,min_freq<span style="color:#666">=</span>min_freq)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>specials <span style="color:#666">=</span> [<span style="color:#4070a0">&#39;&lt;unk&gt;&#39;</span>, <span style="color:#4070a0">&#39;&lt;pad&gt;&#39;</span>, <span style="color:#4070a0">&#39;&lt;bos&gt;&#39;</span>, <span style="color:#4070a0">&#39;&lt;eos&gt;&#39;</span>]
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>PAD_IDX <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>vocab[<span style="color:#4070a0">&#39;&lt;pad&gt;&#39;</span>]
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>BOS_IDX <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>vocab[<span style="color:#4070a0">&#39;&lt;bos&gt;&#39;</span>]
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>EOS_IDX <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>vocab[<span style="color:#4070a0">&#39;&lt;eos&gt;&#39;</span>]
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>batch_size <span style="color:#666">=</span> batch_size</span></span></code></pre></div><p><strong>第3步：转换为Token序列</strong></p>
+<p>在得到构建的字典后，便可以通过如下函数来将训练集和测试集转换成Token序列：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">data_process</span>(<span style="color:#007020">self</span>, filepaths):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>        <span style="color:#4070a0">&#34;&#34;&#34;
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0"> 3         将每一句话中的每一个词根据字典转换成索引的形式
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0"> 4         :param filepaths:
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0"> 5         :return:
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0"> 6         &#34;&#34;&#34;</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>         raw_in_iter <span style="color:#666">=</span> <span style="color:#007020">iter</span>(<span style="color:#007020">open</span>(filepaths[<span style="color:#40a070">0</span>], encoding<span style="color:#666">=</span><span style="color:#4070a0">&#34;utf8&#34;</span>))
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>         raw_out_iter <span style="color:#666">=</span> <span style="color:#007020">iter</span>(<span style="color:#007020">open</span>(filepaths[<span style="color:#40a070">1</span>], encoding<span style="color:#666">=</span><span style="color:#4070a0">&#34;utf8&#34;</span>))
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>         data <span style="color:#666">=</span> []
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>         <span style="color:#007020;font-weight:bold">for</span> (raw_in, raw_out) <span style="color:#007020;font-weight:bold">in</span> <span style="color:#007020">zip</span>(raw_in_iter, raw_out_iter):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>             in_tensor_ <span style="color:#666">=</span> torch<span style="color:#666">.</span>tensor([<span style="color:#007020">self</span><span style="color:#666">.</span>vocab[token] <span style="color:#007020;font-weight:bold">for</span> token <span style="color:#007020;font-weight:bold">in</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>                    <span style="color:#007020">self</span><span style="color:#666">.</span>tokenizer(raw_in<span style="color:#666">.</span>rstrip(<span style="color:#4070a0">&#34;</span><span style="color:#4070a0;font-weight:bold">\n</span><span style="color:#4070a0">&#34;</span>))], dtype<span style="color:#666">=</span>torch<span style="color:#666">.</span>long)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>             out_tensor_ <span style="color:#666">=</span> torch<span style="color:#666">.</span>tensor([<span style="color:#007020">self</span><span style="color:#666">.</span>vocab[token] <span style="color:#007020;font-weight:bold">for</span> token <span style="color:#007020;font-weight:bold">in</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>                    <span style="color:#007020">self</span><span style="color:#666">.</span>tokenizer(raw_out<span style="color:#666">.</span>rstrip(<span style="color:#4070a0">&#34;</span><span style="color:#4070a0;font-weight:bold">\n</span><span style="color:#4070a0">&#34;</span>))], dtype<span style="color:#666">=</span>torch<span style="color:#666">.</span>long)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>             data<span style="color:#666">.</span>append((in_tensor_, out_tensor_))
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>         <span style="color:#007020;font-weight:bold">return</span> data</span></span></code></pre></div><p>在上述代码中，第11~4行分别用来将原始序列上联和目标序列下联转换为对应词表中的Token形式。在处理完成后，就会得到类似如下的结果：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span>[(tensor([<span style="color:#40a070">5</span>,<span style="color:#40a070">549</span>,<span style="color:#40a070">250</span>,<span style="color:#40a070">1758</span>,<span style="color:#40a070">11</span>,<span style="color:#40a070">228</span>,<span style="color:#40a070">651</span>]),tensor([<span style="color:#40a070">154</span>,<span style="color:#40a070">1420</span>,<span style="color:#40a070">310</span>,<span style="color:#40a070">598</span>,<span style="color:#40a070">29</span>,<span style="color:#40a070">206</span>,<span style="color:#40a070">164</span>])),(tensor([<span style="color:#40a070">12</span>,<span style="color:#40a070">29</span>,<span style="color:#40a070">3218</span>,<span style="color:#40a070">262</span>,<span style="color:#40a070">6</span>,<span style="color:#40a070">628</span>,<span style="color:#40a070">419</span>]),tensor([ <span style="color:#40a070">441</span>,<span style="color:#40a070">62</span>,<span style="color:#40a070">2049</span>,<span style="color:#40a070">93</span>,<span style="color:#40a070">66</span>,<span style="color:#40a070">304</span>,<span style="color:#40a070">111</span>])),
+</span></span><span style="display:flex;"><span>(tensor([<span style="color:#40a070">1137</span>,<span style="color:#40a070">40</span>,<span style="color:#40a070">47</span>,<span style="color:#40a070">286</span>,<span style="color:#40a070">819</span>,<span style="color:#40a070">364</span>,<span style="color:#40a070">1383</span>]),tensor([<span style="color:#40a070">1803</span>,<span style="color:#40a070">49</span>,<span style="color:#40a070">586</span>,<span style="color:#40a070">556</span>,<span style="color:#40a070">126</span>,<span style="color:#40a070">25</span>,<span style="color:#40a070">1830</span>])),(tensor([<span style="color:#40a070">7</span>,<span style="color:#40a070">291</span>,<span style="color:#40a070">138</span>,<span style="color:#40a070">115</span>,<span style="color:#40a070">216</span>,<span style="color:#40a070">151</span>,<span style="color:#40a070">9</span>]),tensor([<span style="color:#40a070">15</span>,<span style="color:#40a070">311</span>,<span style="color:#40a070">107</span>,<span style="color:#40a070">57</span>,<span style="color:#40a070">80</span>,<span style="color:#40a070">5</span>,<span style="color:#40a070">21</span>]))]</span></span></code></pre></div><p>其中左边的一列就是原始序列上联的Token形式，右边一列就是目标序列下联的Token形式，每一行构成一个样本。</p>
+<p><strong>第4步：padding处理</strong></p>
+<p>从上面的输出结果可以看到，无论是对于原始序列来说还是目标序列来说，在不同的样本中其对应长度都不尽相同。但是在将数据输入到相应模型时却需要保持同样的长度，因此在这里我们就需要对Token序列化后的样本进行padding处理。同时需要注意的是，一般在这种生成模型中，<strong>模型在训练过程中只需要保证同一个batch中所有的原始序列等长，所有的目标序列等长即可</strong>，也就是说不需要在整个数据集中所有样本都保证等长。</p>
+<p>因此，在实际处理过程中无论是原始序列还是目标序列都会以每个batch中最长的样本为标准对其它样本进行padding，具体代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">generate_batch</span>(<span style="color:#007020">self</span>, data_batch):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>         in_batch, out_batch <span style="color:#666">=</span> [], []
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>         <span style="color:#007020;font-weight:bold">for</span> (in_item, out_item) <span style="color:#007020;font-weight:bold">in</span> data_batch: <span style="color:#60a0b0;font-style:italic"># 开始对一个batch中的每一个样本进行处理。</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>             in_batch<span style="color:#666">.</span>append(in_item)  <span style="color:#60a0b0;font-style:italic"># 编码器输入序列不需要加起止符</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>             <span style="color:#60a0b0;font-style:italic"># 在每个idx序列的首位加上 起始token 和 结束 token</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>             out <span style="color:#666">=</span> torch<span style="color:#666">.</span>cat([torch<span style="color:#666">.</span>tensor([<span style="color:#007020">self</span><span style="color:#666">.</span>BOS_IDX]), 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>                                 out_item, torch<span style="color:#666">.</span>tensor([<span style="color:#007020">self</span><span style="color:#666">.</span>EOS_IDX])], dim<span style="color:#666">=</span><span style="color:#40a070">0</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>             out_batch<span style="color:#666">.</span> append(out)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>         <span style="color:#60a0b0;font-style:italic"># 以最长的序列为标准进行填充</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>         in_batch <span style="color:#666">=</span> pad_sequence(in_batch, padding_value<span style="color:#666">=</span><span style="color:#007020">self</span><span style="color:#666">.</span>PAD_IDX)  <span style="color:#60a0b0;font-style:italic"># [de_len,batch_size]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>         out_batch <span style="color:#666">=</span> pad_sequence(out_batch, padding_value<span style="color:#666">=</span><span style="color:#007020">self</span><span style="color:#666">.</span>PAD_IDX)  <span style="color:#60a0b0;font-style:italic"># [en_len,batch_size]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>         <span style="color:#007020;font-weight:bold">return</span> in_batch, out_batch</span></span></code></pre></div><p>在上述代码中，第6~7行用来在目标序列的首尾加上特定的起止符；第10~11行则是分别对一个batch中的原始序列和目标序列以各自当中最长的样本为标准进行padding（这里的pad_sequence导入自torch.nn.utils.rnn）。</p>
+<p><strong>第5步：构造mask向量</strong></p>
+<p>在处理完成前面几个步骤后，进一步需要根据src_input和tgt_input来构造相关的mask向量，具体代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">generate_square_subsequent_mask</span>(<span style="color:#007020">self</span>, sz, device):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>         mask <span style="color:#666">=</span> (torch<span style="color:#666">.</span>triu(torch<span style="color:#666">.</span>ones((sz, sz),device<span style="color:#666">=</span>device)) <span style="color:#666">==</span><span style="color:#40a070">1</span>)<span style="color:#666">.</span>transpose(<span style="color:#40a070">0</span>, <span style="color:#40a070">1</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>         mask <span style="color:#666">=</span> mask<span style="color:#666">.</span>float()<span style="color:#666">.</span>masked_fill(mask <span style="color:#666">==</span> <span style="color:#40a070">0</span>, <span style="color:#007020">float</span>(<span style="color:#4070a0">&#39;- inf&#39;</span>))<span style="color:#666">.</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>                                           	masked_fill(mask <span style="color:#666">==</span> <span style="color:#40a070">1</span>, <span style="color:#007020">float</span>(<span style="color:#40a070">0.0</span>))
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>         <span style="color:#007020;font-weight:bold">return</span> mask
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">create_mask</span>(<span style="color:#007020">self</span>, src, tgt, device<span style="color:#666">=</span><span style="color:#4070a0">&#39;cpu&#39;</span>):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>         src_seq_len <span style="color:#666">=</span> src<span style="color:#666">.</span>shape[<span style="color:#40a070">0</span>]
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>         tgt_seq_len <span style="color:#666">=</span> tgt<span style="color:#666">.</span>shape[<span style="color:#40a070">0</span>]
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>         tgt_mask <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>generate_square_subsequent_mask(tgt_seq_len, device) <span style="color:#60a0b0;font-style:italic"># [tgt_len,tgt_len] Decoder的注意力Mask输入，用于掩盖当前position</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>         <span style="color:#60a0b0;font-style:italic"># 之后的position，所以这里是一个对称矩阵</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>         src_mask <span style="color:#666">=</span> torch<span style="color:#666">.</span>zeros((src_seq_len, src_seq_len),device<span style="color:#666">=</span>device)<span style="color:#666">.</span>type(torch<span style="color:#666">.</span>bool)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>         <span style="color:#60a0b0;font-style:italic">#Encoder的注意力Mask输入，这部分其实对于Encoder来说是没有用的，所以全是0</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>         src_padding_mask <span style="color:#666">=</span> (src <span style="color:#666">==</span> <span style="color:#007020">self</span><span style="color:#666">.</span>PAD_IDX)<span style="color:#666">.</span>transpose(<span style="color:#40a070">0</span>, <span style="color:#40a070">1</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>         <span style="color:#60a0b0;font-style:italic"># 用于mask掉Encoder的Token序列中的padding部分,[batch_size, src_len]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>         tgt_padding_mask <span style="color:#666">=</span> (tgt <span style="color:#666">==</span> <span style="color:#007020">self</span><span style="color:#666">.</span>PAD_IDX)<span style="color:#666">.</span>transpose(<span style="color:#40a070">0</span>, <span style="color:#40a070">1</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>         <span style="color:#60a0b0;font-style:italic"># 用于mask掉Decoder的Token序列中的padding部分,batch_size, tgt_len</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>         <span style="color:#007020;font-weight:bold">return</span> src_mask, tgt_mask, src_padding_mask, tgt_padding_mask</span></span></code></pre></div><p>在上述代码中，第1~5行是用来生成一个形状为[sz,sz]的注意力掩码矩阵，用于在解码过程中掩盖当前position之后的position；第6~17行用来返回Transformer中各种情况下的mask矩阵，其中src_mask在这里并没有作用。</p>
+<p><strong>第6步：构造DataLoade与使用示例</strong></p>
+<p>经过前面5步的操作，整个数据集的构建就算是已经基本完成了，只需要再构造一个DataLoader迭代器即可，代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">load_train_val_test_data</span>(<span style="color:#007020">self</span>, train_file_paths, test_file_paths):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>         train_data <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>data_process(train_file_paths)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>         test_data <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>data_process(test_file_paths)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span>         train_iter <span style="color:#666">=</span> DataLoader(train_data, batch_size<span style="color:#666">=</span><span style="color:#007020">self</span><span style="color:#666">.</span>batch_size,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">5</span>                                 shuffle<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">True</span>, collate_fn<span style="color:#666">=</span><span style="color:#007020">self</span><span style="color:#666">.</span>generate_batch)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">6</span>         test_iter <span style="color:#666">=</span> DataLoader(test_data, batch_size<span style="color:#666">=</span><span style="color:#007020">self</span><span style="color:#666">.</span>batch_size,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">7</span>                                shuffle<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">True</span>, collate_fn<span style="color:#666">=</span><span style="color:#007020">self</span><span style="color:#666">.</span>generate_batch)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">8</span>         <span style="color:#007020;font-weight:bold">return</span> train_iter, test_iter</span></span></code></pre></div><p>在上述代码中，第2~3行便是分别用来将训练集和测试集转换为Token序列；第4~7行则是分别构造2个DataLoader，其中 <code>generate_batch</code> 将作为一个参数传入来对每个batch的样本进行处理。在完成类 <code>LoadCoupletDataset</code> 所有的编码过程后，便可以通过如下形式进行使用：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">if</span> <span style="color:#bb60d5">__name__</span> <span style="color:#666">==</span> <span style="color:#4070a0">&#39;__main__&#39;</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     config <span style="color:#666">=</span> Config()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>     data_loader <span style="color:#666">=</span> LoadCoupletDataset(config<span style="color:#666">.</span>train_corpus_file_paths,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>                                      batch_size<span style="color:#666">=</span>config<span style="color:#666">.</span>batch_size,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>                                      tokenizer<span style="color:#666">=</span>my_tokenizer,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>                                      min_freq<span style="color:#666">=</span>config<span style="color:#666">.</span>min_freq)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>     train_iter, test_iter <span style="color:#666">=</span>  data_loader<span style="color:#666">.</span>load_train_val_test_data(config<span style="color:#666">.</span>test_corpus_file_paths,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>                                           	 config<span style="color:#666">.</span>test_corpus_file_paths)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>     <span style="color:#007020">print</span>(data_loader<span style="color:#666">.</span>PAD_IDX)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>     <span style="color:#007020;font-weight:bold">for</span> src, tgt <span style="color:#007020;font-weight:bold">in</span> train_iter:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>         tgt_input <span style="color:#666">=</span> tgt[:<span style="color:#666">-</span><span style="color:#40a070">1</span>, :]
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>         tgt_out <span style="color:#666">=</span> tgt[<span style="color:#40a070">1</span>:, :]
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>         src_mask, tgt_mask, src_padding_mask, tgt_padding_mask <span style="color:#666">=</span> data_loader<span style="color:#666">.</span>create_mask(src, tgt_input)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>         <span style="color:#007020">print</span>(src)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>         <span style="color:#007020">print</span>(tgt)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>         <span style="color:#007020">print</span>(<span style="color:#4070a0">&#34;src shape：&#34;</span>, src<span style="color:#666">.</span>shape)  <span style="color:#60a0b0;font-style:italic"># [in_tensor_len,batch_size]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>         <span style="color:#007020">print</span>(<span style="color:#4070a0">&#34;tgt shape:&#34;</span>, tgt<span style="color:#666">.</span>shape)  <span style="color:#60a0b0;font-style:italic"># [in_tensor_len,batch_size]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>         <span style="color:#007020">print</span>(<span style="color:#4070a0">&#34;src input shape:&#34;</span>, src<span style="color:#666">.</span>shape)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span>         <span style="color:#007020">print</span>(<span style="color:#4070a0">&#34;src_padding_mask shape (batch_size, src_len): &#34;</span>,src_padding_mask<span style="color:#666">.</span>shape)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span>         <span style="color:#007020">print</span>(<span style="color:#4070a0">&#34;tgt input shape:&#34;</span>, tgt_input<span style="color:#666">.</span>shape)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">21</span>         <span style="color:#007020">print</span>(<span style="color:#4070a0">&#34;tgt_padding_mask shape: (batch_size, tgt_len) &#34;</span>,tgt_padding_mask<span style="color:#666">.</span>shape)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">22</span>         <span style="color:#007020">print</span>(<span style="color:#4070a0">&#34;tgt output shape:&#34;</span>, tgt_out<span style="color:#666">.</span>shape)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">23</span>         <span style="color:#007020">print</span>(<span style="color:#4070a0">&#34;tgt_mask shape (tgt_len,tgt_len): &#34;</span>, tgt_mask<span style="color:#666">.</span>shape)</span></span></code></pre></div><p>在介绍完数据集构建的整个过程后，下面就开始正式进入到翻译模型的构建中。如果对于这部分不是特别理解的话，建议先看第5节中的数据处理流程图进行理解。</p>
+<h2 id="72-对联生成模型">7.2 对联生成模型<a class="anchor" href="#72-%e5%af%b9%e8%81%94%e7%94%9f%e6%88%90%e6%a8%a1%e5%9e%8b">#</a></h2>
+<h3 id="721-网络结构">7.2.1 网络结构<a class="anchor" href="#721-%e7%bd%91%e7%bb%9c%e7%bb%93%e6%9e%84">#</a></h3>
+<p>总体来说，基于Transformer的对联生成模型的网络结构其实就是图7-1所展示的所有部分，只是在前面介绍Transformer网络结构时并没有把Embedding部分的实现给加进去。这是因为对于不同的文本生成模型，其Embedding部分会不一样（例如在本场景中编码器和解码器共用一个TokenEmbedding即可，而在翻译模型中就需要两个），所以将两者进行了拆分。同时，待模型训练完成后，在inference过程中Encoder只需要执行一次，所以在此过程中也需要单独使用Transformer中的Encoder和Decoder。</p>
+<p>首先，需要定义一个名为CoupletModel的类，其前向传播过程代码如下所示：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">CoupletModel</span>(nn<span style="color:#666">.</span>Module):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">__init__</span>(<span style="color:#007020">self</span>, vocab_size,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>                  d_model<span style="color:#666">=</span><span style="color:#40a070">512</span>, nhead<span style="color:#666">=</span><span style="color:#40a070">8</span>, num_encoder_layers<span style="color:#666">=</span><span style="color:#40a070">6</span>,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>                  num_decoder_layers<span style="color:#666">=</span><span style="color:#40a070">6</span>, dim_feedforward<span style="color:#666">=</span><span style="color:#40a070">2048</span>,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>                  dropout<span style="color:#666">=</span><span style="color:#40a070">0.1</span>):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>         <span style="color:#007020">super</span>(CoupletModel, <span style="color:#007020">self</span>)<span style="color:#666">.</span><span style="color:#06287e">__init__</span>()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>my_transformer <span style="color:#666">=</span> MyTransformer(d_model<span style="color:#666">=</span>d_model,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>                                  nhead<span style="color:#666">=</span>nhead,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>                                  num_encoder_layers<span style="color:#666">=</span>num_encoder_layers,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>                                  num_decoder_layers<span style="color:#666">=</span>num_decoder_layers,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>                                  dim_feedforward<span style="color:#666">=</span>dim_feedforward,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>                                  dropout<span style="color:#666">=</span>dropout)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>pos_embedding <span style="color:#666">=</span> PositionalEncoding(d_model<span style="color:#666">=</span>d_model,dropout<span style="color:#666">=</span>dropout)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>token_embedding <span style="color:#666">=</span> TokenEmbedding(vocab_size, d_model)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>classification <span style="color:#666">=</span> nn<span style="color:#666">.</span>Linear(d_model, vocab_size)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">forward</span>(<span style="color:#007020">self</span>, src<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>, tgt<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>, src_mask<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>                 tgt_mask<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>, memory_mask<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>, src_key_padding_mask<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span>                 tgt_key_padding_mask<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>, memory_key_padding_mask<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span>         <span style="color:#4070a0">&#34;&#34;&#34;
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">21         :param src: Encoder的输入 [src_len,batch_size]
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">22         :param tgt: Decoder的输入 [tgt_len,batch_size]
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">23         :param src_key_padding_mask: 用来Mask掉Encoder中不同序列的padding部 分,[batch_size, src_len]
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">24         :param tgt_key_padding_mask: 用来Mask掉Decoder中不同序列的padding部分 [batch_size, tgt_len]
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">25         :memory_key_padding_mask: 用来Mask掉Encoder输出的memory中不同序列的 padding部分 [batch_size, src_len]
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">26         :return:
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">27         &#34;&#34;&#34;</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">28</span>         src_embed<span style="color:#666">=</span><span style="color:#007020">self</span><span style="color:#666">.</span>token_embedding(src) <span style="color:#60a0b0;font-style:italic">#[src_len,batch_size,embed_dim]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">29</span>   	  src_embed<span style="color:#666">=</span><span style="color:#007020">self</span><span style="color:#666">.</span>pos_embedding(src_embed) <span style="color:#60a0b0;font-style:italic">#[src_len,batch_size,embed_dim]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">30</span>         tgt_embed <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>token_embedding(tgt) <span style="color:#60a0b0;font-style:italic"># [tgt_len, batch_size, embed_dim]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">31</span>         tgt_embed <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>pos_embedding(tgt_embed) <span style="color:#60a0b0;font-style:italic">#[tgt_len,batch_size,embed_dim]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">32</span>         outs <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>my_transformer(src<span style="color:#666">=</span>src_embed, tgt<span style="color:#666">=</span>tgt_embed,src_mask<span style="color:#666">=</span>src_mask,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">33</span>                             tgt_mask<span style="color:#666">=</span>tgt_mask,memory_mask<span style="color:#666">=</span>memory_mask,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">34</span>                             src_key_padding_mask<span style="color:#666">=</span>src_key_padding_mask,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">35</span>                             tgt_key_padding_mask<span style="color:#666">=</span>tgt_key_padding_mask,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">36</span>                             memory_key_padding_mask<span style="color:#666">=</span>memory_key_padding_mask)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">37</span>         <span style="color:#60a0b0;font-style:italic"># [tgt_len,batch_size,embed_dim]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">38</span>         logits <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>classification(outs) <span style="color:#60a0b0;font-style:italic"># [tgt_len,batch_size,tgt_vocab_size]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">39</span>         <span style="color:#007020;font-weight:bold">return</span> logits</span></span></code></pre></div><p>在上述代码中，第7~12行便是用来定义一个Transformer结构；第13~15分别用来定义Positional Embedding、Token Embedding和最后的分类器（需要注意的是这里是共用同一个Token Embedding）；第28~38行便是用来执行整个前向传播过程，其中Transformer的整个前向传播过程在第4节中已经介绍过，在这里就不再赘述。</p>
+<p>在定义完logits的前向传播过后，便可以通过如下形式进行使用：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">if</span> <span style="color:#bb60d5">__name__</span> <span style="color:#666">==</span> <span style="color:#4070a0">&#39;__main__&#39;</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     src_len <span style="color:#666">=</span> <span style="color:#40a070">7</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>     batch_size <span style="color:#666">=</span> <span style="color:#40a070">2</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>     dmodel <span style="color:#666">=</span> <span style="color:#40a070">32</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>     tgt_len <span style="color:#666">=</span> <span style="color:#40a070">8</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>     num_head <span style="color:#666">=</span> <span style="color:#40a070">4</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>     src <span style="color:#666">=</span> torch<span style="color:#666">.</span>tensor([[<span style="color:#40a070">4</span>, <span style="color:#40a070">3</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">6</span>, <span style="color:#40a070">0</span>, <span style="color:#40a070">0</span>, <span style="color:#40a070">0</span>], <span style="color:#60a0b0;font-style:italic"># 转换成 [src_len, batch_size]</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>                         [<span style="color:#40a070">5</span>, <span style="color:#40a070">7</span>, <span style="color:#40a070">8</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">4</span>, <span style="color:#40a070">0</span>, <span style="color:#40a070">0</span>]])<span style="color:#666">.</span>transpose(<span style="color:#40a070">0</span>, <span style="color:#40a070">1</span>)  
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>     src_key_padding_mask <span style="color:#666">=</span> torch<span style="color:#666">.</span>tensor([[<span style="color:#007020;font-weight:bold">True</span>, <span style="color:#007020;font-weight:bold">True</span>, <span style="color:#007020;font-weight:bold">True</span>, <span style="color:#007020;font-weight:bold">True</span>, <span style="color:#007020;font-weight:bold">False</span>, <span style="color:#007020;font-weight:bold">False</span>, <span style="color:#007020;font-weight:bold">False</span>],
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>                          [<span style="color:#007020;font-weight:bold">True</span>, <span style="color:#007020;font-weight:bold">True</span>, <span style="color:#007020;font-weight:bold">True</span>, <span style="color:#007020;font-weight:bold">True</span>, <span style="color:#007020;font-weight:bold">True</span>, <span style="color:#007020;font-weight:bold">False</span>, <span style="color:#007020;font-weight:bold">False</span>]])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>     tgt <span style="color:#666">=</span> torch<span style="color:#666">.</span>tensor([[<span style="color:#40a070">1</span>, <span style="color:#40a070">3</span>, <span style="color:#40a070">3</span>, <span style="color:#40a070">5</span>, <span style="color:#40a070">4</span>, <span style="color:#40a070">3</span>, <span style="color:#40a070">0</span>, <span style="color:#40a070">0</span>],
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>                             [<span style="color:#40a070">1</span>, <span style="color:#40a070">6</span>, <span style="color:#40a070">8</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">9</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">0</span>, <span style="color:#40a070">0</span>]])<span style="color:#666">.</span>transpose(<span style="color:#40a070">0</span>, <span style="color:#40a070">1</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>     tgt_key_padding_mask <span style="color:#666">=</span> torch<span style="color:#666">.</span>tensor([[<span style="color:#007020;font-weight:bold">True</span>, <span style="color:#007020;font-weight:bold">True</span>, <span style="color:#007020;font-weight:bold">True</span>, <span style="color:#007020;font-weight:bold">True</span>, <span style="color:#007020;font-weight:bold">True</span>, <span style="color:#007020;font-weight:bold">True</span>, <span style="color:#007020;font-weight:bold">False</span>, <span style="color:#007020;font-weight:bold">False</span>],
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>                         [<span style="color:#007020;font-weight:bold">True</span>, <span style="color:#007020;font-weight:bold">True</span>, <span style="color:#007020;font-weight:bold">True</span>, <span style="color:#007020;font-weight:bold">True</span>, <span style="color:#007020;font-weight:bold">True</span>, <span style="color:#007020;font-weight:bold">True</span>, <span style="color:#007020;font-weight:bold">False</span>, <span style="color:#007020;font-weight:bold">False</span>]])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>     trans_model <span style="color:#666">=</span> CoupletModel(vocab_size<span style="color:#666">=</span><span style="color:#40a070">10</span>, d_model<span style="color:#666">=</span>dmodel,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>                                nhead<span style="color:#666">=</span>num_head, num_encoder_layers<span style="color:#666">=</span><span style="color:#40a070">6</span>,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>                                num_decoder_layers<span style="color:#666">=</span><span style="color:#40a070">6</span>, dim_feedforward<span style="color:#666">=</span><span style="color:#40a070">30</span>,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>                                dropout<span style="color:#666">=</span><span style="color:#40a070">0.1</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span>     tgt_mask <span style="color:#666">=</span> trans_model<span style="color:#666">.</span>my_transformer<span style="color:#666">.</span>generate_square_subsequent_mask(tgt_len)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span>     logits <span style="color:#666">=</span> trans_model(src, tgt<span style="color:#666">=</span>tgt, tgt_mask<span style="color:#666">=</span>tgt_mask,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">21</span>                          src_key_padding_mask<span style="color:#666">=</span>src_key_padding_mask,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">22</span>                          tgt_key_padding_mask<span style="color:#666">=</span>tgt_key_padding_mask,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">23</span>                          memory_key_padding_mask<span style="color:#666">=</span>src_key_padding_mask)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">24</span>     <span style="color:#007020">print</span>(logits<span style="color:#666">.</span>shape)</span></span></code></pre></div><p>接着，我们需要再定义一个Encoder和Decoder在inference中进行使用，代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">encoder</span>(<span style="color:#007020">self</span>, src):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>         src_embed <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>token_embedding(src)<span style="color:#60a0b0;font-style:italic">#[src_len,batch_size,embed_dim]</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>         src_embed <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>pos_embedding(src_embed)<span style="color:#60a0b0;font-style:italic">#[src_len,batch_size,embed_dim]</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>         memory <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>my_transformer<span style="color:#666">.</span>encoder(src_embed)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>         <span style="color:#007020;font-weight:bold">return</span> memory <span style="color:#60a0b0;font-style:italic"># [src_len, batch_size, embed_dim]</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">decoder</span>(<span style="color:#007020">self</span>, tgt, memory, tgt_mask):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>         tgt_embed <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>tgt_token_embedding(tgt) <span style="color:#60a0b0;font-style:italic">#[tgt_len,batch_size,embed_dim]</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>         tgt_embed <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>pos_embedding(tgt_embed) <span style="color:#60a0b0;font-style:italic">#[tgt_len,batch_size,embed_dim]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>         outs <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>my_transformer<span style="color:#666">.</span>decoder(tgt_embed, memory<span style="color:#666">=</span>memory,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>                          tgt_mask<span style="color:#666">=</span>tgt_mask)  <span style="color:#60a0b0;font-style:italic"># [tgt_len,batch_size,embed_dim]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>         <span style="color:#007020;font-weight:bold">return</span> outs</span></span></code></pre></div><p>在上述代码中，第1~5行用于在inference时对输入序列进行编码并得到memory（只需要执行一次）；第7~11行用于根据memory和当前解码时刻的输入对输出进行预测，需要循环执行多次，这部分内容详见7.2.3模型预测部分。</p>
+<h3 id="722-模型训练">7.2.2 模型训练<a class="anchor" href="#722-%e6%a8%a1%e5%9e%8b%e8%ae%ad%e7%bb%83">#</a></h3>
+<p>在定义完成整个对联生成模型的网络结构后下面就可以开始训练模型了。由于这部分代码较长，所以下面依旧以分块的形式进行介绍：</p>
+<p><strong>第1步：载入数据集</strong></p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">train_model</span>(config):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>     data_loader <span style="color:#666">=</span> LoadCoupletDataset(config<span style="color:#666">.</span>train_corpus_file_paths,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>                                      batch_size<span style="color:#666">=</span>config<span style="color:#666">.</span>batch_size,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span>                                      tokenizer<span style="color:#666">=</span>my_tokenizer,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">5</span>                                      min_freq<span style="color:#666">=</span>config<span style="color:#666">.</span>min_freq)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">6</span>     train_iter, test_iter <span style="color:#666">=</span> data_loader<span style="color:#666">.</span>load_train_val_test_data(
+</span></span><span style="display:flex;"><span><span style="color:#40a070">7</span>                config<span style="color:#666">.</span>train_corpus_file_paths,config<span style="color:#666">.</span>test_corpus_file_paths)</span></span></code></pre></div><p>首先我们可以根据前面的介绍，通过类LoadCoupletDataset来载入数据集，其中config中定义了模型所涉及到的所有配置参数。</p>
+<p><strong>第2步：定义模型并初始化权重</strong></p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span>     couplet_model <span style="color:#666">=</span> CoupletModel(vocab_size<span style="color:#666">=</span><span style="color:#007020">len</span>(data_loader<span style="color:#666">.</span>vocab),
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>                              d_model<span style="color:#666">=</span>config<span style="color:#666">.</span>d_model,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>                              nhead<span style="color:#666">=</span>config<span style="color:#666">.</span>num_head,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>                              num_encoder_layers<span style="color:#666">=</span>config<span style="color:#666">.</span>num_encoder_layers,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>                              num_decoder_layers<span style="color:#666">=</span>config<span style="color:#666">.</span>num_decoder_layers,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>                              dim_feedforward<span style="color:#666">=</span>config<span style="color:#666">.</span>dim_feedforward,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>                              dropout<span style="color:#666">=</span>config<span style="color:#666">.</span>dropout)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>     <span style="color:#007020;font-weight:bold">for</span> p <span style="color:#007020;font-weight:bold">in</span> couplet_model<span style="color:#666">.</span>parameters():
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>         <span style="color:#007020;font-weight:bold">if</span> p<span style="color:#666">.</span>dim() <span style="color:#666">&gt;</span> <span style="color:#40a070">1</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>             nn<span style="color:#666">.</span>init<span style="color:#666">.</span>xavier_uniform_(p)</span></span></code></pre></div><p>在载入数据后，便可以定义模型CoupletModel，并根据相关参数对其进行实例化；同时，可以对整个模型中的所有参数进行初始化操作。</p>
+<p><strong>第3步：定义损失学习率与优化器</strong></p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span>     loss_fn <span style="color:#666">=</span> torch<span style="color:#666">.</span>nn<span style="color:#666">.</span>CrossEntropyLoss(ignore_index<span style="color:#666">=</span>data_loader<span style="color:#666">.</span>PAD_IDX)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>     learning_rate <span style="color:#666">=</span> CustomSchedule(config<span style="color:#666">.</span>d_model)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>     optimizer <span style="color:#666">=</span> torch<span style="color:#666">.</span>optim<span style="color:#666">.</span>Adam(couplet_model<span style="color:#666">.</span>parameters(),lr<span style="color:#666">=</span><span style="color:#40a070">0.</span>,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span>                                  betas<span style="color:#666">=</span>(config<span style="color:#666">.</span>beta1, config<span style="color:#666">.</span>beta2),                     
+</span></span><span style="display:flex;"><span><span style="color:#40a070">5</span>                                  eps<span style="color:#666">=</span>config<span style="color:#666">.</span>epsilon)</span></span></code></pre></div><p>在上述代码中，第1行是定义交叉熵损失函数，并同时指定需要忽略的索引ignore_index部分的损失。因为根据tgt_output可知，有些位置上的标签值其实是Padding后的结果，因此在计算损失的时候需要将这些位置给忽略掉。第2行代码则是论文中所提出来的动态学习率计算过程，具体在第5节中已经介绍过来，这里就不再赘述。</p>
+<p><strong>第4步：开始训练</strong></p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span>     <span style="color:#007020;font-weight:bold">for</span> epoch <span style="color:#007020;font-weight:bold">in</span> <span style="color:#007020">range</span>(config<span style="color:#666">.</span>epochs):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>         losses <span style="color:#666">=</span> <span style="color:#40a070">0</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>         start_time <span style="color:#666">=</span> time<span style="color:#666">.</span>time()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>         <span style="color:#007020;font-weight:bold">for</span> idx, (src, tgt) <span style="color:#007020;font-weight:bold">in</span> <span style="color:#007020">enumerate</span>(train_iter):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>             src <span style="color:#666">=</span> src<span style="color:#666">.</span>to(config<span style="color:#666">.</span>device)  <span style="color:#60a0b0;font-style:italic"># [src_len, batch_size]</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>             tgt <span style="color:#666">=</span> tgt<span style="color:#666">.</span>to(config<span style="color:#666">.</span>device)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>             tgt_input <span style="color:#666">=</span> tgt[:<span style="color:#666">-</span><span style="color:#40a070">1</span>, :]  <span style="color:#60a0b0;font-style:italic"># 解码部分的输入, [tgt_len,batch_size]</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>             src_mask, tgt_mask, src_padding_mask, tgt_padding_mask \
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>                     <span style="color:#666">=</span> data_loader<span style="color:#666">.</span>create_mask(src, tgt_input, config<span style="color:#666">.</span>device)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>             logits <span style="color:#666">=</span> couplet_model(
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>                 src<span style="color:#666">=</span>src,  <span style="color:#60a0b0;font-style:italic"># Encoder的token序列输入，[src_len,batch_size]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>                 tgt<span style="color:#666">=</span>tgt_input,  <span style="color:#60a0b0;font-style:italic"># Decoder的token序列输入,[tgt_len,batch_size]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>                 src_mask<span style="color:#666">=</span>src_mask, <span style="color:#60a0b0;font-style:italic"># Encoder的注意力Mask输入，这部分其实对于Encoder来说是没有用的</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>                 tgt_mask<span style="color:#666">=</span>tgt_mask, <span style="color:#60a0b0;font-style:italic"># Decoder的注意力Mask输入，</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>                 <span style="color:#60a0b0;font-style:italic"># 用于掩盖当前position之后的position[tgt_len,tgt_len]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>                 src_key_padding_mask<span style="color:#666">=</span>src_padding_mask,   <span style="color:#60a0b0;font-style:italic"># 用于mask掉Encoder的Token序列中的padding部分</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>                 tgt_key_padding_mask<span style="color:#666">=</span>tgt_padding_mask,  <span style="color:#60a0b0;font-style:italic"># 用于mask掉Decoder的Token序列中的padding部分</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>                 memory_key_padding_mask<span style="color:#666">=</span>src_padding_mask) 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span>             <span style="color:#60a0b0;font-style:italic"># logits 输出shape为[tgt_len,batch_size,tgt_vocab_size]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span>             optimizer<span style="color:#666">.</span>zero_grad()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">21</span>             tgt_out <span style="color:#666">=</span> tgt[<span style="color:#40a070">1</span>:, :] <span style="color:#60a0b0;font-style:italic">#解码部分的真实值  shape: [tgt_len,batch_size]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">22</span>             loss <span style="color:#666">=</span> loss_fn(logits<span style="color:#666">.</span>reshape(<span style="color:#666">-</span><span style="color:#40a070">1</span>, logits<span style="color:#666">.</span>shape[<span style="color:#666">-</span><span style="color:#40a070">1</span>]),tgt_out<span style="color:#666">.</span>reshape(<span style="color:#666">-</span><span style="color:#40a070">1</span>))
+</span></span><span style="display:flex;"><span><span style="color:#40a070">23</span>             <span style="color:#60a0b0;font-style:italic"># [tgt_len*batch_size, tgt_vocab_size] with [tgt_len*batch_size,]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">24</span>             loss<span style="color:#666">.</span>backward()</span></span></code></pre></div><p>在上述代码中，第5~9行是用来得到模型各个部分的输入；第10~18行是计算模型整个前向传播的过程；第20~24行则是执行损失计算与反向传播。</p>
+<p>以下便是模型训练过程中的输出：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#666">--</span> INFO: Epoch: <span style="color:#40a070">0</span>, Batch[<span style="color:#40a070">29</span><span style="color:#666">/</span><span style="color:#40a070">3010</span>], Train loss : <span style="color:#40a070">8.965</span>, Train acc: <span style="color:#40a070">0.094</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span> <span style="color:#666">--</span> INFO: Epoch: <span style="color:#40a070">0</span>, Batch[<span style="color:#40a070">59</span><span style="color:#666">/</span><span style="color:#40a070">3010</span>], Train loss : <span style="color:#40a070">8.618</span>, Train acc: <span style="color:#40a070">0.098</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span> <span style="color:#666">--</span> INFO: Epoch: <span style="color:#40a070">0</span>, Batch[<span style="color:#40a070">89</span><span style="color:#666">/</span><span style="color:#40a070">3010</span>], Train loss : <span style="color:#40a070">8.366</span>, Train acc: <span style="color:#40a070">0.099</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span> <span style="color:#666">--</span> INFO: Epoch: <span style="color:#40a070">0</span>, Batch[<span style="color:#40a070">119</span><span style="color:#666">/</span><span style="color:#40a070">3010</span>], Train loss : <span style="color:#40a070">8.137</span>, Train acc: <span style="color:#40a070">0.109</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">5</span> <span style="color:#666">...</span></span></span></code></pre></div><h3 id="723-模型预测">7.2.3 模型预测<a class="anchor" href="#723-%e6%a8%a1%e5%9e%8b%e9%a2%84%e6%b5%8b">#</a></h3>
+<p>在介绍完模型的训练过程后接下来就来看模型的预测部分。生成模型的预测部分不像普通的分类任务只需要将网络最后的输出做argmax操作即可，生成模型在预测过程中往往需要按时刻一步步进行来进行。因此，下面我们这里定义一个couplet函数来执行这一过程，具体代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">couplet</span>(model, src, data_loader, config):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     vocab <span style="color:#666">=</span> data_loader<span style="color:#666">.</span>vocab
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>     tokenizer <span style="color:#666">=</span> data_loader<span style="color:#666">.</span>tokenizer
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>     model<span style="color:#666">.</span>eval()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>     tokens <span style="color:#666">=</span> [vocab<span style="color:#666">.</span>stoi[tok] <span style="color:#007020;font-weight:bold">for</span> tok <span style="color:#007020;font-weight:bold">in</span> tokenizer(src)]  <span style="color:#60a0b0;font-style:italic"># 构造一个样本</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>     num_tokens <span style="color:#666">=</span> <span style="color:#007020">len</span>(tokens)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>     src <span style="color:#666">=</span> (torch<span style="color:#666">.</span>LongTensor(tokens)<span style="color:#666">.</span>reshape(num_tokens, <span style="color:#40a070">1</span>)) <span style="color:#60a0b0;font-style:italic"># 将src_len 作为第一个维度</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>     tgt_tokens <span style="color:#666">=</span> greedy_decode(model, src, max_len<span style="color:#666">=</span>num_tokens <span style="color:#666">+</span> <span style="color:#40a070">5</span>,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>                    start_symbol<span style="color:#666">=</span>data_loader<span style="color:#666">.</span>BOS_IDX,config<span style="color:#666">=</span>config,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>                    data_loader<span style="color:#666">=</span>data_loader)<span style="color:#666">.</span>flatten()  <span style="color:#60a0b0;font-style:italic"># 解码的预测结果</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>     <span style="color:#007020;font-weight:bold">return</span> <span style="color:#4070a0">&#34;&#34;</span><span style="color:#666">.</span>join([vocab<span style="color:#666">.</span>itos[tok] <span style="color:#007020;font-weight:bold">for</span> tok <span style="color:#007020;font-weight:bold">in</span> tgt_tokens])<span style="color:#666">.</span>replace(<span style="color:#4070a0">&#34;&lt;bos&gt;&#34;</span>,       <span style="color:#4070a0">&#34;&#34;</span>)<span style="color:#666">.</span>replace(<span style="color:#4070a0">&#34;&lt;eos&gt;&#34;</span>, <span style="color:#4070a0">&#34;&#34;</span>)</span></span></code></pre></div><p>在上述代码中，第5行是将待翻译的源序列进行序列化操作；第7~10行则是通过函数greedy_decode函数来对输入进行解码；第11行则是将最后解码后的结果由Token序列在转换成实际的目标语言。同时，greedy_decode函数实现如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">greedy_decode</span>(model, src, max_len, start_symbol, config, data_loader):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     src <span style="color:#666">=</span> src<span style="color:#666">.</span>to(config<span style="color:#666">.</span>device)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>     memory <span style="color:#666">=</span> model<span style="color:#666">.</span>encoder(src)  <span style="color:#60a0b0;font-style:italic"># 对输入的Token序列进行解码翻译</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>     ys <span style="color:#666">=</span> torch<span style="color:#666">.</span>ones(<span style="color:#40a070">1</span>, <span style="color:#40a070">1</span>)<span style="color:#666">.</span>fill_(start_symbol)<span style="color:#666">.</span> \
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>         	<span style="color:#007020">type</span>(torch<span style="color:#666">.</span>long)<span style="color:#666">.</span>to(config<span style="color:#666">.</span>device)  <span style="color:#60a0b0;font-style:italic"># 解码的第一个输入，起始符号</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>     <span style="color:#007020;font-weight:bold">for</span> i <span style="color:#007020;font-weight:bold">in</span> <span style="color:#007020">range</span>(max_len <span style="color:#666">-</span> <span style="color:#40a070">1</span>):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>         memory <span style="color:#666">=</span> memory<span style="color:#666">.</span>to(config<span style="color:#666">.</span>device)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>         out <span style="color:#666">=</span> model<span style="color:#666">.</span>decoder(ys, memory)  <span style="color:#60a0b0;font-style:italic"># [tgt_len,tgt_vocab_size]</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>         out <span style="color:#666">=</span> out<span style="color:#666">.</span>transpose(<span style="color:#40a070">0</span>, <span style="color:#40a070">1</span>)  <span style="color:#60a0b0;font-style:italic"># [tgt_vocab_size, tgt_len]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>         prob <span style="color:#666">=</span> model<span style="color:#666">.</span>classification(out[:, <span style="color:#666">-</span><span style="color:#40a070">1</span>])  <span style="color:#60a0b0;font-style:italic"># 只对对预测的下一个词进行分类</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>         _, next_word <span style="color:#666">=</span> torch<span style="color:#666">.</span>max(prob, dim<span style="color:#666">=</span><span style="color:#40a070">1</span>)  <span style="color:#60a0b0;font-style:italic"># 选择概率最大者</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>         next_word <span style="color:#666">=</span> next_word<span style="color:#666">.</span>item()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>         ys <span style="color:#666">=</span> torch<span style="color:#666">.</span>cat([ys, torch<span style="color:#666">.</span>ones(<span style="color:#40a070">1</span>, <span style="color:#40a070">1</span>)<span style="color:#666">.</span>type_as(src<span style="color:#666">.</span>data)<span style="color:#666">.</span>fill_(next_word)], dim<span style="color:#666">=</span><span style="color:#40a070">0</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>         <span style="color:#60a0b0;font-style:italic"># 将当前时刻解码的预测输出结果，同之前所有的结果堆叠作为输入再去预测下一个词。</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>         <span style="color:#007020;font-weight:bold">if</span> next_word <span style="color:#666">==</span> data_loader<span style="color:#666">.</span>EOS_IDX:  <span style="color:#60a0b0;font-style:italic"># 如果当前时刻的预测输出为结束标志，则跳出循环结束预测。</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>             <span style="color:#007020;font-weight:bold">break</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>     <span style="color:#007020;font-weight:bold">return</span> ys</span></span></code></pre></div><p>在上述代码中，第3行是将源序列输入到Transformer的编码器中进行编码并得到Memory；第4~5行是初始化解码阶段输入的第1个时刻的，在这里也就是 <sos>；第6~17行则是整个循环解码过程，在下一个时刻为EOS_IDX或者达到最大长度后停止；第8行是根据memory以及当前时刻的输入对当前时刻的输出进行解码；第10~12行则是分类得到当前时刻的解码输出结果；第13则是将当前时刻的解码输出结果头当前时刻之前所有的输入进行拼接，以此再对下一个时刻的输出进行预测。</p>
+<p>最后，我们只需要调用如下函数便可以完成对原始输入上联的下联生成任务：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">do_couplet</span>(srcs, config):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     data_loader <span style="color:#666">=</span> LoadCoupletDataset(config<span style="color:#666">.</span>train_corpus_file_paths,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>                                      batch_size<span style="color:#666">=</span>config<span style="color:#666">.</span>batch_size,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>                                      tokenizer<span style="color:#666">=</span>my_tokenizer,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>                                      min_freq<span style="color:#666">=</span>config<span style="color:#666">.</span>min_freq)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>     couplet_model <span style="color:#666">=</span> CoupletModel(vocab_size<span style="color:#666">=</span><span style="color:#007020">len</span>(data_loader<span style="color:#666">.</span>vocab),
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>                               d_model<span style="color:#666">=</span>config<span style="color:#666">.</span>d_model,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>                               nhead<span style="color:#666">=</span>config<span style="color:#666">.</span>num_head,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>                               num_encoder_layers<span style="color:#666">=</span>config<span style="color:#666">.</span>num_encoder_layers,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>                               num_decoder_layers<span style="color:#666">=</span>config<span style="color:#666">.</span>num_decoder_layers,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>                               dim_feedforward<span style="color:#666">=</span>config<span style="color:#666">.</span>dim_feedforward,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>                               dropout<span style="color:#666">=</span>config<span style="color:#666">.</span>dropout)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>     couplet_model <span style="color:#666">=</span> couplet_model<span style="color:#666">.</span>to(config<span style="color:#666">.</span>device)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>     loaded_paras <span style="color:#666">=</span> torch<span style="color:#666">.</span>load(config<span style="color:#666">.</span>model_save_dir <span style="color:#666">+</span> <span style="color:#4070a0">&#39;/model.pkl&#39;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>     couplet_model<span style="color:#666">.</span>load_state_dict(loaded_paras)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>     results <span style="color:#666">=</span> []
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>     <span style="color:#007020;font-weight:bold">for</span> src <span style="color:#007020;font-weight:bold">in</span> srcs:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>         r <span style="color:#666">=</span> couplet(couplet_model, src, data_loader, config)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span>         results<span style="color:#666">.</span>append(r)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span>     <span style="color:#007020;font-weight:bold">return</span> results
+</span></span><span style="display:flex;"><span><span style="color:#40a070">21</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">22</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">23</span> <span style="color:#007020;font-weight:bold">if</span> <span style="color:#bb60d5">__name__</span> <span style="color:#666">==</span> <span style="color:#4070a0">&#39;__main__&#39;</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">24</span>     srcs <span style="color:#666">=</span> [<span style="color:#4070a0">&#34;晚风摇树树还挺&#34;</span>,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">25</span>             <span style="color:#4070a0">&#34;忽忽几晨昏，离别间之，疾病间之，不及终年同静好&#34;</span>,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">26</span>             <span style="color:#4070a0">&#34;风声、雨声、读书声，声声入耳&#34;</span>,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">27</span>             <span style="color:#4070a0">&#34;上海自来水来自海上&#34;</span>]
+</span></span><span style="display:flex;"><span><span style="color:#40a070">28</span>     tgts <span style="color:#666">=</span> [<span style="color:#4070a0">&#34;晨露润花花更红&#34;</span>,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">29</span>             <span style="color:#4070a0">&#34;茕茕小儿女，孱羸若此，娇憨若此，更烦二老费精神&#34;</span>,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">30</span>             <span style="color:#4070a0">&#34;家事、国事、天下事，事事关心&#34;</span>,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">31</span>             <span style="color:#4070a0">&#34;&#34;</span>]
+</span></span><span style="display:flex;"><span><span style="color:#40a070">32</span>     config <span style="color:#666">=</span> Config()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">33</span>     srcs <span style="color:#666">=</span> [<span style="color:#4070a0">&#34; &#34;</span><span style="color:#666">.</span>join(src) <span style="color:#007020;font-weight:bold">for</span> src <span style="color:#007020;font-weight:bold">in</span> srcs]
+</span></span><span style="display:flex;"><span><span style="color:#40a070">34</span>     results <span style="color:#666">=</span> do_couplet(srcs, config)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">35</span>     <span style="color:#007020;font-weight:bold">for</span> src, tgt, r <span style="color:#007020;font-weight:bold">in</span> <span style="color:#007020">zip</span>(srcs, tgts, results):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">36</span>         <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;上联：</span><span style="color:#70a0d0">{</span><span style="color:#4070a0">&#39;&#39;</span><span style="color:#666">.</span>join(src<span style="color:#666">.</span>split())<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">37</span>         <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34; AI：</span><span style="color:#70a0d0">{</span>r<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">38</span>         <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;下联：</span><span style="color:#70a0d0">{</span>tgts<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">39</span>         <span style="color:#007020">print</span>(<span style="color:#4070a0">&#34;=======&#34;</span>)</span></span></code></pre></div><p>在上述代码中，第6~15行是定义网络结构，以及恢复本地保存的网络权重；第16~20行则是开始执行多个上联的下联生成任务；第34-39行为生成示例，其输出结果为：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> 上联<span style="">：</span>晚风摇树树还挺
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>  A I<span style="">：</span>朝露沾花花更红
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span> 下联<span style="">：</span>晨露润花花更红
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span> 上联<span style="">：</span>忽忽几晨昏<span style="">，</span>离别间之<span style="">，</span>疾病间之<span style="">，</span>不及终年同静好
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>  A I<span style="">：</span>茕茕小儿女<span style="">，</span>孱羸若此<span style="">，</span>娇憨若此<span style="">，</span>更烦二老费精神
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span> 下联<span style="">：</span>茕茕小儿女<span style="">，</span>孱羸若此<span style="">，</span>娇憨若此<span style="">，</span>更烦二老费精神
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span> 上联<span style="">：</span>风声<span style="">、</span>雨声<span style="">、</span>读书声<span style="">，</span>声声入耳
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>  A I<span style="">：</span>山色<span style="">、</span>水色<span style="">、</span>烟霞色<span style="">，</span>色色宜人
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span> 下联<span style="">：</span>家事<span style="">、</span>国事<span style="">、</span>天下事<span style="">，</span>事事关心
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span> 上联<span style="">：</span>上海自来水来自海上
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>  A I<span style="">：</span>中山落叶松叶落山中
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>  
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span> 上联<span style="">：</span>月来客栈<span style="">，</span>迎五湖好友<span style="">，</span>谈百态人生<span style="">。</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>  A I<span style="">：</span>花发老舍<span style="">，</span>请四海嘉宾<span style="">，</span>喝一杯清茶<span style="">。</span></span></span></code></pre></div><p>以上完整代码可参见 <a href="https://github.com/mlwithme/TransformerCouplet">https://github.com/mlwithme/TransformerCouplet</a>。</p>
+<div class="book-page-pv text-small" id="busuanzi_container_page_pv">
+      <span class="book-page-pv-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" focusable="false">
+          <path d="M1.5 12s3.9-6.5 10.5-6.5S22.5 12 22.5 12s-3.9 6.5-10.5 6.5S1.5 12 1.5 12Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7"/>
+          <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.7"/>
+        </svg>
+      </span>
+      <span class="book-page-pv-label">阅读</span>
+      <span class="book-page-pv-value" id="busuanzi_value_page_pv">--</span>
+    </div><section class="book-article-index book-related-articles" aria-labelledby="related-articles-title">
+    <h2 id="related-articles-title">相关阅读</h2>
+    <div class="book-article-grid"><article class="book-article-card book-related-article-card">
+              <h3 class="book-article-card-title">
+                <a href="/tutorials/transformer/classification/">第6节 基于Transformer的分类模型</a>
+              </h3><p class="book-article-card-desc">本文是 Transformer 精读系列第6讲，从零用 Transformer Encoder 搭建 AG_News 新闻文本分类模型。系统讲清分类任务只需 Encoder 不需要 Decoder 的原因、Encoder 输出张量的池化策略 …</p></article><article class="book-article-card book-related-article-card">
+              <h3 class="book-article-card-title">
+                <a href="/tutorials/transformer/translation/">第5节 基于Transformer 的翻译模型</a>
+              </h3><p class="book-article-card-desc">本文是 Transformer 精读系列第5讲，从零开始搭建一个英语到德语的机器翻译模型。以 Multi30K 平行语料为对象，详细讲清 6 步数据预处理流程（tokenize、词表、序列化、padding、`/` 与 …</p></article><article class="book-article-card book-related-article-card">
+              <h3 class="book-article-card-title">
+                <a href="/tutorials/transformer/transformer-implement/">第4节 Transformer 的实现过程</a>
+              </h3><p class="book-article-card-desc">本文是 Transformer 精读系列第4讲，全程使用 PyTorch 一步步实现完整的 Transformer 模型，覆盖 Token Embedding、正弦 Positional …</p></article><article class="book-article-card book-related-article-card">
+              <h3 class="book-article-card-title">
+                <a href="/tutorials/transformer/multi-head-attention/">第1节 多头注意力机制原理</a>
+              </h3><p class="book-article-card-desc">本文是《Attention Is All You Need》精读系列第1讲，从 RNN 串行瓶颈出发讲清 Transformer 为什么必须引入自注意力，再用图解与公式拆解 Scaled Dot-Product …</p></article><article class="book-article-card book-related-article-card">
+              <h3 class="book-article-card-title">
+                <a href="/tutorials/transformer/positional-encoding/">第2节 位置编码与编码解码过程</a>
+              </h3><p class="book-article-card-desc">本文是 Transformer 精读系列第2讲，用图解与对比示例讲清 Transformer 为什么必须加入位置编码，并拆解正弦 Positional Encoding 公式与高低频维度直觉。随后通过可视化方式演示 …</p></article><article class="book-article-card book-related-article-card">
+              <h3 class="book-article-card-title">
+                <a href="/tutorials/transformer/self-attention/">第3节 网络结构与自注意力实现</a>
+              </h3><p class="book-article-card-desc">本文是 Transformer 精读系列第3讲，详细讲解如何用 PyTorch 一步步实现 MultiHeadAttention 模块。先回顾多层 Transformer 与单层 Encoder-Decoder 结构，再系统拆解自注意力实现 …</p></article></div>
+  </section></article>
+ 
+      
+
+
+      <footer class="book-footer">
+        
+  <div class="flex flex-wrap justify-between">
+
+<div>
+
+</div>
+
+<div>
+
+</div>
+
+</div>
+
+
+
+ 
+        
+  
+  <div class="book-comments"><div class="giscus"></div>
+<script src="https://giscus.app/client.js"
+        data-repo="mlwithme/mlwithme.github.io"
+        data-repo-id="R_kgDOTBt94Q"
+        data-category="Announcements"
+        data-category-id="DIC_kwDOTBt94c4C_21V"
+        data-mapping="pathname"
+        data-strict="1"
+        data-reactions-enabled="1"
+        data-emit-metadata="0"
+        data-input-position="top"
+        data-theme="preferred_color_scheme"
+        data-lang="zh-CN"
+        data-loading="lazy"
+        crossorigin="anonymous"
+        async>
+</script>
+</div>
+  
+ 
+        
+  <link rel="stylesheet" href="https://mlwithme.github.io/katex/katex.min.css" />
+  <script defer src="https://mlwithme.github.io/katex/katex.min.js"></script>
+  <script defer src="https://mlwithme.github.io/katex/auto-render.min.js"></script>
+  
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        if (window.renderMathInElement) {
+          renderMathInElement(
+            document.querySelector(".book-page"),
+            Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
+          );
+        }
+      });
+    </script>
+  
+
+        
+  
+ 
+        
+  
+    <script>(function(){document.querySelectorAll("pre:has(code)").forEach(e=>{e.addEventListener("click",e.focus),e.addEventListener("copy",function(t){if(t.preventDefault(),navigator.clipboard){const t=window.getSelection().toString()||e.textContent;navigator.clipboard.writeText(t)}})})})()</script>
+  
+
+      </footer>
+
+      <label for="menu-control" class="hidden book-menu-overlay"></label>
+    </div>
+
+    
+  
+  <aside class="book-toc">
+    <div class="book-toc-content">
+      
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#71--数据预处理">7.1  数据预处理</a>
+      <ul>
+        <li><a href="#711-语料介绍">7.1.1 语料介绍</a></li>
+        <li><a href="#712-数据集构建">7.1.2 数据集构建</a></li>
+      </ul>
+    </li>
+    <li><a href="#72-对联生成模型">7.2 对联生成模型</a>
+      <ul>
+        <li><a href="#721-网络结构">7.2.1 网络结构</a></li>
+        <li><a href="#722-模型训练">7.2.2 模型训练</a></li>
+        <li><a href="#723-模型预测">7.2.3 模型预测</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+
+
+
+
+    </div>
+  </aside>
+  
+ 
+  </main>
+
+  <button
+  type="button"
+  class="book-back-to-top"
+  aria-label="回到顶部"
+  title="回到顶部"
+>
+  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <path
+      d="M12 5.5l-5.25 5.25 1.5 1.5 2.7-2.7V18.5h2.1V9.55l2.7 2.7 1.5-1.5L12 5.5z"
+      fill="currentColor"
+    ></path>
+  </svg>
+</button>
+
+<script>
+  (function () {
+    var button = document.querySelector(".book-back-to-top");
+    if (!button) {
+      return;
+    }
+
+    var toggleButton = function () {
+      if (window.scrollY > 360) {
+        button.classList.add("is-visible");
+      } else {
+        button.classList.remove("is-visible");
+      }
+    };
+
+    button.addEventListener("click", function () {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+
+    toggleButton();
+    window.addEventListener("scroll", toggleButton, { passive: true });
+  })();
+</script>
+
+<div class="book-floating-toolbox" data-book-floating-toolbox>
+  <ul
+    class="book-floating-toolbox__items"
+    id="book-floating-toolbox-items"
+    role="menu"
+    aria-label="工具箱"
+    hidden
+  >
+    <li class="book-floating-toolbox__item" role="none" style="--book-toolbox-index: 0; --book-toolbox-count: 3;">
+      <a
+        class="book-floating-toolbox__action"
+        role="menuitem"
+        href="/glossary/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="术语百科"
+      >
+        <span class="book-floating-toolbox__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path
+              d="M5 4.5h11.5a2.5 2.5 0 0 1 2.5 2.5V20l-4-2.5L11 20l-4-2.5L3 20V7a2.5 2.5 0 0 1 2-2.5z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linejoin="round"
+            ></path>
+            <path
+              d="M7.5 9.5h7M7.5 12.5h5"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+            ></path>
+          </svg>
+        </span>
+      </a>
+      <span class="book-floating-toolbox__tip" aria-hidden="true">术语百科</span>
+    </li>
+    <li class="book-floating-toolbox__item" role="none" style="--book-toolbox-index: 1; --book-toolbox-count: 3;">
+      <a
+        class="book-floating-toolbox__action"
+        role="menuitem"
+        href="/code-templates/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="代码模板"
+      >
+        <span class="book-floating-toolbox__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path
+              d="M8.5 7.5 4 12l4.5 4.5M15.5 7.5 20 12l-4.5 4.5M13.5 5l-3 14"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            ></path>
+          </svg>
+        </span>
+      </a>
+      <span class="book-floating-toolbox__tip" aria-hidden="true">代码模板</span>
+    </li>
+    <li class="book-floating-toolbox__item" role="none" style="--book-toolbox-index: 2; --book-toolbox-count: 3;">
+      <a
+        class="book-floating-toolbox__action"
+        role="menuitem"
+        href="https://www.machinelearningwithme.com"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="开发中……"
+      >
+        <span class="book-floating-toolbox__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path
+              d="M9 3.5h6a1.5 1.5 0 0 1 1.5 1.5V7h2.25A1.75 1.75 0 0 1 20.5 8.75v9A1.75 1.75 0 0 1 18.75 19.5H5.25A1.75 1.75 0 0 1 3.5 17.75v-9A1.75 1.75 0 0 1 5.25 7H7.5V5A1.5 1.5 0 0 1 9 3.5z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linejoin="round"
+            ></path>
+            <path
+              d="M9 7h6"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+            ></path>
+            <circle cx="12" cy="13" r="3" fill="none" stroke="currentColor" stroke-width="1.6"></circle>
+          </svg>
+        </span>
+      </a>
+      <span class="book-floating-toolbox__tip" aria-hidden="true">开发中……</span>
+    </li>
+  </ul>
+  <button
+    type="button"
+    class="book-floating-toolbox__toggle"
+    aria-label="工具箱"
+    aria-haspopup="menu"
+    aria-expanded="false"
+    aria-controls="book-floating-toolbox-items"
+    title="工具箱"
+    data-book-toolbox-toggle
+  >
+    <svg class="book-floating-toolbox__toggle-icon-open" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        d="M14.7 6.3a4 4 0 0 0-5.4 5.4l-6.3 6.3a1 1 0 0 0 0 1.4l2 2a1 1 0 0 0 1.4 0l6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-2.4z"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linejoin="round"
+        stroke-linecap="round"
+      ></path>
+      <circle
+        cx="19.5"
+        cy="4.5"
+        r="1.6"
+        fill="currentColor"
+      ></circle>
+    </svg>
+    <svg class="book-floating-toolbox__toggle-icon-close" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        d="M6.5 6.5l11 11M17.5 6.5l-11 11"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.8"
+        stroke-linecap="round"
+      ></path>
+    </svg>
+  </button>
+</div>
+
+<script>
+  (function () {
+    var root = document.querySelector("[data-book-floating-toolbox]");
+    if (!root) {
+      return;
+    }
+    var toggle = root.querySelector("[data-book-toolbox-toggle]");
+    var items = root.querySelector(".book-floating-toolbox__items");
+    if (!toggle || !items) {
+      return;
+    }
+
+    var isOpen = function () {
+      return root.classList.contains("is-open");
+    };
+
+    var open = function () {
+      root.classList.add("is-open");
+      items.hidden = false;
+      toggle.setAttribute("aria-expanded", "true");
+    };
+
+    var close = function () {
+      root.classList.remove("is-open");
+      items.hidden = true;
+      toggle.setAttribute("aria-expanded", "false");
+    };
+
+    toggle.addEventListener("click", function (event) {
+      event.stopPropagation();
+      if (isOpen()) {
+        close();
+      } else {
+        open();
+      }
+    });
+
+    document.addEventListener("click", function (event) {
+      if (!isOpen()) {
+        return;
+      }
+      if (root.contains(event.target)) {
+        return;
+      }
+      close();
+    });
+
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape" && isOpen()) {
+        close();
+        toggle.focus();
+      }
+    });
+
+    items.addEventListener("click", function (event) {
+      if (event.target.closest("a")) {
+        close();
+      }
+    });
+
+    window.addEventListener("pageshow", close);
+  })();
+</script>
+
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
