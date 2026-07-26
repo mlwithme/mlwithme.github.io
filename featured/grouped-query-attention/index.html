@@ -1,0 +1,4871 @@
+<!DOCTYPE html>
+<html lang="zh_CN" dir="ltr">
+<head>
+  <!--
+Made with Book Theme
+https://github.com/alex-shpak/hugo-book
+--><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="本文是 LLaMA 大模型推理优化系列的第2篇，系统讲清 Grouped Query Attention GQA 这种介于 MQA 与 MHA 之间的折衷注意力方案。先回溯 MQA 的痛点（单一 K/V 损失表达力），再以 MHA→MQA→GQA 结构对比图讲清「Queries …">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="index,follow,max-image-preview:large">
+
+
+
+
+
+<meta property="og:url" content="https://mlwithme.github.io/featured/grouped-query-attention/">
+<meta property="og:site_name" content="《从零学AI指南手册》">
+<meta property="og:title" content="GQA 分组查询注意力原理与实现：详解 MHA→MQA→GQA 的演进与 LLaMA 2/ChatGLM 的实践">
+<meta property="og:description" content="本文是 LLaMA 大模型推理优化系列的第2篇，系统讲清 Grouped Query Attention GQA 这种介于 MQA 与 MHA 之间的折衷注意力方案。先回溯 MQA 的痛点（单一 K/V 损失表达力），再以 MHA→MQA→GQA 结构对比图讲清「Queries …">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:type" content="article">
+<meta property="og:image" content="https://mlwithme.github.io/share-cover.png">
+<meta property="og:image:url" content="https://mlwithme.github.io/share-cover.png">
+<meta property="og:image:secure_url" content="https://mlwithme.github.io/share-cover.png">
+<meta property="og:image:width" content="759">
+<meta property="og:image:height" content="759">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:alt" content="《从零学AI指南手册》 - GQA 分组查询注意力原理与实现：详解 MHA→MQA→GQA 的演进与 LLaMA 2/ChatGLM 的实践">
+
+  <meta property="article:section" content="featured">
+  
+    <meta property="article:published_time" content="2026-07-22T20:55:13&#43;08:00">
+  
+  
+    <meta property="article:modified_time" content="2026-07-23T22:35:41&#43;08:00">
+  
+  
+
+
+<script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"WebSite","description":"面向机器学习、深度学习与 AI Agent 的中文系统化学习手册，包含原理讲解、代码示例与实战案例。","inLanguage":"zh_CN","name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
+  </script>
+  <script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.github.io/share-cover.png"},"name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
+  </script><script type="application/ld+json">
+      {"@context":"https://schema.org","@type":"Article","articleSection":"featured","author":{"@type":"Person","name":"WangCheng","url":"https://mlwithme.github.io/author/"},"dateModified":"2026-07-23T22:35:41+08:00","datePublished":"2026-07-22T20:55:13+08:00","description":"本文是 LLaMA 大模型推理优化系列的第2篇，系统讲清 Grouped Query Attention GQA 这种介于 MQA 与 MHA 之间的折衷注意力方案。先回溯 MQA 的痛点（单一 K/V 损失表达力），再以 MHA→MQA→GQA 结构对比图讲清「Queries …","headline":"GQA 分组查询注意力原理与实现：详解 MHA→MQA→GQA 的演进与 LLaMA 2/ChatGLM 的实践","image":["https://mlwithme.github.io/share-cover.png"],"inLanguage":"zh_CN","mainEntityOfPage":"https://mlwithme.github.io/featured/grouped-query-attention/","publisher":{"@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.github.io/share-cover.png"},"name":"《从零学AI指南手册》"},"url":"https://mlwithme.github.io/featured/grouped-query-attention/"}
+    </script><script type="application/ld+json">
+        {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","item":"https://mlwithme.github.io/","name":"首页","position":1},{"@type":"ListItem","item":"https://mlwithme.github.io/featured/","name":"精选文章","position":2},{"@type":"ListItem","item":"https://mlwithme.github.io/featured/grouped-query-attention/","name":"GQA 分组查询注意力原理与实现：详解 MHA→MQA→GQA 的演进与 LLaMA 2/ChatGLM 的实践","position":3}]}
+      </script>
+
+<title>GQA 分组查询注意力原理与实现：详解 MHA→MQA→GQA 的演进与 LLaMA 2/ChatGLM 的实践 • 《从零学AI指南手册》</title>
+<link rel="icon" href="https://mlwithme.github.io/favicon.png" type="image/png">
+<link rel="shortcut icon" href="https://mlwithme.github.io/favicon.png" type="image/png">
+<link rel="apple-touch-icon" href="https://mlwithme.github.io/favicon.png">
+
+<link rel="manifest" href="/manifest.json">
+<link rel="canonical" href="https://mlwithme.github.io/featured/grouped-query-attention/">
+<link rel="stylesheet" href="/book.min.04800c306c9a4025943ba95ba687acbf99c9a8d44d89ae79df98ad8111606047.css" integrity="sha256-BIAMMGyaQCWUO6lbpoesv5nJqNRNia5535itgRFgYEc=" crossorigin="anonymous">
+  <script defer type="module" src="/zh-cn.search.min.f1dcaf5ffb003a5d8d501b4c6c5a7e051bc6f1cb007aa9fe982329837af7afb3.js" integrity="sha256-8dyvX/sAOl2NUBtMbFp&#43;BRvG8csAeqn&#43;mCMpg3r3r7M=" crossorigin="anonymous"></script>
+
+  
+
+
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="GQA 分组查询注意力原理与实现：详解 MHA→MQA→GQA 的演进与 LLaMA 2/ChatGLM 的实践">
+<meta name="twitter:description" content="本文是 LLaMA 大模型推理优化系列的第2篇，系统讲清 Grouped Query Attention GQA 这种介于 MQA 与 MHA 之间的折衷注意力方案。先回溯 MQA 的痛点（单一 K/V 损失表达力），再以 MHA→MQA→GQA 结构对比图讲清「Queries …">
+<meta name="twitter:url" content="https://mlwithme.github.io/featured/grouped-query-attention/">
+<meta name="twitter:image" content="https://mlwithme.github.io/share-cover.png">
+<meta name="twitter:image:alt" content="《从零学AI指南手册》 - GQA 分组查询注意力原理与实现：详解 MHA→MQA→GQA 的演进与 LLaMA 2/ChatGLM 的实践">
+<script>
+  var _hmt = _hmt || [];
+  (function() {
+    var hm = document.createElement("script");
+    hm.src = "https://hm.baidu.com/hm.js?19b2d342631cd14e3578ad00b4823e80";
+    var s = document.getElementsByTagName("script")[0];
+    s.parentNode.insertBefore(hm, s);
+  })();
+</script>
+<script>
+  var _hmt = _hmt || [];
+  (function() {
+    var hm = document.createElement("script");
+    hm.src = "https://hm.baidu.com/hm.js?74a336dd47fbbab3ceb99d4ad8afcb76";
+    var s = document.getElementsByTagName("script")[0];
+    s.parentNode.insertBefore(hm, s);
+  })();
+</script>
+<script async src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
+
+</head>
+<body dir="ltr" class="book-kind-page book-type-featured">
+  <input type="checkbox" class="hidden toggle" id="menu-control" />
+  <input type="checkbox" class="hidden toggle" id="toc-control" />
+  <main class="container flex">
+    
+<aside class="book-menu">
+  <div class="book-menu-content">
+    
+  <nav>
+<h2 class="book-brand">
+  <a class="flex align-center" href="/"><svg xmlns="http://www.w3.org/2000/svg" height="20" width="20" viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true" class="book-brand-icon" style="margin-right:.35em;flex:none">
+      <path d="M240-200h120v-240h240v240h120v-360L480-740 240-560v360Zm-80 80q-33 0-56.5-23.5T80-200v-360q0-27 11-49t31-39l280-220q21-17 47-25t51-8q25 0 51 8t47 25l280 220q20 17 31 39t11 49v360q0 33-23.5 56.5T840-120H600q-17 0-28.5-11.5T560-160v-200H400v200q0 17-11.5 28.5T360-120H160Zm320-280Z"/>
+    </svg>
+
+    <span>返回主页</span>
+
+  </a>
+</h2>
+
+
+<div class="book-search hidden">
+  <input id="book-search-input" type="text" 
+    placeholder="Search"
+    aria-label="Search"
+    maxlength="64" />
+  <div class="book-search-spinner hidden"></div>
+  <ul id="book-search-results"></ul>
+</div>
+<script>document.querySelector(".book-search").classList.remove("hidden")</script>
+
+
+
+
+
+
+
+
+
+
+
+  
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/featured/" class="">
+      <span class="book-menu-link-title">精选文章</span>
+</a>
+  
+
+          
+  <ul>
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bb7497cb5e222579131ad9ad959011cb" class="toggle"  />
+    <label for="section-bb7497cb5e222579131ad9ad959011cb" class="flex">
+      <a href="/tutorials/" class="">
+        <span class="book-menu-link-title">专题文章</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/tutorials/transformer/" class="">
+      <span class="book-menu-link-title">图解 Transformer 入门指南教程</span>
+</a>
+  
+
+          
+  <ul>
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/tutorials/bert/" class="">
+      <span class="book-menu-link-title">从零玩转 Bert 详解6大下游任务</span>
+</a>
+  
+
+          
+  <ul>
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/tutorials/mini-chatgpt/" class="">
+      <span class="book-menu-link-title">手把手带你从零构建 ChatGPT</span>
+</a>
+  
+
+          
+  <ul>
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/" class="">
+      <span class="book-menu-link-title">大模型Agent开发（更新中……）</span>
+</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-279cf10e5100caa4f65ba3f7dd8888a4" class="toggle"  />
+    <label for="section-279cf10e5100caa4f65ba3f7dd8888a4" class="flex">
+      <a href="/agent/chapter01/" class="">
+        <span class="book-menu-link-title">第 1 章 RAG 基础概念</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/what-is-rag/" class="">
+      <span class="book-menu-link-title">1.1 RAG 提出背景</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/rag-pipeline-overview/" class="">
+      <span class="book-menu-link-title">1.2 RAG 流程概览</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-83c662c2764f1c19f8005eab77fee110" class="toggle"  />
+    <label for="section-83c662c2764f1c19f8005eab77fee110" class="flex">
+      <a href="/agent/chapter02/" class="">
+        <span class="book-menu-link-title">第 2 章 大模型接入与使用</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/intro-to-llm-sdk/" class="">
+      <span class="book-menu-link-title">2.1 SDK 介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/modern-llm-sdk/" class="">
+      <span class="book-menu-link-title">2.2 现代大模型中的 SDK</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/dashscope-api-overview/" class="">
+      <span class="book-menu-link-title">2.3 DashScope 接口体系</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/qwen-onboarding/" class="">
+      <span class="book-menu-link-title">2.4 千问大模型接入与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-1e583d7a26333453241d87c5c16592bd" class="toggle"  />
+    <label for="section-1e583d7a26333453241d87c5c16592bd" class="flex">
+      <a href="/agent/chapter03/" class="">
+        <span class="book-menu-link-title">第 3 章 文档标准化与语义检索</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/document-loading-and-preprocessing/" class="">
+      <span class="book-menu-link-title">3.1 文档加载与标准化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/text-splitting-strategies/" class="">
+      <span class="book-menu-link-title">3.2 常见文本切分策略</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/vector-database-selection/" class="">
+      <span class="book-menu-link-title">3.3 向量数据库选择</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/qwen-embedding-model/" class="">
+      <span class="book-menu-link-title">3.4 Qwen3 Embedding 模型介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/semantic-retrieval-pipeline/" class="">
+      <span class="book-menu-link-title">3.5 语义搜索引擎构建</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/milvus-tutorial/" class="">
+      <span class="book-menu-link-title">3.6  Milvus 模块解析</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="toggle"  />
+    <label for="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="flex">
+      <a href="/agent/chapter04/" class="">
+        <span class="book-menu-link-title">第 4 章 RAG 与 Agent</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/two-step-rag/" class="">
+      <span class="book-menu-link-title">4.1 两步式 RAG 搭建</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/function-calling-basics/" class="">
+      <span class="book-menu-link-title">4.2 Function Calling 概念介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/langchain-tool-decorator/" class="">
+      <span class="book-menu-link-title">4.3 LangChain 中的 Tool 修饰器</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/rag-agent-essentials/" class="">
+      <span class="book-menu-link-title">4.4 RAG Agent 原理与搭建</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/react-framework/" class="">
+      <span class="book-menu-link-title">4.5 复杂问题拆解与ReAct框架</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/two-stage-indexing/" class="">
+      <span class="book-menu-link-title">4.6 RAG 中的两阶段索引</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/qwen3-reranking/" class="">
+      <span class="book-menu-link-title">4.7 Qwen3 Reranking 原理与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/two-stage-rag-agent/" class="">
+      <span class="book-menu-link-title">4.8 基于两阶段索引的 RAG Agent</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/langgraph-basics/" class="">
+      <span class="book-menu-link-title">4.9 LangGraph 基本概念介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/langgraph-custom-rag-agent/" class="">
+      <span class="book-menu-link-title">4.10  基于 LangGraph 构建自定义 RAG Agent</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bf5130286ff0eee8f362b632167a5e6b" class="toggle"  />
+    <label for="section-bf5130286ff0eee8f362b632167a5e6b" class="flex">
+      <a href="/agent/chapter05/" class="">
+        <span class="book-menu-link-title">第 5 章 Agent 记忆机制与管理</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/agent-memory-overview/" class="">
+      <span class="book-menu-link-title">5.1 Agent 记忆机制概览</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/langchain-short-term-memory/" class="">
+      <span class="book-menu-link-title">5.2 短期记忆持久化与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/short-term-memory-management/" class="">
+      <span class="book-menu-link-title">5.3 短期记忆管理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/short-term-memory-rag-agent/" class="">
+      <span class="book-menu-link-title">5.4 拥有短期记忆的 RAG Agent</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/long-term-memory-strategies/" class="">
+      <span class="book-menu-link-title">5.5 长期记忆管理与持久化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/mini-chatgpt-from-scratch/" class="">
+      <span class="book-menu-link-title">5.6 从零实现 Mini ChatGPT 助手</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/pgvector-setup/" class="">
+      <span class="book-menu-link-title">5.7 pgvector 配置安装</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/long-term-memory-retrieval-and-forgetting/" class="">
+      <span class="book-menu-link-title">5.8 长期记忆检索与遗忘</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/langgraph-mini-chatgpt/" class="">
+      <span class="book-menu-link-title">5.9 基于 LangGraph 的Mini ChatGPT 助手</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/create-agent-mini-chatgpt/" class="">
+      <span class="book-menu-link-title">5.10 使用 create_agent 搭建 Mini ChatGPT</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/" class="">
+      <span class="book-menu-link-title">深度学习</span>
+</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/mindmap/" class="">
+      <span class="book-menu-link-title">目录思维导图</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-cf7621e8efb1f3153eaca44a113dcdb9" class="toggle"  />
+    <label for="section-cf7621e8efb1f3153eaca44a113dcdb9" class="flex">
+      <a href="/dl/chapter01/" class="">
+        <span class="book-menu-link-title">第 1 章 深度学习简介</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/dl-development-stages/" class="">
+      <span class="book-menu-link-title">1.1 深度学习的发展阶段</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/dl-key-figures/" class="">
+      <span class="book-menu-link-title">1.2 深度学习中的关键人物</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/mainstream-dl-frameworks/" class="">
+      <span class="book-menu-link-title">1.3 深度学习框架介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f9bf1a68c19405769f9c4a1495708a55" class="toggle"  />
+    <label for="section-f9bf1a68c19405769f9c4a1495708a55" class="flex">
+      <a href="/dl/chapter02/" class="">
+        <span class="book-menu-link-title">第 2 章 环境配置</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/dl-dev-environment-architecture/" class="">
+      <span class="book-menu-link-title">2.1 体系结构介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/dl-cuda-pytorch-install/" class="">
+      <span class="book-menu-link-title">2.2 深度学习环境安装</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/dl-cuda-training-env-setup/" class="">
+      <span class="book-menu-link-title">2.3 开发环境安装配置</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="toggle"  />
+    <label for="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="flex">
+      <a href="/dl/chapter03/" class="">
+        <span class="book-menu-link-title">第 3 章 深度学习基础</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/linear-regression-basics/" class="">
+      <span class="book-menu-link-title">3.1 线性回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/linear-regression-implementation/" class="">
+      <span class="book-menu-link-title">3.2 线性回归简洁实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/backpropagation-and-gradient-descent/" class="">
+      <span class="book-menu-link-title">3.3 梯度下降与反向传播</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/regression-from-scratch/" class="">
+      <span class="book-menu-link-title">3.4 从零实现回归模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/softmax-regression-basics/" class="">
+      <span class="book-menu-link-title">3.5 从逻辑回归到Softmax回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/softmax-regression-implementation/" class="">
+      <span class="book-menu-link-title">3.6 Softmax回归简洁实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/softmax-regression-from-scratch/" class="">
+      <span class="book-menu-link-title">3.7 从零实现分类模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/regression-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">3.8 回归模型评估指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/classification-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">3.9 分类模型评估指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/overfitting-and-regularization/" class="">
+      <span class="book-menu-link-title">3.10 过拟合与正则化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/hyperparameters-and-cross-validation/" class="">
+      <span class="book-menu-link-title">3.11 超参数与交叉验证</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/activation-functions/" class="">
+      <span class="book-menu-link-title">3.12 激活函数</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/multi-label-classification/" class="">
+      <span class="book-menu-link-title">3.13 多标签分类</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-7a12cee83820a928df00362d70804a97" class="toggle"  />
+    <label for="section-7a12cee83820a928df00362d70804a97" class="flex">
+      <a href="/dl/chapter04/" class="">
+        <span class="book-menu-link-title">第 4 章 卷积神经网络</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/cnn-basics/" class="">
+      <span class="book-menu-link-title">4.1 卷积的概念</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/convolution-operation/" class="">
+      <span class="book-menu-link-title">4.2 卷积的计算过程</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/convolution-and-pooling/" class="">
+      <span class="book-menu-link-title">4.3 填充和池化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/lenet5/" class="">
+      <span class="book-menu-link-title">4.4 LeNet5网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/alexnet/" class="">
+      <span class="book-menu-link-title">4.5 AlexNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/vgg/" class="">
+      <span class="book-menu-link-title">4.6 VGG网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/nin/" class="">
+      <span class="book-menu-link-title">4.7 NIN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/googlenet/" class="">
+      <span class="book-menu-link-title">4.8 GoogLeNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/resnet/" class="">
+      <span class="book-menu-link-title">4.9 ResNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/densenet/" class="">
+      <span class="book-menu-link-title">4.10 DenseNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-be9addfd3a15c372d609d09cabb94159" class="toggle"  />
+    <label for="section-be9addfd3a15c372d609d09cabb94159" class="flex">
+      <a href="/dl/chapter05/" class="">
+        <span class="book-menu-link-title">第 5 章 模型训练与复用</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/training-logs-management/" class="">
+      <span class="book-menu-link-title">5.1 参数及日志管理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/tensorboard-tutorial/" class="">
+      <span class="book-menu-link-title">5.2 Tensorboard可视化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/pytorch-model-save-load/" class="">
+      <span class="book-menu-link-title">5.3 模型的保存与复用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/transfer-learning-tutorial/" class="">
+      <span class="book-menu-link-title">5.4 模型的迁移学习</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/pretrained-model-reuse/" class="">
+      <span class="book-menu-link-title">5.5 开源模型复用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/multi-gpu-training/" class="">
+      <span class="book-menu-link-title">5.6 多GPU训练</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/training-data-preprocessing-cache/" class="">
+      <span class="book-menu-link-title">5.7 数据预处理与缓存</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="toggle"  />
+    <label for="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="flex">
+      <a href="/dl/chapter06/" class="">
+        <span class="book-menu-link-title">第 6 章 模型优化方法</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/learning-rate-scheduler/" class="">
+      <span class="book-menu-link-title">6.1 学习率调度器</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/gradient-clipping/" class="">
+      <span class="book-menu-link-title">6.2 梯度裁剪</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/batch-norm/" class="">
+      <span class="book-menu-link-title">6.3 批归一化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/layer-norm/" class="">
+      <span class="book-menu-link-title">6.4 层归一化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/group-norm/" class="">
+      <span class="book-menu-link-title">6.5 组归一化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/momentum/" class="">
+      <span class="book-menu-link-title">6.6 动量法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/ada-grad/" class="">
+      <span class="book-menu-link-title">6.7 AdaGrad算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/ada-delta/" class="">
+      <span class="book-menu-link-title">6.8 AdaDelta算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/adam/" class="">
+      <span class="book-menu-link-title">6.9 Adam算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/weight-initialization/" class="">
+      <span class="book-menu-link-title">6.10 初始化方法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-517b751d7c44a7ac77d25d295ed44271" class="toggle"  />
+    <label for="section-517b751d7c44a7ac77d25d295ed44271" class="flex">
+      <a href="/dl/chapter07/" class="">
+        <span class="book-menu-link-title">第 7 章 循环神经网络</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/rnn-basics/" class="">
+      <span class="book-menu-link-title">7.1 RNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/time-series-modeling/" class="">
+      <span class="book-menu-link-title">7.2 时序数据</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/lstm/" class="">
+      <span class="book-menu-link-title">7.3 LSTM网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/gru/" class="">
+      <span class="book-menu-link-title">7.4 GRU网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/bi-rnn/" class="">
+      <span class="book-menu-link-title">7.5 BiRNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/char-rnn/" class="">
+      <span class="book-menu-link-title">7.6 CharRNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-b9b861f64ba32bc68dfb977497de37d9" class="toggle"  />
+    <label for="section-b9b861f64ba32bc68dfb977497de37d9" class="flex">
+      <a href="/dl/chapter08/" class="">
+        <span class="book-menu-link-title">第 8 章 时序与模型融合</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/textcnn/" class="">
+      <span class="book-menu-link-title">8.1 TextCNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/textrnn/" class="">
+      <span class="book-menu-link-title">8.2 TextRNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/cnn-rnn/" class="">
+      <span class="book-menu-link-title">8.3 CNN-RNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/convlstm/" class="">
+      <span class="book-menu-link-title">8.4 ConvLSTM网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/3dcnn/" class="">
+      <span class="book-menu-link-title">8.5 3DCNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/stresnet/" class="">
+      <span class="book-menu-link-title">8.6 STResNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-e54a1e28b1438b8266637bcb8dac1a44" class="toggle"  />
+    <label for="section-e54a1e28b1438b8266637bcb8dac1a44" class="flex">
+      <a href="/dl/chapter09/" class="">
+        <span class="book-menu-link-title">第 9 章 自然语言处理</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/nlp-basics/" class="">
+      <span class="book-menu-link-title">9.1 自然语言处理介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/word2vec-principle/" class="">
+      <span class="book-menu-link-title">9.2 Word2Vec词向量</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/word2vec-training-and-usage/" class="">
+      <span class="book-menu-link-title">9.3 Word2Vec训练与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/glove/" class="">
+      <span class="book-menu-link-title">9.4 GloVe词向量</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/word-vector-finetuning/" class="">
+      <span class="book-menu-link-title">9.5 词向量的微调使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/fasttext/" class="">
+      <span class="book-menu-link-title">9.6 fastText网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/seq2seq-tutorial/" class="">
+      <span class="book-menu-link-title">9.7 Seq2Seq网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/seq-model-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">9.8 序列模型评价指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/nmt-seq2seq/" class="">
+      <span class="book-menu-link-title">9.9 NMT网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/attention-mechanism/" class="">
+      <span class="book-menu-link-title">9.10 注意力机制</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/nmt-with-attention/" class="">
+      <span class="book-menu-link-title">9.11 含注意力的NMT网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/rnn-with-attention/" class="">
+      <span class="book-menu-link-title">9.12 含注意力的RNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f6636b2f9dc1df93b9fa64dd201716d9" class="toggle"  />
+    <label for="section-f6636b2f9dc1df93b9fa64dd201716d9" class="flex">
+      <a href="/dl/chapter10/" class="">
+        <span class="book-menu-link-title">第 10 章 现代神经网络</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/elmo/" class="">
+      <span class="book-menu-link-title">10.1 ELMo网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-principle/" class="">
+      <span class="book-menu-link-title">10.2 Transformer网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-architecture/" class="">
+      <span class="book-menu-link-title">10.3 Transformer结构</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-implementation/" class="">
+      <span class="book-menu-link-title">10.4 Transformer实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-couplet-model/" class="">
+      <span class="book-menu-link-title">10.5 Transformer对联模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-principle/" class="">
+      <span class="book-menu-link-title">10.6 BERT网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-from-scratch/" class="">
+      <span class="book-menu-link-title">10.7 从零实现BERT</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-text-classification/" class="">
+      <span class="book-menu-link-title">10.8 BERT文本分类模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-sentence-pair-matching/" class="">
+      <span class="book-menu-link-title">10.9 BERT问题选择模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-question-answering/" class="">
+      <span class="book-menu-link-title">10.10 BERT问题回答模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-ner/" class="">
+      <span class="book-menu-link-title">10.11 BERT命名体识别模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-pretraining/" class="">
+      <span class="book-menu-link-title">10.12 BERT从零训练</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-1/" class="">
+      <span class="book-menu-link-title">10.13 GPT-1模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-2-and-gpt-3/" class="">
+      <span class="book-menu-link-title">10.14 GPT-2与GPT-3模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-2-chinese-pretraining/" class="">
+      <span class="book-menu-link-title">10.15 基于GPT-2的中文预训练模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/instructgpt-and-chatgpt/" class="">
+      <span class="book-menu-link-title">10.16 InstructGPT与ChatGPT</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/chatgpt-prompt-engineering/" class="">
+      <span class="book-menu-link-title">10.17 ChatGPT与提示词工程</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/baichuan-usage/" class="">
+      <span class="book-menu-link-title">10.18 百川大模型使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/baichuan-implementation/" class="">
+      <span class="book-menu-link-title">10.19 百川大模型实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-4-and-gpts/" class="">
+      <span class="book-menu-link-title">10.20 GPT-4与GPTs使用</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/" class="">
+      <span class="book-menu-link-title">机器学习</span>
+</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/mindmap/" class="">
+      <span class="book-menu-link-title">目录思维导图</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-48f56957e94e3cf66f3022103a7dd0ff" class="toggle"  />
+    <label for="section-48f56957e94e3cf66f3022103a7dd0ff" class="flex">
+      <a href="/ml/chapter01/" class="">
+        <span class="book-menu-link-title">第 1 章 环境配置</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/conda-install-tutorial/" class="">
+      <span class="book-menu-link-title">1.1 安装使用Conda</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/ml-conda-env-setup/" class="">
+      <span class="book-menu-link-title">1.2 开发环境安装配置</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-56a896338a1c41249d22a3efa0e0063c" class="toggle"  />
+    <label for="section-56a896338a1c41249d22a3efa0e0063c" class="flex">
+      <a href="/ml/chapter02/" class="">
+        <span class="book-menu-link-title">第 2 章 线性回归</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/linear-regression-basics/" class="">
+      <span class="book-menu-link-title">2.1 模型的建立与求解</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/multivariate-linear-regression/" class="">
+      <span class="book-menu-link-title">2.2 多变量线性回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/polynomial-regression/" class="">
+      <span class="book-menu-link-title">2.3 多项式回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/regression-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">2.4 回归模型评估</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/gradient-descent-derivation/" class="">
+      <span class="book-menu-link-title">2.5 梯度下降</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/normal-distribution/" class="">
+      <span class="book-menu-link-title">2.6 正态分布</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/linear-regression-loss-derivation/" class="">
+      <span class="book-menu-link-title">2.7 目标函数推导</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ccd0dc9386ea80613d4cedf91b30058d" class="toggle"  />
+    <label for="section-ccd0dc9386ea80613d4cedf91b30058d" class="flex">
+      <a href="/ml/chapter03/" class="">
+        <span class="book-menu-link-title">第 3 章 逻辑回归</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/logistic-regression-basics/" class="">
+      <span class="book-menu-link-title">3.1 模型的建立与求解</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/logistic-regression-multiclass/" class="">
+      <span class="book-menu-link-title">3.2 多分类任务</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/classification-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">3.3 常见的分类评估指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/logistic-regression-loss-derivation/" class="">
+      <span class="book-menu-link-title">3.4 目标函数推导</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="toggle"  />
+    <label for="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="flex">
+      <a href="/ml/chapter04/" class="">
+        <span class="book-menu-link-title">第 4 章 模型的改善与泛化</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/generalization-basics/" class="">
+      <span class="book-menu-link-title">4.1 基本概念</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/feature-scaling/" class="">
+      <span class="book-menu-link-title">4.2 特征标准化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/overfitting-solutions/" class="">
+      <span class="book-menu-link-title">4.3 过拟合</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/l1-l2-regularization/" class="">
+      <span class="book-menu-link-title">4.4 正则化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/bias-and-variance/" class="">
+      <span class="book-menu-link-title">4.5 偏差、方差与交叉验证</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/handwritten-digit-recognition-case/" class="">
+      <span class="book-menu-link-title">4.6 实例分析手写体识别</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-40f463d9d502d24b86ea6120b7030123" class="toggle"  />
+    <label for="section-40f463d9d502d24b86ea6120b7030123" class="flex">
+      <a href="/ml/chapter05/" class="">
+        <span class="book-menu-link-title">第 5 章 K近邻</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/knn-principle/" class="">
+      <span class="book-menu-link-title">5.1 K近邻思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/knn-algorithm-details/" class="">
+      <span class="book-menu-link-title">5.2 K近邻原理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/sklearn-knn-example/" class="">
+      <span class="book-menu-link-title">5.3 sklearn接口与示例代码</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/kd-tree-knn/" class="">
+      <span class="book-menu-link-title">5.4 kd树构建与搜索</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/knn-from-scratch/" class="">
+      <span class="book-menu-link-title">5.5 从零实现K近邻</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-5a460dc18f1e79253296cf2cd0498446" class="toggle"  />
+    <label for="section-5a460dc18f1e79253296cf2cd0498446" class="flex">
+      <a href="/ml/chapter06/" class="">
+        <span class="book-menu-link-title">第 6 章 文本特征与模型复用</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/bag-of-words/" class="">
+      <span class="book-menu-link-title">6.1 词袋模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/knn-spam-classification/" class="">
+      <span class="book-menu-link-title">6 .2 基于K近邻算法的垃圾邮件分类</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/tf-idf/" class="">
+      <span class="book-menu-link-title">6.3 考虑权重的词袋模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/wordcloud-generation/" class="">
+      <span class="book-menu-link-title">6.4 词云图</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-96f45a8b8c8b75adc70c78026d93dbf6" class="toggle"  />
+    <label for="section-96f45a8b8c8b75adc70c78026d93dbf6" class="flex">
+      <a href="/ml/chapter07/" class="">
+        <span class="book-menu-link-title">第 7 章 朴素贝叶斯</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/naive-bayes-basics/" class="">
+      <span class="book-menu-link-title">7.1 朴素贝叶斯算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/bayes-estimation/" class="">
+      <span class="book-menu-link-title">7.2 贝叶斯估计</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/naive-bayes-implementation/" class="">
+      <span class="book-menu-link-title">7.3 朴素贝叶斯实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/multinomial-naive-bayes/" class="">
+      <span class="book-menu-link-title">7.4 多项式朴素贝叶斯原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/gaussian-naive-bayes/" class="">
+      <span class="book-menu-link-title">7.5 高斯朴素贝叶斯原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-22476e49d5058c3e5e7e7366b7ab676f" class="toggle"  />
+    <label for="section-22476e49d5058c3e5e7e7366b7ab676f" class="flex">
+      <a href="/ml/chapter08/" class="">
+        <span class="book-menu-link-title">第 8 章 决策树</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-principle/" class="">
+      <span class="book-menu-link-title">8.1 决策树的基本思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-sklearn/" class="">
+      <span class="book-menu-link-title">8.2 决策树建模与可视化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/id3-vs-c45/" class="">
+      <span class="book-menu-link-title">8.3 决策树生成之ID3与C4.5</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-pruning/" class="">
+      <span class="book-menu-link-title">8.4 决策树剪枝过程</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-from-scratch/" class="">
+      <span class="book-menu-link-title">8.5 从零实现ID3与C4.5算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-continuous-features/" class="">
+      <span class="book-menu-link-title">8.6 连续型特征变量下决策树实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/cart-algorithm/" class="">
+      <span class="book-menu-link-title">8.7 CART生成与剪枝算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/cart-from-scratch/" class="">
+      <span class="book-menu-link-title">8.8 从零实现CART算法及剪枝示例</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-2feb6a51cabb61dba860f45c1881386b" class="toggle"  />
+    <label for="section-2feb6a51cabb61dba860f45c1881386b" class="flex">
+      <a href="/ml/chapter09/" class="">
+        <span class="book-menu-link-title">第 9 章 集成学习与提升算法</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/ensemble-learning-basics/" class="">
+      <span class="book-menu-link-title">9.1 集成学习算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/random-forest-principle/" class="">
+      <span class="book-menu-link-title">9.2 随机森林</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/random-forest-titanic/" class="">
+      <span class="book-menu-link-title">9.3 泰坦尼克号生还预测</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/adaboost/" class="">
+      <span class="book-menu-link-title">9.4 AdaBoost原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/multi-adaboost/" class="">
+      <span class="book-menu-link-title">9.5 MultiAdaBoost原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/gradient-boost/" class="">
+      <span class="book-menu-link-title">9.6 Gradient Boost 原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-938ae119c3849b03ccb6f91cef4243dd" class="toggle"  />
+    <label for="section-938ae119c3849b03ccb6f91cef4243dd" class="flex">
+      <a href="/ml/chapter10/" class="">
+        <span class="book-menu-link-title">第 10 章 支持向量机</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-principle/" class="">
+      <span class="book-menu-link-title">10.1 SVM思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-nonlinear-kernel/" class="">
+      <span class="book-menu-link-title">10.2 SVM线性不可分</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-max-margin/" class="">
+      <span class="book-menu-link-title">10.3 SVM原理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-soft-margin/" class="">
+      <span class="book-menu-link-title">10.4 SVM中的软间隔</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/lagrange-multipliers/" class="">
+      <span class="book-menu-link-title">10.5 拉格朗日乘数法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/kkt-conditions/" class="">
+      <span class="book-menu-link-title">10.6 对偶性与KKT条件</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-optimization/" class="">
+      <span class="book-menu-link-title">10.7 SVM优化问题</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-kernel-functions/" class="">
+      <span class="book-menu-link-title">10.8 SVM核函数原理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/smo-algorithm/" class="">
+      <span class="book-menu-link-title">10.9 SMO算法求解SVM</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-from-scratch/" class="">
+      <span class="book-menu-link-title">10.10 从零实现SVM分类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-9f4d9786d4ab755fde42c64d09b0d026" class="toggle"  />
+    <label for="section-9f4d9786d4ab755fde42c64d09b0d026" class="flex">
+      <a href="/ml/chapter11/" class="">
+        <span class="book-menu-link-title">第 11 章 聚类分析</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/clustering-basics/" class="">
+      <span class="book-menu-link-title">11.1 聚类算法的思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-principle/" class="">
+      <span class="book-menu-link-title">11.2 Kmeans聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-iteration/" class="">
+      <span class="book-menu-link-title">11.3 Kmeans算法求解</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-from-scratch/" class="">
+      <span class="book-menu-link-title">11.4 从零实现Kmeans聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-plus-plus/" class="">
+      <span class="book-menu-link-title">11.5 Kmeans&#43;&#43;聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/clustering-external-metrics/" class="">
+      <span class="book-menu-link-title">11.6 聚类外部评价指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/weighted-kmeans/" class="">
+      <span class="book-menu-link-title">11.7 加权Kmeans聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/clustering-internal-metrics/" class="">
+      <span class="book-menu-link-title">11.8 聚类内部评价指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-k-selection/" class="">
+      <span class="book-menu-link-title">11.9 聚类K值选取与分析</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/dbscan/" class="">
+      <span class="book-menu-link-title">11.10 基于密度的聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/hierarchical-clustering/" class="">
+      <span class="book-menu-link-title">11.11 基于层次的聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-d5e78c45312818bb3abd5c19c858f7e5" class="toggle"  />
+    <label for="section-d5e78c45312818bb3abd5c19c858f7e5" class="flex">
+      <a href="/ml/chapter12/" class="">
+        <span class="book-menu-link-title">第 12 章 降维算法</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/pca-principle/" class="">
+      <span class="book-menu-link-title">12.1 主成分分析</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/kpca/" class="">
+      <span class="book-menu-link-title">12.2 基于核函数的主成分分析</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-a82b41bb7eb95af72bc11e8a3d668acd" class="toggle"  />
+    <label for="section-a82b41bb7eb95af72bc11e8a3d668acd" class="flex">
+      <a href="/ml/chapter13/" class="">
+        <span class="book-menu-link-title">第 13 章 自训练与标签传播</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/self-training/" class="">
+      <span class="book-menu-link-title">13.1 Self-Training 自训练算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/label-propagation/" class="">
+      <span class="book-menu-link-title">13.2 Label Propagation算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/label-spreading/" class="">
+      <span class="book-menu-link-title">13.3 Label Spreading 算法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</nav>
+
+
+
+
+  <script>(function(){var e=document.querySelector("aside .book-menu-content");addEventListener("beforeunload",function(){localStorage.setItem("menu.scrollTop",e.scrollTop)}),e.scrollTop=localStorage.getItem("menu.scrollTop")})()</script>
+
+
+
+  </div>
+</aside>
+ 
+
+    <div class="book-page">
+      <header class="book-header hidden">
+        
+  <div class="flex align-center justify-between">
+  <label for="menu-control">
+    <img src="/icons/menu.svg" class="book-icon" alt="Menu" />
+  </label>
+
+  <h3>GQA 分组查询注意力原理与实现：详解 MHA→MQA→GQA 的演进与 LLaMA 2/ChatGLM 的实践</h3>
+
+  <label for="toc-control">
+    
+    <img src="/icons/toc.svg" class="book-icon" alt="Table of Contents" />
+    
+  </label>
+</div>
+
+
+  
+  <aside class="hidden">
+    
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#1-动机">1. 动机</a>
+      <ul>
+        <li><a href="#11-mqa-既要快还要好">1.1 MQA 既要快还要好</a></li>
+        <li><a href="#12-比-mqa-更好的-gqa">1.2 比 MQA 更好的 GQA</a></li>
+      </ul>
+    </li>
+    <li><a href="#2-mqa-增量训练">2. MQA 增量训练</a>
+      <ul>
+        <li><a href="#21-mqa-增量训练原理">2.1 MQA 增量训练原理</a></li>
+        <li><a href="#22-mqa-增量训练实现">2.2 MQA 增量训练实现</a></li>
+      </ul>
+    </li>
+    <li><a href="#3-gqa-增量训练">3. GQA 增量训练</a>
+      <ul>
+        <li><a href="#31-gqa-原理">3.1 GQA 原理</a></li>
+        <li><a href="#32-gqa-实现过程">3.2 GQA 实现过程</a></li>
+        <li><a href="#33-gqa-增量训练实现">3.3 GQA 增量训练实现</a></li>
+      </ul>
+    </li>
+    <li><a href="#4-复杂度分析">4. 复杂度分析</a>
+      <ul>
+        <li><a href="#41-复杂度分析对比">4.1 复杂度分析对比</a></li>
+        <li><a href="#42-参数缓存对比">4.2 参数缓存对比</a></li>
+      </ul>
+    </li>
+    <li><a href="#5-总结">5. 总结</a></li>
+    <li><a href="#引用">引用</a></li>
+  </ul>
+</nav>
+
+
+
+
+  </aside>
+  
+ 
+      </header>
+
+      
+      
+  <article class="markdown book-article"><nav class="book-breadcrumbs text-small book-breadcrumbs--page" aria-label="面包屑导航">
+    <ol class="book-breadcrumbs__list"><li class="book-breadcrumbs__item"><a class="book-breadcrumbs__link" href="https://mlwithme.github.io/">首页</a></li><li class="book-breadcrumbs__item"><a class="book-breadcrumbs__link" href="https://mlwithme.github.io/featured/">精选文章</a></li><li class="book-breadcrumbs__item"><span class="book-breadcrumbs__current" aria-current="page">GQA 原理与从零实现：MHA、MQA、GQA 演进与 LLaMA 2 选择 GQA 的原因</span></li></ol>
+  </nav><div class="book-article-lastmod text-small">
+        <span class="book-article-lastmod-label">更新于</span>
+        <span class="book-article-lastmod-value">2026年7月23日</span>
+      </div><div align=center><img width="500" src="/images/featured/202507261728.png" alt="grouped query attention中 Key 与 Value 复制过程图"/> </div><center>GQA 中 Key 与 Value 复制过程图</center>
+<p>在上一篇文章当中，我们详细介绍了 MQA 的动机、原理及其实现过程，并且也提到由于单一的 Key 和 Value 大大降低了模型的表达能力，所以在实际情况是 MQA 在大模型推理中的效果并不太理想，因此使用更为广泛的是分组查询注意力机制（ Grouped Query Attention, GQA）[1]。</p>
+<p>那什么又是 GQA 呢？</p>
+<p>简单来说它是介于 MQA 和 MHA 之间的一种解决方案，算是 MQA 和 MHA 之间的一种折衷处理，即将 Query 进行分组，然后每一组 Query 对应一个 Key 和 Value，如图1所示。</p>
+<div align=center><img width="680" src="/images/featured/202507121431.png" alt="图 1. MHA、MQA 和 GQA 结构对比图"/> </div><center> 图 1. MHA、MQA 和 GQA 结构对比图</center>
+<p>在图1右侧 GQA 当中，此时的 Queries 被分成了 3 组，因此对应就有 3 组 Keys-Values ，然后每一组内部所有的 Query 共享一个 Key 和 Value。 此时可以看出，MQA 其实就是 GQA 的一种特殊情况，也就是把所有的 Query 看成一组。</p>
+<p>看到这里大家脑海有想到了什么吗？</p>
+<p>是不是觉得 MQA 和 GQA 的做法有点类似于我们之前在深度学习基础中所介绍的两种算法？</p>
+<p>想一想……</p>
+<p>对，就是 层归一化和组归一化这两种算法，如图2所示。</p>
+<div align=center><img width="650" src="/images/featured/240421120002.jpg" alt="图 2. LN 和 GN 归一化对比图"/> </div><center> 图 2. LN 和 GN 归一化对比图</center>
+<p>在 LN 和 GN 中，LN 是将所有的 feature map 看成是一个整体进行归一化，而 GN 则是分组进行归一化，每一组内的 feature map 共享一组参数，可以看出 LN 也是 GN 的一种特殊情况，即此时每个通道为一个组。 关于这部分内容的详细介绍，可以参见<a href="/dl/chapter06/group-norm/">「6.5 组归一化 GroupNorm：原理、公式与 PyTorch 实现」</a> 内容。</p>
+<p>介绍到这里你是不是以为 GQA 的内容已经完了？</p>
+<p>不错，核心内容确实是完了，照着图1中 GQA 的结构就能够实现，不过 GQA 提出的动机却不仅仅只是这一个。</p>
+<p>下面带着大家开始一步步走进 GQA 算法。</p>
+<p><strong>关键词：多头注意力、self-attention、MHA、MQA、GQA、LLaMA、Transformer</strong></p>
+<h2 id="1-动机">1. 动机<a class="anchor" href="#1-%e5%8a%a8%e6%9c%ba">#</a></h2>
+<p>尽管 MQA 在推理时的速度相比于 MHA 更快，但是从实际情况来看它的效果并不好；其次，从各个技术的出现时间上来看，MHA 在前而GQA 在后，因此还需要考虑的一个点便是如何将 MHA 方便地转换为 GQA 能够适用的情况。</p>
+<p>下面，分别从这两个方面以 GQA 论文中的角度来为大家介绍 GQA 提出的动机。</p>
+<h3 id="11-mqa-既要快还要好">1.1 MQA 既要快还要好<a class="anchor" href="#11-mqa-%e6%97%a2%e8%a6%81%e5%bf%ab%e8%bf%98%e8%a6%81%e5%a5%bd">#</a></h3>
+<p>尽管 MQA 在推理过程中能够极大地加快模型的推理速度，但是由于所有的注意力头都共享这一个 Key 和 Value ，使得模型的效果有了很大程度的降低，同时还影响了模型训练时的稳定性。因此，如果仅仅只是为了使用 MQA 来加快推理速度而再从头单独训练这样一个独立的模型显然是不可取的。</p>
+<blockquote class='book-hint '>
+<p>Multi-query attention (MQA), which only uses a single key-value head, drastically speeds up decoder inference. However, MQA can lead to quality degradation  training instability, and moreover <strong>it may not be desirable to train a separate model just for faster inference</strong>.</p>
+</blockquote><p>什么意思呢，为什么说从头单独训练一个模型又是不可取的呢？</p>
+<p>为了说明这个问题，我们先来看看这篇论文提出的背景及时间点。</p>
+<p>GQA 是 2023年12月提出的，此时距离 GPT-4 提出已经过去了9个月，距离 1750 亿参数量的 GPT-3 （2020年5月）已经过去了快2年半。作为对比，MQA 提出的时间是 2019年11月，彼此模型的参数规模大约在数十亿这样的量级，例如 2019年2月发布的 GPT-2 参数规模约 15 亿，也就相当于15个BERT-base 左右的规模。</p>
+<div align=center><img width="800" src="/images/featured/202508032228.png" alt="图 3. 模型参数规模发展图 [2] "/> </div><center>图 3. 模型参数规模发展图 [2] </center>
+<p>所以，从千亿规模参数的时代再回过头去看数十亿规模的模型，简直是不要太迷你，说从头开始训练就可以从头开始训练，一点不带犹豫。</p>
+<p>然而，现在的大模型动不动就是上百亿千亿的规模，模型已经（采用 MHA ）训练好了，那我们总不能为了使用 MQA 再来重新训练一个模型，这显然是不可取的。</p>
+<p>反观 MQA 时代，那时候的模型都还很小，所以可以随时从头训练。</p>
+<p>所以，上面所谓的 “从头单独训练这样一个独立的模型” 作者想要表达的正真含义是：<strong>先前使用 MQA 的方式都不对，都是基于 MQA 从头开始训练模型的，这样虽然加快了模型的推理速度但是又耗费了资源（重新训练）同时模型效果又不好（共享一个 Key 和 Value）</strong>。</p>
+<p>因此，在 GQA 这篇论文中，作者的第一个贡献就是提出了通过以增量训练（uptrain）的方式，<strong>将 MHA 中的参数复用到 MQA 中</strong>，这样既保证了模型推理时的速度，又使得模型的效果比重新从头训练一个 MQA 模型的效果更好。</p>
+<blockquote class='book-hint '>
+<p>This work contains two contributions for faster inference with large language models. First, we show that language model checkpoints with multi-head attention (MHA) can be uptrained to use MQA with a small fraction of original training compute.  This presents a cost-effective method to obtain fast multi-query as well as high-quality MHA checkpoints.</p>
+</blockquote><h3 id="12-比-mqa-更好的-gqa">1.2 比 MQA 更好的 GQA<a class="anchor" href="#12-%e6%af%94-mqa-%e6%9b%b4%e5%a5%bd%e7%9a%84-gqa">#</a></h3>
+<p>尽管通过增量训练的方式将预训练得到的 MHA 转换成 MQA 比单纯直接使用 MQA 从头训练得到的效果更好，但是这依旧没能改变一个事实—— MQA 中多头注意力共享一个 Key 和 Value，而这也极大地降低了模型的表达能力，因此，作者又提出了分组查询注意力机制（ Grouped Query Attention, GQA）这一方法。</p>
+<p>最后，经过增量训练以后，GQA 既能在速度上与 MQA 类似，在效果上也与 MHA 几乎接近。</p>
+<blockquote class='book-hint '>
+<p>Second, we propose grouped-query attention (GQA), an interpolation between multi-head and multi-query attention with single key and value heads per subgroup of query heads. We show that uptrained GQA achieves quality close to multi-head attention while being almost as fast as multi-query attention.</p>
+</blockquote><p>如图1所示，GQA 的核心思想就是先将 Queries 进行分组，然后每一组内部共享同一个 Key 和 Value，可以看出 MQA 就是 GQA 的一种特殊情况。</p>
+<p>总结起来这篇论文一共两点贡献：<strong>① 给出了如何通过增量训练将 MHA 中的模型参数迁移到 MQA 中；② 提出了比 MQA 更优的 GQA 算法，并同样也给出了将 MHA 复用到 GQA 的方法，并对 GQA 的性能进行了分析。</strong></p>
+<p>下面，开始分别介绍这两部分内容的原理。</p>
+<h2 id="2-mqa-增量训练">2. MQA 增量训练<a class="anchor" href="#2-mqa-%e5%a2%9e%e9%87%8f%e8%ae%ad%e7%bb%83">#</a></h2>
+<p>所谓 MQA 增量训练指的是将已经完成训练模型中的 MHA 转换成适用于 MQA 的结构，然后再基于此时的权重参数进行追加训练。</p>
+<p>那如何将 MHA 中的权重参数转换为 MQA 适用的结构呢？</p>
+<h3 id="21-mqa-增量训练原理">2.1 MQA 增量训练原理<a class="anchor" href="#21-mqa-%e5%a2%9e%e9%87%8f%e8%ae%ad%e7%bb%83%e5%8e%9f%e7%90%86">#</a></h3>
+<p>对于如何将 MHA 中的权重参换为 MQA 适用的结构，作者给出的最简单的做法就是取平均值，也就类似于在卷积神经网络中的 Mean Pool 做法，如图4所示。</p>
+<div align=center><img width="620" src="/images/featured/202508031842.png" alt="图 4. MHA 转换成 MQA 示意图"/> </div><center>图 4. MHA 转换成 MQA 示意图</center>
+<p>如图4所示，对于已经训练得到的 MHA 权重参数，我们分别取所有头对应的 $W^K$ 和 $W^V$ 的均值，作为 MQA 中的新的权重，这样便完成了模型权重参数的转换。</p>
+<p>在完成模型参数的结构转换以后，只需要再使用之前同样的预训练方法，对基于 MQA 的模型进行训练即可。</p>
+<blockquote class='book-hint '>
+<p>Generating a multi-query model from a multi-head model takes place in two steps: first, converting the checkpoint, and second, additional pre-training to allow the model to adapt to its new structure.</p>
+</blockquote><p>并且，通常来说转换后的模型只需要训练少量的步数便可到达一个理想的效果。</p>
+<blockquote class='book-hint '>
+<p>The converted checkpoint is then pre-trained for a small proportion $\alpha$ of its original training steps on the same pre-training recipe.</p>
+</blockquote><div align=center><img width="400" src="/images/featured/202507261028.png" alt="图 5. 增量训练步数对结果的影响"/> </div><center>图 5. 增量训练步数对结果的影响</center>
+<p>从图5中可以看出，当 $\alpha=0.1$ 的时候（即再训练之前步数的 $10\%$），基于 GQA 增量训练后的模型便能达到 MHA 类似的效果，而 MQA 则是因为模型本身表达能力的欠缺。</p>
+<p>当然，对于模型结构转换的方法，除了图4中的均值方法，还可以直接选择多头中的一组 Key-Value或者是直接随机初始化，然后再进行增量训练。不过根据作者实验来看，均值法是三者当中效果最好的。</p>
+<blockquote class='book-hint '>
+<p>The projection matrices for key and value heads are mean pooled into single projection matrices, which we find works better than selecting a single key and value head or randomly initializing new key and value heads from scratch.</p>
+</blockquote><div align=center><img width="400" src="/images/featured/202507261026.png" alt="图 6. 不同策略转换下的效果"/> </div><center>图 6. 不同策略转换下的效果</center>
+<p>如图6所示便是不同转换策略下模型的表现情况，其中 “First” 表示旋转第一个头对应的 Key 和 Value。从图中可以看成，均值法的效果是三者当中最好的。</p>
+<h3 id="22-mqa-增量训练实现">2.2 MQA 增量训练实现<a class="anchor" href="#22-mqa-%e5%a2%9e%e9%87%8f%e8%ae%ad%e7%bb%83%e5%ae%9e%e7%8e%b0">#</a></h3>
+<p>在介绍完 MQA 增量训练的原理以后，我们再来看如何从零实现这部分代码，完整示例代码可参见 <code>Code/C08_GQA/C01_mqa_uptrain.py</code> 文件。</p>
+<p>总体来看，如果我们拿到一个模型基于 MHA 训练得到的大模型，那么首先我们需要载入这些模型参数，然后解析并对每一层中所有的 Keys 和 Values 取均值得到对应层满足 MQA 结构的 Key 和 Value，最后再重新赋值给现在的基于 MQA 的网络结构。</p>
+<h4 id="221-定义网络结构">2.2.1 定义网络结构<a class="anchor" href="#221-%e5%ae%9a%e4%b9%89%e7%bd%91%e7%bb%9c%e7%bb%93%e6%9e%84">#</a></h4>
+<p>为了模拟整个过程，我们首先需要定义一个基于 MHA 的网络结构，然后将训练结束的模型持久化到本地，示例代码如下所示：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">Decoder</span>(nn<span style="color:#666">.</span>Module):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">__init__</span>(<span style="color:#007020">self</span>, num_layers<span style="color:#666">=</span><span style="color:#40a070">2</span>, embed_dim<span style="color:#666">=</span><span style="color:#40a070">64</span>, num_heads<span style="color:#666">=</span><span style="color:#40a070">8</span>, attention_type<span style="color:#666">=</span><span style="color:#4070a0">&#39;mha&#39;</span>):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>         <span style="color:#007020">super</span>(Decoder, <span style="color:#007020">self</span>)<span style="color:#666">.</span><span style="color:#06287e">__init__</span>()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>         <span style="color:#007020;font-weight:bold">if</span> attention_type <span style="color:#666">==</span> <span style="color:#4070a0">&#39;mha&#39;</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>             attn <span style="color:#666">=</span> MultiHeadAttention
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>         <span style="color:#007020;font-weight:bold">elif</span> attention_type <span style="color:#666">==</span> <span style="color:#4070a0">&#39;mqa&#39;</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>             attn <span style="color:#666">=</span> MultiQueryAttention
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>         <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;## 正在训练基于 </span><span style="color:#70a0d0">{</span>attention_type<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>         layers <span style="color:#666">=</span> [attn(embed_dim, num_heads) <span style="color:#007020;font-weight:bold">for</span> _ <span style="color:#007020;font-weight:bold">in</span> <span style="color:#007020">range</span>(num_layers)]
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>decoder_layer <span style="color:#666">=</span> nn<span style="color:#666">.</span>ModuleList(layers)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>classifier <span style="color:#666">=</span> nn<span style="color:#666">.</span>Linear(embed_dim, embed_dim, bias<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">False</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>norm <span style="color:#666">=</span> nn<span style="color:#666">.</span>RMSNorm(embed_dim)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">forward</span>(<span style="color:#007020">self</span>, x, mask<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>         output <span style="color:#666">=</span> x
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>         <span style="color:#007020;font-weight:bold">for</span> layer <span style="color:#007020;font-weight:bold">in</span> <span style="color:#007020">self</span><span style="color:#666">.</span>decoder_layer:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>             output <span style="color:#666">=</span> layer(output, output, output, mask)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>         output <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>norm(output)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span>         logits <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>classifier(output)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span>         <span style="color:#007020;font-weight:bold">return</span> logits</span></span></code></pre></div><p>在上述代码中，第4~7行是根据参数选择不同的自注意力模块，这样后续我们只需要修改参数就能够复用整个代码。关于 <code>MultiQueryAttention</code> 模块的介绍可以参见文章<a href="/featured/multi-query-attention/">「MQA 多查询注意力原理与实现：详解 KV Cache 显存优化与 MHA 的差异」</a>。</p>
+<p>进一步，我们基于上述代码完成一次前向传播过程，并保存模型参数，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">train</span>(config):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     x <span style="color:#666">=</span> torch<span style="color:#666">.</span>randn([config<span style="color:#666">.</span>batch_size, config<span style="color:#666">.</span>seq_len, config<span style="color:#666">.</span>embed_dim])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>     mask <span style="color:#666">=</span> torch<span style="color:#666">.</span>full((<span style="color:#40a070">1</span>, <span style="color:#40a070">1</span>, config<span style="color:#666">.</span>seq_len, config<span style="color:#666">.</span>seq_len), <span style="color:#007020">float</span>(<span style="color:#4070a0">&#34;-inf&#34;</span>))
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>     mask <span style="color:#666">=</span> torch<span style="color:#666">.</span>triu(mask, diagonal<span style="color:#666">=</span><span style="color:#40a070">1</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>     model <span style="color:#666">=</span> Decoder(config<span style="color:#666">.</span>num_layers, config<span style="color:#666">.</span>embed_dim, 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>     config<span style="color:#666">.</span>num_heads, config<span style="color:#666">.</span>attention_type)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>     <span style="color:#007020;font-weight:bold">if</span> os<span style="color:#666">.</span>path<span style="color:#666">.</span>exists(config<span style="color:#666">.</span>target_type):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>         <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;## 存在模型文件 </span><span style="color:#70a0d0">{</span>config<span style="color:#666">.</span>target_type<span style="color:#70a0d0">}</span><span style="color:#4070a0">，正在进行增量训练……&#34;</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>         model<span style="color:#666">.</span>load_state_dict(torch<span style="color:#666">.</span>load(config<span style="color:#666">.</span>target_type))
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>     output <span style="color:#666">=</span> model(x, mask)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>     torch<span style="color:#666">.</span>save(model<span style="color:#666">.</span>state_dict(), <span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;</span><span style="color:#70a0d0">{</span>config<span style="color:#666">.</span>attention_type<span style="color:#70a0d0">}</span><span style="color:#4070a0">.pt&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>     <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;模型保存成功: </span><span style="color:#70a0d0">{</span>config<span style="color:#666">.</span>attention_type<span style="color:#70a0d0">}</span><span style="color:#4070a0">.pt&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>     <span style="color:#007020">print</span>(output<span style="color:#666">.</span>shape)</span></span></code></pre></div><p>在上述代码中，第7~9行是判断，如过当前已经存在转换后的模型参数，则进行增量训练。第10~11行便是模拟计算一次前向传播过程，然后再持久化保存到本地，文件名为 <code>mha.pt</code>。</p>
+<h4 id="222-转换模型参数">2.2.2 转换模型参数<a class="anchor" href="#222-%e8%bd%ac%e6%8d%a2%e6%a8%a1%e5%9e%8b%e5%8f%82%e6%95%b0">#</a></h4>
+<p>在得到模型参数 <code>mha.pt</code> 以后，下一步我们需要将其转换成适合 MQA 的结构。</p>
+<p>一般来说，在这之前我们可以先载入模型参数并打印出相关参数的信息，然后分析如何转换。</p>
+<p>如下所示，便是 <code>mha.pt</code> 中每个参数的信息：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#60a0b0;font-style:italic"># para_names:[decoder_layer.0.wq.weight], shape:torch.Size([72, 72])</span>
+</span></span><span style="display:flex;"><span><span style="color:#60a0b0;font-style:italic"># para_names:[decoder_layer.0.wk.weight], shape:torch.Size([72, 72])</span>
+</span></span><span style="display:flex;"><span><span style="color:#60a0b0;font-style:italic"># para_names:[decoder_layer.0.wv.weight], shape:torch.Size([72, 72])</span>
+</span></span><span style="display:flex;"><span><span style="color:#60a0b0;font-style:italic"># para_names:[decoder_layer.0.wo.weight], shape:torch.Size([72, 72])</span>
+</span></span><span style="display:flex;"><span><span style="color:#60a0b0;font-style:italic"># para_names:[decoder_layer.1.wq.weight], shape:torch.Size([72, 72])</span>
+</span></span><span style="display:flex;"><span><span style="color:#60a0b0;font-style:italic"># para_names:[decoder_layer.1.wk.weight], shape:torch.Size([72, 72])</span>
+</span></span><span style="display:flex;"><span><span style="color:#60a0b0;font-style:italic"># para_names:[decoder_layer.1.wv.weight], shape:torch.Size([72, 72])</span>
+</span></span><span style="display:flex;"><span><span style="color:#60a0b0;font-style:italic"># para_names:[decoder_layer.1.wo.weight], shape:torch.Size([72, 72])</span>
+</span></span><span style="display:flex;"><span><span style="color:#60a0b0;font-style:italic"># para_names:[classifier.weight], shape:torch.Size([72, 72])</span>
+</span></span><span style="display:flex;"><span><span style="color:#60a0b0;font-style:italic"># para_names:[norm.weight], shape:torch.Size([72])</span></span></span></code></pre></div><p>可以看到，一共有2个 <code>decoder_layer</code> 层， 每一层中都有 <code>wq</code>、<code>wk</code>、<code>wv</code> 和 <code>wo</code> 这4个权重参数，并且最后还有一个分类层和归一化层。关于上面各个参数的命名规则介绍大家可以参见<a href="/tutorials/bert/bert-for-squad">「第8讲 BERT SQuAD 阅读理解实战：预测与滑动窗口长文本处理」</a>部分的内容。</p>
+<p><strong>这里尤其需要注意一点的是</strong>：对于  <code>wq</code>、<code>wk</code> 和 <code>wv</code> 这三个权重参数来说，尽管形状都是 <code>[72,72]</code> 也即 <code>[embed_dim, embed_dim]</code>，但是我们需要明白它的本质其实是 <code>[embed_dim, num_head * head_dim]</code>，并且由于 PyTorch 中 <code>Linear</code> 层权重参数的存储形式是列优先，所以上面 <code>wq</code>、<code>wk</code> 和 <code>wv</code> 的形状其实是  <code>[num_head * head_dim, embed_dim]</code>。</p>
+<p>关于 <code>Linear</code> 中权重形状的介绍有兴趣可以参见文章「10090-Linear中权重的形状」。</p>
+<p>此时我们知道，下一步我们只需要对每一层中 <code>wk</code> 和 <code>wv</code> 对应的权重参数进行转换即可，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">convert_checkpoint</span>(config):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     __converted_key__ <span style="color:#666">=</span> [<span style="color:#4070a0">&#39;wk&#39;</span>, <span style="color:#4070a0">&#39;wv&#39;</span>]
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>     loaded_params <span style="color:#666">=</span> torch<span style="color:#666">.</span>load(config<span style="color:#666">.</span>source_type)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>     new_state_dict <span style="color:#666">=</span> deepcopy(loaded_params)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>     <span style="color:#007020;font-weight:bold">for</span> layer_id <span style="color:#007020;font-weight:bold">in</span> <span style="color:#007020">range</span>(config<span style="color:#666">.</span>num_layers):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>         <span style="color:#007020;font-weight:bold">for</span> key <span style="color:#007020;font-weight:bold">in</span> __converted_key__:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>             para_name <span style="color:#666">=</span> <span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;decoder_layer.</span><span style="color:#70a0d0">{</span>layer_id<span style="color:#70a0d0">}</span><span style="color:#4070a0">.</span><span style="color:#70a0d0">{</span>key<span style="color:#70a0d0">}</span><span style="color:#4070a0">.weight&#34;</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>             para <span style="color:#666">=</span> loaded_params[para_name]<span style="color:#666">.</span>transpose(<span style="color:#40a070">0</span>,<span style="color:#40a070">1</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>             <span style="color:#60a0b0;font-style:italic"># 由 [num_head * head_dim, embed_dim] 转换成 [embed_dim, num_head * head_dim]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>             para <span style="color:#666">=</span> para<span style="color:#666">.</span>reshape(config<span style="color:#666">.</span>embed_dim, config<span style="color:#666">.</span>num_heads, <span style="color:#666">-</span><span style="color:#40a070">1</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>             <span style="color:#60a0b0;font-style:italic"># [embed_dim, num_heads, head_dim]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>             <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;参数 </span><span style="color:#70a0d0">{</span>para_name<span style="color:#70a0d0">}</span><span style="color:#4070a0"> 转换成形状[embed_dim, num_heads, head_dim]: </span><span style="color:#70a0d0">{</span>para<span style="color:#666">.</span>shape<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>             para_mean <span style="color:#666">=</span> torch<span style="color:#666">.</span>mean(para, dim<span style="color:#666">=</span><span style="color:#40a070">1</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>             <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;参数 </span><span style="color:#70a0d0">{</span>para_name<span style="color:#70a0d0">}</span><span style="color:#4070a0"> 转换成形状[embed_dim, head_dim]: </span><span style="color:#70a0d0">{</span>para_mean<span style="color:#666">.</span>shape<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>             new_state_dict[para_name] <span style="color:#666">=</span> para_mean<span style="color:#666">.</span>transpose(<span style="color:#40a070">0</span>, <span style="color:#40a070">1</span>) <span style="color:#60a0b0;font-style:italic"># [head_dim, embed_dim]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>             <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;参数 </span><span style="color:#70a0d0">{</span>para_name<span style="color:#70a0d0">}</span><span style="color:#4070a0"> 处理完毕</span><span style="color:#4070a0;font-weight:bold">\n</span><span style="color:#4070a0">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>     torch<span style="color:#666">.</span>save(new_state_dict, <span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;</span><span style="color:#70a0d0">{</span>config<span style="color:#666">.</span>target_type<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)</span></span></code></pre></div><p>在上述代码中，第3行是载入本地模型参数。第4行是深度拷贝一份载入后的模型参数，因为后续我们会在此基础上进行修改。第5行开始便是遍历每一层中的权重参数。第6行是对我们需要进行转换的参数进行处理。第7行是构造得到对应的参数名。第8行是把权重参数的形状转换成符合我们直觉的方式，即 <code> [embed_dim, num_head * head_dim]</code>。第9~13行是取到对应的参数，并以均值法进行转换。第13行则是得到转换后的参数。第15行是把权重参数的形状转换成符合 <code>Linear</code> 中规范的形式。第17行是将转换结束后的参数实例化保存到本地，文件名为 <code>mqa.pt</code>。</p>
+<p>上述代码运行时将会输出类似如下信息：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> 参数 decoder_layer<span style="color:#40a070">.0</span><span style="color:#666">.</span>wk<span style="color:#666">.</span>weight 转换成形状[embed_dim, num_heads, head_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">72</span>, <span style="color:#40a070">6</span>, <span style="color:#40a070">12</span>])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span> 参数 decoder_layer<span style="color:#40a070">.0</span><span style="color:#666">.</span>wk<span style="color:#666">.</span>weight 转换成形状[embed_dim, head_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">72</span>, <span style="color:#40a070">12</span>])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span> 参数 decoder_layer<span style="color:#40a070">.0</span><span style="color:#666">.</span>wk<span style="color:#666">.</span>weight 处理完毕
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span> 参数 decoder_layer<span style="color:#40a070">.0</span><span style="color:#666">.</span>wv<span style="color:#666">.</span>weight 转换成形状[embed_dim, num_heads, head_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">72</span>, <span style="color:#40a070">6</span>, <span style="color:#40a070">12</span>])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span> 参数 decoder_layer<span style="color:#40a070">.0</span><span style="color:#666">.</span>wv<span style="color:#666">.</span>weight 转换成形状[embed_dim, head_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">72</span>, <span style="color:#40a070">12</span>])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span> 参数 decoder_layer<span style="color:#40a070">.0</span><span style="color:#666">.</span>wv<span style="color:#666">.</span>weight 处理完毕
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span> 参数 decoder_layer<span style="color:#40a070">.1</span><span style="color:#666">.</span>wk<span style="color:#666">.</span>weight 转换成形状[embed_dim, num_heads, head_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">72</span>, <span style="color:#40a070">6</span>, <span style="color:#40a070">12</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span> 参数 decoder_layer<span style="color:#40a070">.1</span><span style="color:#666">.</span>wk<span style="color:#666">.</span>weight 转换成形状[embed_dim, head_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">72</span>, <span style="color:#40a070">12</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span> 参数 decoder_layer<span style="color:#40a070">.1</span><span style="color:#666">.</span>wk<span style="color:#666">.</span>weight 处理完毕
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span> 参数 decoder_layer<span style="color:#40a070">.1</span><span style="color:#666">.</span>wv<span style="color:#666">.</span>weight 转换成形状[embed_dim, num_heads, head_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">72</span>, <span style="color:#40a070">6</span>, <span style="color:#40a070">12</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span> 参数 decoder_layer<span style="color:#40a070">.1</span><span style="color:#666">.</span>wv<span style="color:#666">.</span>weight 转换成形状[embed_dim, head_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">72</span>, <span style="color:#40a070">12</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span> 参数 decoder_layer<span style="color:#40a070">.1</span><span style="color:#666">.</span>wv<span style="color:#666">.</span>weight 处理完毕</span></span></code></pre></div><h4 id="223-增量训练">2.2.3 增量训练<a class="anchor" href="#223-%e5%a2%9e%e9%87%8f%e8%ae%ad%e7%bb%83">#</a></h4>
+<p>在完成参数结构的调整以后，我们可以再次基于上面的 <code>train(config)</code> 方法来完成基于 MQA 的模型的训练过程，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">if</span> <span style="color:#bb60d5">__name__</span> <span style="color:#666">==</span> <span style="color:#4070a0">&#39;__main__&#39;</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     config <span style="color:#666">=</span> Config()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>     <span style="color:#60a0b0;font-style:italic"># 第一步： 训练 mha 并保存模型</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>     train(config)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>     <span style="color:#60a0b0;font-style:italic"># 第二步： 分析 mha 参数</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>     analysis(config<span style="color:#666">.</span>source_type)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>     <span style="color:#60a0b0;font-style:italic"># 第三步： 将 mha 转换为 mqa 并保存</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>     convert_checkpoint(config)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>     <span style="color:#60a0b0;font-style:italic"># 第四步： 基于 mqa 增量训练</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>     config<span style="color:#666">.</span><span style="color:#bb60d5">__dict__</span>[<span style="color:#4070a0">&#39;attention_type&#39;</span>] <span style="color:#666">=</span> <span style="color:#4070a0">&#39;mqa&#39;</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>     train(config)</span></span></code></pre></div><p>以上就是如何将基于 MHA 的模型参数转换为符合 MQA 结构的过程，以及如何继续进行增量训练。</p>
+<h2 id="3-gqa-增量训练">3. GQA 增量训练<a class="anchor" href="#3-gqa-%e5%a2%9e%e9%87%8f%e8%ae%ad%e7%bb%83">#</a></h2>
+<p>在介绍完 MQA 的增量训练过程以后，我们再来看如何基于 GQA 来同样完成上述整个流程。不过在这之前先来给大家介绍一下 GQA 的具体原理，以及如何一步步实现 GQA 注意力结构。</p>
+<h3 id="31-gqa-原理">3.1 GQA 原理<a class="anchor" href="#31-gqa-%e5%8e%9f%e7%90%86">#</a></h3>
+<p>假设多头输入 Query、Key 和 Value 分别为 $X_q\in\mathbb{R}^{T_t\times d}$ 、 $X_k\in\mathbb{R}^{T_s\times d}$ 和  $X_v\in\mathbb{R}^{T_s\times d}$ ，其中 $T_s$ 和 $T_t$  分别表示源序列和目标序列的长度，$d$ 表示模型维度。同时，$h$ 表示多头个数，$g$ 表示分组数量，$s$ 表示每一组中多头的个数，即 $sg=h$。那么第 $i$ 个头对应的三个线性层映射权重分别为 $W^i_q\in\mathbb{R}^{d\times d_h}$ 、 $W^{\lfloor(i-1)/s\rfloor+1}_k\in\mathbb{R}^{d\times d_h}$ 和 $W^{\lfloor(i-1)/s\rfloor+1}_v\in\mathbb{R}^{d\times d_h}$ ，其中 $i=1,2,...,h$， $\lfloor x\rfloor$ 表示对 $x$ 向下取整（即整除）， 且通常 $d=h\times d_h$ 。</p>
+<p>此时，第 $i$ 个头的注意力计算过程可以表示为
+</p>
+$$
+\begin{aligned}
+Q_i &= X_qW^i_q\in\mathbb{R}^{T_t\times d_h}\\[2ex]
+\quad K_i &= X_kW^{\lfloor(i-1)/s\rfloor+1}_k\in\mathbb{R}^{T_s\times d_h}\\[2ex]
+\quad V_i &= X_vW^{\lfloor(i-1)/s\rfloor+1}_v\in\mathbb{R}^{T_s\times d_h}\\[2ex]
+\text{head}_i(Q_i,K_i,V_i)&=\text{softmax}\left(\frac{Q_iK_i^T}{\sqrt{d_h}}\right)V_i\in\mathbb{R}^{T_t\times d_h}
+\end{aligned}\tag{1}
+$$<p>
+这里需要注意的是，因为同一组中的 Key 和 Value 是共享的，所以实际情况中每一组里的 $K_i$ 只需要计算一次即可，式(1)中只是一种通用的表达式。</p>
+<p>进一步，多头注意力的计算过程为
+</p>
+$$
+\begin{aligned}
+Y_{\text{MHA}}=\text{Concat}(\text{head}_1,...,\text{head}_h)W^O
+\end{aligned}
+\tag{2}
+$$<p>
+其中 $W^O\in\mathbb{R}^{d\times d}$ 。</p>
+<p>接着，根据式(1)我们可以得到计算 3 个线性变换的时间复杂度分别为 $O(T_tdd_hh)$ 、 $O(T_sdd_hg)$ 和 $O(T_sdd_hg)$ ，$Q_iK_i^T$ 对应的时间复杂度为 $O(T_td_hT_sh)$  ，计算注意力权重的时间复杂度为 $O(T_tT_sd_hh)$ 。因为模型超参数是固定的，GQA 的整体时间复杂度为 $O(T_tT_sd_hh)$。同时，由于 GQA 中每一组中所有头共享一个 Key 和 Value ，所以缓存 $K$ 和 $V$ 的空间复杂度均为 $O(T_sd_hg)$</p>
+<p>此时，如果仅考虑推理时的场景那么 $T_t=T_s=n$，则 GQA 整体的时间复杂度为 $O(n^2d)$ ，空间复杂度为 $O(nd_hg)$ 。</p>
+<h3 id="32-gqa-实现过程">3.2 GQA 实现过程<a class="anchor" href="#32-gqa-%e5%ae%9e%e7%8e%b0%e8%bf%87%e7%a8%8b">#</a></h3>
+<h4 id="321-gqa-实现策略">3.2.1 GQA 实现策略<a class="anchor" href="#321-gqa-%e5%ae%9e%e7%8e%b0%e7%ad%96%e7%95%a5">#</a></h4>
+<p>根据式(1)和式(2)的计算过程，我们便可以完成整个 GQA 的实现过程。同时，由于每一组中的所有头共享一个 Key 和 Value ，所有在实际实现时我们可以先计算得到每个组中对应的  Key 和 Value ，然后再在组内进行复制，如图7所示。</p>
+<div align=center><img width="600" src="/images/featured/202507261728.png" alt="图 7. GQA 中 Key 与 Value 复制过程图"/> </div><center>图 7. GQA 中 Key 与 Value 复制过程图</center>
+<p>在图7中，我们先计算得到每一组中共享的  Key 和 Value ，然后再在每组内部进行复制，这样便得到了每个头完整的三个状态，进一步便可以完整整个 GQA 多头注意力的计算过程。</p>
+<p>因此，我们首先需要实现这么一个辅助函数来完成上面的复制过程，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">repeat_kv</span>(x, n_heads_group):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     bs, seq_len, groups, head_dim <span style="color:#666">=</span> x<span style="color:#666">.</span>shape
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>     <span style="color:#60a0b0;font-style:italic"># n_heads_group 每个 group 中头的个数</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>     <span style="color:#60a0b0;font-style:italic"># groups 分组数量</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>     <span style="color:#007020;font-weight:bold">if</span> groups <span style="color:#666">==</span> <span style="color:#40a070">1</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>         <span style="color:#007020;font-weight:bold">return</span> x
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>     <span style="color:#007020;font-weight:bold">return</span> (x[:, :, :, <span style="color:#007020;font-weight:bold">None</span>, :]  <span style="color:#60a0b0;font-style:italic"># [bs, seq_len, groups,1, head_dim ]</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>         <span style="color:#666">.</span>expand(bs, seq_len, groups, n_heads_group, head_dim)  
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>         <span style="color:#60a0b0;font-style:italic"># [bs, seq_len, groups, n_heads_group, head_dim ]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>         <span style="color:#666">.</span>reshape(bs, seq_len, groups <span style="color:#666">*</span> n_heads_group, head_dim))</span></span></code></pre></div><p>在上述代码中，第5~6行表示如果只有一个组则直接返回，这是因为此时 Key 和 Value 的形状均为 <code>[bs, seq_len, 1, head_dim]</code> ，在计算时会自动出发 PyTorch 中的广播机制。如果第3个维度不是1则不会出发广播机制，需要手动实现。第7~10行便是整个复制过程，大家按维度标识即可理解。</p>
+<h4 id="322-从零实现-gqa">3.2.2 从零实现 GQA<a class="anchor" href="#322-%e4%bb%8e%e9%9b%b6%e5%ae%9e%e7%8e%b0-gqa">#</a></h4>
+<p>进一步，我们便可以来实现 GQA 的整个计算过程，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">GroupedQueryAttention</span>(nn<span style="color:#666">.</span>Module):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">__init__</span>(<span style="color:#007020">self</span>, embed_dim<span style="color:#666">=</span><span style="color:#40a070">64</span>, num_heads<span style="color:#666">=</span><span style="color:#40a070">8</span>, num_groups<span style="color:#666">=</span><span style="color:#40a070">8</span>):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>         <span style="color:#007020">super</span>()<span style="color:#666">.</span><span style="color:#06287e">__init__</span>()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>         <span style="color:#666">......</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>num_groups <span style="color:#666">=</span> num_groups
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>num_heads_groups <span style="color:#666">=</span> num_heads <span style="color:#666">//</span> num_groups
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>wq <span style="color:#666">=</span> nn<span style="color:#666">.</span>Linear(<span style="color:#007020">self</span><span style="color:#666">.</span>embed_dim, <span style="color:#007020">self</span><span style="color:#666">.</span>num_heads <span style="color:#666">*</span> <span style="color:#007020">self</span><span style="color:#666">.</span>head_dim, bias<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">False</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>wk <span style="color:#666">=</span> nn<span style="color:#666">.</span>Linear(<span style="color:#007020">self</span><span style="color:#666">.</span>embed_dim, <span style="color:#007020">self</span><span style="color:#666">.</span>num_groups <span style="color:#666">*</span> <span style="color:#007020">self</span><span style="color:#666">.</span>head_dim, bias<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">False</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>wv <span style="color:#666">=</span> nn<span style="color:#666">.</span>Linear(<span style="color:#007020">self</span><span style="color:#666">.</span>embed_dim, <span style="color:#007020">self</span><span style="color:#666">.</span>num_groups <span style="color:#666">*</span> <span style="color:#007020">self</span><span style="color:#666">.</span>head_dim, bias<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">False</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>wo <span style="color:#666">=</span> nn<span style="color:#666">.</span>Linear(<span style="color:#007020">self</span><span style="color:#666">.</span>embed_dim, <span style="color:#007020">self</span><span style="color:#666">.</span>embed_dim, bias<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">False</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">forward</span>(<span style="color:#007020">self</span>, query, key, value, mask<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>         bsz, tgt_len, _ <span style="color:#666">=</span> query<span style="color:#666">.</span>shape
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>         src_len <span style="color:#666">=</span> key<span style="color:#666">.</span>size(<span style="color:#40a070">1</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>         xq <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>wq(query)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>         xk, xv <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>wk(key), <span style="color:#007020">self</span><span style="color:#666">.</span>wv(value)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>         xk <span style="color:#666">=</span> xk<span style="color:#666">.</span>view(bsz, src_len, <span style="color:#007020">self</span><span style="color:#666">.</span>num_groups, <span style="color:#007020">self</span><span style="color:#666">.</span>head_dim)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>         xv <span style="color:#666">=</span> xv<span style="color:#666">.</span>view(bsz, src_len, <span style="color:#007020">self</span><span style="color:#666">.</span>num_groups, <span style="color:#007020">self</span><span style="color:#666">.</span>head_dim)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span>         xk <span style="color:#666">=</span> repeat_kv(xk, <span style="color:#007020">self</span><span style="color:#666">.</span>num_heads_groups) <span style="color:#60a0b0;font-style:italic"># [bsz, src_len, num_heads, head_dim]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span>         xv <span style="color:#666">=</span> repeat_kv(xv, <span style="color:#007020">self</span><span style="color:#666">.</span>num_heads_groups)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">21</span>         queries <span style="color:#666">=</span> xq<span style="color:#666">.</span>view(bsz, tgt_len, <span style="color:#007020">self</span><span style="color:#666">.</span>num_heads, <span style="color:#007020">self</span><span style="color:#666">.</span>head_dim)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">22</span>         keys, values <span style="color:#666">=</span> xk<span style="color:#666">.</span>transpose(<span style="color:#40a070">1</span>, <span style="color:#40a070">2</span>), xv<span style="color:#666">.</span>transpose(<span style="color:#40a070">1</span>, <span style="color:#40a070">2</span>) 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">23</span>         queries <span style="color:#666">=</span> queries<span style="color:#666">.</span>transpose(<span style="color:#40a070">1</span>, <span style="color:#40a070">2</span>)  <span style="color:#60a0b0;font-style:italic"># [bsz, num_heads, tgt_len, head_dim]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">24</span>         scores <span style="color:#666">=</span> torch<span style="color:#666">.</span>matmul(queries, keys<span style="color:#666">.</span>transpose(<span style="color:#40a070">2</span>, <span style="color:#40a070">3</span>)) <span style="color:#666">/</span> math<span style="color:#666">.</span>sqrt(<span style="color:#007020">self</span><span style="color:#666">.</span>head_dim)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">25</span>         <span style="color:#007020;font-weight:bold">if</span> mask <span style="color:#007020;font-weight:bold">is</span> <span style="color:#007020;font-weight:bold">not</span> <span style="color:#007020;font-weight:bold">None</span>:  <span style="color:#60a0b0;font-style:italic"># [1, 1, tgt_len, src_len]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">26</span>             scores <span style="color:#666">=</span> scores <span style="color:#666">+</span> mask
+</span></span><span style="display:flex;"><span><span style="color:#40a070">27</span>         scores <span style="color:#666">=</span> F<span style="color:#666">.</span>softmax(scores<span style="color:#666">.</span>float(), dim<span style="color:#666">=-</span><span style="color:#40a070">1</span>)<span style="color:#666">.</span>type_as(xq)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">28</span>         output <span style="color:#666">=</span> torch<span style="color:#666">.</span>matmul(scores, values) <span style="color:#60a0b0;font-style:italic"># [bsz, num_heads, tgt_len, head_dim]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">29</span>         output <span style="color:#666">=</span> output<span style="color:#666">.</span>transpose(<span style="color:#40a070">1</span>, <span style="color:#40a070">2</span>)<span style="color:#666">.</span>contiguous()<span style="color:#666">.</span>view(bsz, tgt_len, <span style="color:#666">-</span><span style="color:#40a070">1</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">30</span>         <span style="color:#007020;font-weight:bold">return</span> <span style="color:#007020">self</span><span style="color:#666">.</span>wo(output)</span></span></code></pre></div><p>在上述代码中，第5~6行是分别指定分组数量以及每一组中多头的数量。第8~9行是定义 Key 和 Value 对应的线性层映射权重。第15~16行则是分别计算三个线性变换，其中 <code>xk</code> 和 <code>xv</code> 的形状均为 <code>[bsz, src_len, num_groups * head_dim]</code>。第19~20行则是在组内对 Key 和 Value 进行复制，结束后的形状均为 <code>[bsz, src_len, num_heads, head_dim]</code> 。此时从形状上看便回到了正常的 MHA 计算过程，后续代码就不再赘述。</p>
+<p>同时，如过我们将第22行代码中 <code>keys</code> 的部分值输出，即 <code>print(keys[0][:4, :3, :5])</code>，那将会得到类似如下结果：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span>tensor([[[<span style="color:#666">-</span><span style="color:#40a070">0.0911</span>,  <span style="color:#40a070">0.5632</span>,  <span style="color:#40a070">0.6265</span>,  <span style="color:#40a070">0.4045</span>, <span style="color:#666">-</span><span style="color:#40a070">0.2997</span>],
+</span></span><span style="display:flex;"><span>         [ <span style="color:#40a070">0.1754</span>, <span style="color:#666">-</span><span style="color:#40a070">0.2272</span>, <span style="color:#666">-</span><span style="color:#40a070">0.1159</span>,  <span style="color:#40a070">0.4430</span>, <span style="color:#666">-</span><span style="color:#40a070">0.5355</span>],
+</span></span><span style="display:flex;"><span>         [<span style="color:#666">-</span><span style="color:#40a070">1.0640</span>, <span style="color:#666">-</span><span style="color:#40a070">0.2887</span>,  <span style="color:#40a070">0.2030</span>, <span style="color:#666">-</span><span style="color:#40a070">0.1093</span>, <span style="color:#666">-</span><span style="color:#40a070">1.0711</span>]],
+</span></span><span style="display:flex;"><span>        
+</span></span><span style="display:flex;"><span>        [[<span style="color:#666">-</span><span style="color:#40a070">0.0911</span>,  <span style="color:#40a070">0.5632</span>,  <span style="color:#40a070">0.6265</span>,  <span style="color:#40a070">0.4045</span>, <span style="color:#666">-</span><span style="color:#40a070">0.2997</span>],
+</span></span><span style="display:flex;"><span>         [ <span style="color:#40a070">0.1754</span>, <span style="color:#666">-</span><span style="color:#40a070">0.2272</span>, <span style="color:#666">-</span><span style="color:#40a070">0.1159</span>,  <span style="color:#40a070">0.4430</span>, <span style="color:#666">-</span><span style="color:#40a070">0.5355</span>],
+</span></span><span style="display:flex;"><span>         [<span style="color:#666">-</span><span style="color:#40a070">1.0640</span>, <span style="color:#666">-</span><span style="color:#40a070">0.2887</span>,  <span style="color:#40a070">0.2030</span>, <span style="color:#666">-</span><span style="color:#40a070">0.1093</span>, <span style="color:#666">-</span><span style="color:#40a070">1.0711</span>]],
+</span></span><span style="display:flex;"><span>        
+</span></span><span style="display:flex;"><span>        [[ <span style="color:#40a070">1.3268</span>,  <span style="color:#40a070">0.0737</span>, <span style="color:#666">-</span><span style="color:#40a070">0.3388</span>,  <span style="color:#40a070">0.1127</span>, <span style="color:#666">-</span><span style="color:#40a070">0.1139</span>],
+</span></span><span style="display:flex;"><span>         [<span style="color:#666">-</span><span style="color:#40a070">0.4012</span>,  <span style="color:#40a070">0.1279</span>,  <span style="color:#40a070">1.1473</span>,  <span style="color:#40a070">0.5551</span>,  <span style="color:#40a070">0.5691</span>],
+</span></span><span style="display:flex;"><span>         [ <span style="color:#40a070">0.1228</span>,  <span style="color:#40a070">0.9680</span>, <span style="color:#666">-</span><span style="color:#40a070">0.1508</span>, <span style="color:#666">-</span><span style="color:#40a070">0.9461</span>,  <span style="color:#40a070">0.8109</span>]],
+</span></span><span style="display:flex;"><span>        
+</span></span><span style="display:flex;"><span>        [[ <span style="color:#40a070">1.3268</span>,  <span style="color:#40a070">0.0737</span>, <span style="color:#666">-</span><span style="color:#40a070">0.3388</span>,  <span style="color:#40a070">0.1127</span>, <span style="color:#666">-</span><span style="color:#40a070">0.1139</span>],
+</span></span><span style="display:flex;"><span>         [<span style="color:#666">-</span><span style="color:#40a070">0.4012</span>,  <span style="color:#40a070">0.1279</span>,  <span style="color:#40a070">1.1473</span>,  <span style="color:#40a070">0.5551</span>,  <span style="color:#40a070">0.5691</span>],
+</span></span><span style="display:flex;"><span>         [ <span style="color:#40a070">0.1228</span>,  <span style="color:#40a070">0.9680</span>, <span style="color:#666">-</span><span style="color:#40a070">0.1508</span>, <span style="color:#666">-</span><span style="color:#40a070">0.9461</span>,  <span style="color:#40a070">0.8109</span>]]],
+</span></span><span style="display:flex;"><span>       grad_fn<span style="color:#666">=&lt;</span>SliceBackward0<span style="color:#666">&gt;</span>)</span></span></code></pre></div><p>此时 <code>keys</code> 的形状为 <code>[bsz, num_heads, src_len, head_dim]</code> ，所以上面结果展示的便是前4个头的输出情况。根据 <code>num_heads = 6</code> ，<code>num_groups = 3</code> 可知，每一组中有两个头，对应上面两组中每一组内部两个头的 Key 都是相等的。</p>
+<p>到此，对于 GQA 的实现过程就介绍完了，以上完整示例代码可参见 <code>Code/C08_GQA/C02_gqa.py</code> 文件。</p>
+<h3 id="33-gqa-增量训练实现">3.3 GQA 增量训练实现<a class="anchor" href="#33-gqa-%e5%a2%9e%e9%87%8f%e8%ae%ad%e7%bb%83%e5%ae%9e%e7%8e%b0">#</a></h3>
+<p>在完成 GQA 的实现以后，我们再来看如何基于 MHA 持久化的模型使用 GQA 结构进行增量训练。</p>
+<h4 id="331-转换模型参数">3.3.1 转换模型参数<a class="anchor" href="#331-%e8%bd%ac%e6%8d%a2%e6%a8%a1%e5%9e%8b%e5%8f%82%e6%95%b0">#</a></h4>
+<p>如同上面介绍 MHA 的增量训练流程一样，首先仍旧需要实现一个辅助函数将 MHA 对应的权重参数转换为适用于 GQA 的结构。转换思路同 MQA 一样，采用 Mean Pool 即可，实现流程如图 8所示。</p>
+<div align=center><img width="600" src="/images/featured/202508031843.png" alt="图 8. MHA 转 GQA 参数结构示意图"/> </div><center>图 8. MHA 转 GQA 参数结构示意图</center>
+<p>如图8所示便是对有6个头来说的多头注意力 MHA ，当分组数为3时，采用 Mean Pool 策略进行转换时的示意图。</p>
+<blockquote class='book-hint '>
+<p>When converting a multi-head checkpoint to a GQA checkpoint, we construct each group key and value head by mean-pooling all the original heads within that group.</p>
+</blockquote><p>当然，除了这样的均值法以外，我们也可以手动选择每一组 Query 中对应的 Key 和 Value 。</p>
+<p>根据图8中的示意过程，我们便可以完成相应的代码实现过程，示例代码如下所示：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">convert_checkpoint</span>(config):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     __converted_key__ <span style="color:#666">=</span> [<span style="color:#4070a0">&#39;wk&#39;</span>, <span style="color:#4070a0">&#39;wv&#39;</span>]
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>     loaded_params <span style="color:#666">=</span> torch<span style="color:#666">.</span>load(config<span style="color:#666">.</span>source_type)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>     new_state_dict <span style="color:#666">=</span> deepcopy(loaded_params)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>     <span style="color:#007020;font-weight:bold">for</span> layer_id <span style="color:#007020;font-weight:bold">in</span> <span style="color:#007020">range</span>(config<span style="color:#666">.</span>num_layers):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>         <span style="color:#007020;font-weight:bold">for</span> key <span style="color:#007020;font-weight:bold">in</span> __converted_key__:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>             para_name <span style="color:#666">=</span> <span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;decoder_layer.</span><span style="color:#70a0d0">{</span>layer_id<span style="color:#70a0d0">}</span><span style="color:#4070a0">.</span><span style="color:#70a0d0">{</span>key<span style="color:#70a0d0">}</span><span style="color:#4070a0">.weight&#34;</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>             para <span style="color:#666">=</span> loaded_params[para_name]<span style="color:#666">.</span>transpose(<span style="color:#40a070">0</span>, <span style="color:#40a070">1</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>             <span style="color:#60a0b0;font-style:italic"># 由 [num_head * head_dim, embed_dim] 转换成 [embed_dim, num_head * head_dim]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>             para <span style="color:#666">=</span> para<span style="color:#666">.</span>reshape(config<span style="color:#666">.</span>embed_dim, config<span style="color:#666">.</span>num_heads, <span style="color:#666">-</span><span style="color:#40a070">1</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>             <span style="color:#60a0b0;font-style:italic"># [embed_dim, num_heads, head_dim]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>             <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;</span><span style="color:#70a0d0">{</span>para_name<span style="color:#70a0d0">}</span><span style="color:#4070a0"> [embed_dim, num_heads, head_dim]: </span><span style="color:#70a0d0">{</span>para<span style="color:#666">.</span>shape<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>             para <span style="color:#666">=</span> para<span style="color:#666">.</span>view(config<span style="color:#666">.</span>embed_dim, config<span style="color:#666">.</span>num_groups, config<span style="color:#666">.</span>num_heads_group, <span style="color:#666">-</span><span style="color:#40a070">1</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>             <span style="color:#60a0b0;font-style:italic"># [embed_dim, num_groups, num_heads_group, head_dim]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>             <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34; </span><span style="color:#70a0d0">{</span>para_name<span style="color:#70a0d0">}</span><span style="color:#4070a0"> [embed_dim,num_groups, num_heads_group, head_dim]: </span><span style="color:#70a0d0">{</span>para<span style="color:#666">.</span>shape<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>             para_mean <span style="color:#666">=</span> torch<span style="color:#666">.</span>mean(para, dim<span style="color:#666">=</span><span style="color:#40a070">2</span>)<span style="color:#666">.</span>view(config<span style="color:#666">.</span>embed_dim, <span style="color:#666">-</span><span style="color:#40a070">1</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>             <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34; </span><span style="color:#70a0d0">{</span>para_name<span style="color:#70a0d0">}</span><span style="color:#4070a0"> [embed_dim,num_groups * head_dim]: </span><span style="color:#70a0d0">{</span>para_mean<span style="color:#666">.</span>shape<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>             new_state_dict[para_name] <span style="color:#666">=</span> para_mean<span style="color:#666">.</span>transpose(<span style="color:#40a070">0</span>, <span style="color:#40a070">1</span>)  <span style="color:#60a0b0;font-style:italic"># [num_groups * head_dim, embed_dim]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span>             <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34; </span><span style="color:#70a0d0">{</span>para_name<span style="color:#70a0d0">}</span><span style="color:#4070a0"> 处理完毕</span><span style="color:#4070a0;font-weight:bold">\n</span><span style="color:#4070a0">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span>     torch<span style="color:#666">.</span>save(new_state_dict, <span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;</span><span style="color:#70a0d0">{</span>config<span style="color:#666">.</span>target_type<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)</span></span></code></pre></div><p>在上述代码中，第8行首先将权重参数的形状转换成符合我们直觉的方式，即 <code> [embed_dim, num_head * head_dim]</code>。第10行是将参数转换成 <code>[embed_dim, num_heads, head_dim]</code> 形状，然后再按组进行拆分，即第13行代码所示。第16行代码则是在 <code>num_heads_group</code> 找个维度上取均值。第18行是把权重参数的形状转换成符合 <code>Linear</code> 中规范的形式。第20行代码是将处理完成后的结果持久化到本地，文件名为 <code>gqa.pt</code>。</p>
+<p>上述代码运行时将会输出类似如下信息：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> decoder_layer<span style="color:#40a070">.0</span><span style="color:#666">.</span>wk<span style="color:#666">.</span>weight [embed_dim, num_heads, head_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">72</span>, <span style="color:#40a070">6</span>, <span style="color:#40a070">12</span>])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span> decoder_layer<span style="color:#40a070">.0</span><span style="color:#666">.</span>wk<span style="color:#666">.</span>weight [embed_dim,num_groups, num_heads_group, head_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">72</span>, <span style="color:#40a070">3</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">12</span>])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span> decoder_layer<span style="color:#40a070">.0</span><span style="color:#666">.</span>wk<span style="color:#666">.</span>weight [embed_dim,num_groups <span style="color:#666">*</span> head_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">72</span>, <span style="color:#40a070">36</span>])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span> decoder_layer<span style="color:#40a070">.0</span><span style="color:#666">.</span>wk<span style="color:#666">.</span>weight 处理完毕
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span> decoder_layer<span style="color:#40a070">.0</span><span style="color:#666">.</span>wv<span style="color:#666">.</span>weight [embed_dim, num_heads, head_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">72</span>, <span style="color:#40a070">6</span>, <span style="color:#40a070">12</span>])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span> decoder_layer<span style="color:#40a070">.0</span><span style="color:#666">.</span>wv<span style="color:#666">.</span>weight [embed_dim,num_groups, num_heads_group, head_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">72</span>, <span style="color:#40a070">3</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">12</span>])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span> decoder_layer<span style="color:#40a070">.0</span><span style="color:#666">.</span>wv<span style="color:#666">.</span>weight [embed_dim,num_groups <span style="color:#666">*</span> head_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">72</span>, <span style="color:#40a070">36</span>])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span> decoder_layer<span style="color:#40a070">.0</span><span style="color:#666">.</span>wv<span style="color:#666">.</span>weight 处理完毕
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span> decoder_layer<span style="color:#40a070">.1</span><span style="color:#666">.</span>wk<span style="color:#666">.</span>weight [embed_dim, num_heads, head_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">72</span>, <span style="color:#40a070">6</span>, <span style="color:#40a070">12</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span> decoder_layer<span style="color:#40a070">.1</span><span style="color:#666">.</span>wk<span style="color:#666">.</span>weight [embed_dim,num_groups, num_heads_group, head_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">72</span>, <span style="color:#40a070">3</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">12</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span> decoder_layer<span style="color:#40a070">.1</span><span style="color:#666">.</span>wk<span style="color:#666">.</span>weight [embed_dim,num_groups <span style="color:#666">*</span> head_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">72</span>, <span style="color:#40a070">36</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span> decoder_layer<span style="color:#40a070">.1</span><span style="color:#666">.</span>wk<span style="color:#666">.</span>weight 处理完毕
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span> decoder_layer<span style="color:#40a070">.1</span><span style="color:#666">.</span>wv<span style="color:#666">.</span>weight [embed_dim, num_heads, head_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">72</span>, <span style="color:#40a070">6</span>, <span style="color:#40a070">12</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span> decoder_layer<span style="color:#40a070">.1</span><span style="color:#666">.</span>wv<span style="color:#666">.</span>weight [embed_dim,num_groups, num_heads_group, head_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">72</span>, <span style="color:#40a070">3</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">12</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span> decoder_layer<span style="color:#40a070">.1</span><span style="color:#666">.</span>wv<span style="color:#666">.</span>weight [embed_dim,num_groups <span style="color:#666">*</span> head_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">72</span>, <span style="color:#40a070">36</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span> decoder_layer<span style="color:#40a070">.1</span><span style="color:#666">.</span>wv<span style="color:#666">.</span>weight 处理完毕</span></span></code></pre></div><h4 id="332-定义网络结构">3.3.2 定义网络结构<a class="anchor" href="#332-%e5%ae%9a%e4%b9%89%e7%bd%91%e7%bb%9c%e7%bb%93%e6%9e%84">#</a></h4>
+<p>在得到转换后的参数结构以后，我们只需要对上面第2.2.1节中的 <code>Decoder</code> 做细微调整即可用于 GQA 的增量训练，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">Decoder</span>(nn<span style="color:#666">.</span>Module):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">__init__</span>(<span style="color:#007020">self</span>, num_layers<span style="color:#666">=</span><span style="color:#40a070">2</span>, embed_dim<span style="color:#666">=</span><span style="color:#40a070">64</span>, num_heads<span style="color:#666">=</span><span style="color:#40a070">8</span>, attention_type<span style="color:#666">=</span><span style="color:#4070a0">&#39;mha&#39;</span>, num_groups<span style="color:#666">=</span><span style="color:#40a070">8</span>):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>         <span style="color:#007020">super</span>(Decoder, <span style="color:#007020">self</span>)<span style="color:#666">.</span><span style="color:#06287e">__init__</span>()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>         <span style="color:#007020;font-weight:bold">if</span> attention_type <span style="color:#666">==</span> <span style="color:#4070a0">&#39;mha&#39;</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>             attn <span style="color:#666">=</span> MultiHeadAttention
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>         <span style="color:#007020;font-weight:bold">elif</span> attention_type <span style="color:#666">==</span> <span style="color:#4070a0">&#39;gqa&#39;</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>             attn <span style="color:#666">=</span> GroupedQueryAttention
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>         <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;## 正在训练基于 </span><span style="color:#70a0d0">{</span>attention_type<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>         layers <span style="color:#666">=</span> [attn(embed_dim, num_heads, num_groups<span style="color:#666">=</span>num_groups) <span style="color:#007020;font-weight:bold">for</span> _ <span style="color:#007020;font-weight:bold">in</span> <span style="color:#007020">range</span>(num_layers)]
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>decoder_layer <span style="color:#666">=</span> nn<span style="color:#666">.</span>ModuleList(layers)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>classifier <span style="color:#666">=</span> nn<span style="color:#666">.</span>Linear(embed_dim, embed_dim, bias<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">False</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>norm <span style="color:#666">=</span> nn<span style="color:#666">.</span>RMSNorm(embed_dim)</span></span></code></pre></div><p>在上述代码中，第6~7行我们修改了 <code>gqa</code> 这一选项来使用基于 GQA 的网络结构。</p>
+<h4 id="333-增量训练">3.3.3 增量训练<a class="anchor" href="#333-%e5%a2%9e%e9%87%8f%e8%ae%ad%e7%bb%83">#</a></h4>
+<p>最后，我们使用如下 <code>train()</code> 方法便可以模拟整个训练过程：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">train</span>(config):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     x <span style="color:#666">=</span> torch<span style="color:#666">.</span>randn([config<span style="color:#666">.</span>batch_size, config<span style="color:#666">.</span>seq_len, config<span style="color:#666">.</span>embed_dim])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>     mask <span style="color:#666">=</span> torch<span style="color:#666">.</span>full((<span style="color:#40a070">1</span>, <span style="color:#40a070">1</span>, config<span style="color:#666">.</span>seq_len, config<span style="color:#666">.</span>seq_len), <span style="color:#007020">float</span>(<span style="color:#4070a0">&#34;-inf&#34;</span>))
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>     mask <span style="color:#666">=</span> torch<span style="color:#666">.</span>triu(mask, diagonal<span style="color:#666">=</span><span style="color:#40a070">1</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>     model <span style="color:#666">=</span> Decoder(config<span style="color:#666">.</span>num_layers, config<span style="color:#666">.</span>embed_dim, config<span style="color:#666">.</span>num_heads,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>                     config<span style="color:#666">.</span>attention_type, config<span style="color:#666">.</span>num_groups)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>     <span style="color:#007020;font-weight:bold">if</span> os<span style="color:#666">.</span>path<span style="color:#666">.</span>exists(config<span style="color:#666">.</span>target_type):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>         <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;## 存在模型文件 </span><span style="color:#70a0d0">{</span>config<span style="color:#666">.</span>target_type<span style="color:#70a0d0">}</span><span style="color:#4070a0">，正在进行增量训练……&#34;</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>         model<span style="color:#666">.</span>load_state_dict(torch<span style="color:#666">.</span>load(config<span style="color:#666">.</span>target_type))
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>     output <span style="color:#666">=</span> model(x, mask)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>     torch<span style="color:#666">.</span>save(model<span style="color:#666">.</span>state_dict(), <span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;</span><span style="color:#70a0d0">{</span>config<span style="color:#666">.</span>attention_type<span style="color:#70a0d0">}</span><span style="color:#4070a0">.pt&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>     <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;模型保存成功: </span><span style="color:#70a0d0">{</span>config<span style="color:#666">.</span>attention_type<span style="color:#70a0d0">}</span><span style="color:#4070a0">.pt&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>     <span style="color:#007020">print</span>(output<span style="color:#666">.</span>shape)</span></span></code></pre></div><p>以上便是基于 GQA 结构的增量训练过程，完整示例代码可以参见 <code>Code/C08_GQA/C03_gqa_uptrain.py</code> 文件。</p>
+<h2 id="4-复杂度分析">4. 复杂度分析<a class="anchor" href="#4-%e5%a4%8d%e6%9d%82%e5%ba%a6%e5%88%86%e6%9e%90">#</a></h2>
+<p>在介绍完 GQA 的相关原理及实现以后，我们再来看看 GQA 的复杂度等情况，以及将其与之前的 MHA 和 MQA 进行一个对比。</p>
+<h3 id="41-复杂度分析对比">4.1 复杂度分析对比<a class="anchor" href="#41-%e5%a4%8d%e6%9d%82%e5%ba%a6%e5%88%86%e6%9e%90%e5%af%b9%e6%af%94">#</a></h3>
+<p>根据上面第3.1节内容及上一篇文章的介绍，我们分析得到如果仅考虑推理时的场景那么 $T_t=T_s=n$，则 MHA 整体的时间复杂度为 $O(n^2d)$ ，空间复杂度为 $O(nd)$ ；MQA 整体的时间复杂度为 $O(n^2d)$ ，空间复杂度为 $O(nd_h)$ ； GQA 整体的时间复杂度为 $O(n^2d)$ ，空间复杂度为 $O(nd_hg)$ 。</p>
+<p>根据以上结果可以看出，MHA、MQA 和 GQA 在时间复杂度上并没有降低，这因为它们的 Query 数量没有变，所以仍旧需要计算 $h$ 次 $Q_iK^T$ ，所以在时间开销的量级上并没有减少。</p>
+<p>但是，从空间复杂度上来看，MHA 为 $O(nd)$ 、 MQA 为 $O(nd_h)$  而 GQA 为 $O(nd_hg)$ ，所以 MQA 相较于 MHA 会减少 $h$ 倍存储空间，而 GQA 则将取决于分组数量 $g$ 的影响。因此 MQA 对显存节省非常显著，而 GQA 则是两者之间的一个平衡。</p>
+<h3 id="42-参数缓存对比">4.2 参数缓存对比<a class="anchor" href="#42-%e5%8f%82%e6%95%b0%e7%bc%93%e5%ad%98%e5%af%b9%e6%af%94">#</a></h3>
+<p>接着，我们继续来看看 MHA 、 MQA 和 GQA 的参数量和 KV 缓存大小的差异。</p>
+<p>在 MHA 中因为每个注意力头有独立的 Query、Key、Value 投影矩阵，其参数量为 $(3dd_h)h=3d^2$ 。在 MQA 中，所有的头共享一个 Key 和 Value ，所以分别对应只有一个投影矩阵，其参数量为 $hdd_h+2dd_h=d^2+2dd_h$ 。在 GQA 中，每一组头重共享一个 Key 和 Value ，所以分别对应只有 $g$  个投影矩阵，其参数量为 $hdd_h+2gdd_h=d^2+2gdd_h$ 。</p>
+<p>可以看出，MQA 参数量是最小的，而 MHA 是大的，而 GQA 则居于两者之间。</p>
+<p>同时，由于在 MHA 中 KV Cache 随 $h$ 数线性增长，所以长序列推理时极容易出现显存爆炸的情况；而在 MQA 中只是 MHA 的 $1/h$ 倍的显存；在 GQA 中则是 MHA 的 $g/h$ 倍的显存。</p>
+<p>现在假设模型在推理时 $h=32$，$n=2048$，$d_h=128$，参数精度为 float16 （即每个参数占用 2 个字节）。由此可以得到此时如果是MHA 其对应 KV 缓存占用显存大小为 $(nd_hh2)2=2048\times128\times32\times2\times2=33554432$ 字节（32MB） ； MQA 对应 KV 缓存大小为 $(nd_h2)2=2048\times128\times1\times2\times2=1048576$ 字节（1MB）；GQA 对应的 KV 缓存大小为 $(nd_hg2)2=2048\times128\times g\times2\times2=1048576g$ 字节（g MB）。</p>
+<p>根据上述信息，我们可以得到如下对比结果。</p>
+<table>
+	<thead>
+			<tr>
+					<th></th>
+					<th>时间复杂度</th>
+					<th>空间复杂度</th>
+					<th>参数量</th>
+					<th>KV 缓存</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>MHA</td>
+					<td>$O(n^2d)$</td>
+					<td>$O(nd)$</td>
+					<td>$3d^2$</td>
+					<td>$hx$</td>
+			</tr>
+			<tr>
+					<td>GQA</td>
+					<td>$O(n^2d)$</td>
+					<td>$O(nd_hg)$</td>
+					<td>$d^2+2gdd_h$</td>
+					<td>$gx$</td>
+			</tr>
+			<tr>
+					<td>MQA</td>
+					<td>$O(n^2d)$</td>
+					<td>$O(nd_h)$</td>
+					<td>$d^2+2dd_h$</td>
+					<td>$x$</td>
+			</tr>
+	</tbody>
+</table>
+<h2 id="5-总结">5. 总结<a class="anchor" href="#5-%e6%80%bb%e7%bb%93">#</a></h2>
+<p>虽然在 MQA 中所有头都共享一个 Key 和 Value 极大减少缓存和带宽，但是效果却并不理想。但是作为 MQA 的泛化， GQA 能同时兼顾推理效率和模型质量，所以更加适合大模型在推理环境中使用。同时，在 GQA 中我们可以通过调整分组数来平衡模型的推理速度和之旅，因此也更加灵活。</p>
+<h2 id="引用">引用<a class="anchor" href="#%e5%bc%95%e7%94%a8">#</a></h2>
+<p>[1] Ainslie J, Lee-Thorp J, De Jong M, et al. Gqa: Training generalized multi-query transformer models from multi-head checkpoints[J]. arXiv preprint arXiv:2305.13245, 2023.</p>
+<p>[2] <a href="https://shaheryaryousaf.medium.com/the-evolution-of-language-models-ee8d696ec352">https://shaheryaryousaf.medium.com/the-evolution-of-language-models-ee8d696ec352</a></p>
+<p>[3] Hugo Touvron, Louis Martin, et al. Llama 2: Open Foundation and Fine-Tuned Chat Models[J]. arXiv preprint arXiv:2307.09288, 2023.</p>
+<div class="book-page-pv text-small" id="busuanzi_container_page_pv">
+      <span class="book-page-pv-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" focusable="false">
+          <path d="M1.5 12s3.9-6.5 10.5-6.5S22.5 12 22.5 12s-3.9 6.5-10.5 6.5S1.5 12 1.5 12Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7"/>
+          <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.7"/>
+        </svg>
+      </span>
+      <span class="book-page-pv-label">阅读</span>
+      <span class="book-page-pv-value" id="busuanzi_value_page_pv">--</span>
+    </div><section class="book-article-index book-related-articles" aria-labelledby="related-articles-title">
+    <h2 id="related-articles-title">相关阅读</h2>
+    <div class="book-article-grid"><article class="book-article-card book-related-article-card">
+              <h3 class="book-article-card-title">
+                <a href="/featured/kv-cache-inference/">彻底搞懂KV Cache大模型推理加速的核心！</a>
+              </h3><p class="book-article-card-desc">本文从 ChatGPT、Claude 等大模型首 Token 慢、其余瞬间输出的现象切入，系统讲清 KV Cache 原理：自回归推理中如何缓存每一层的 Key 与 Value 矩阵并避免每步重算历史 token，以及 …</p></article><article class="book-article-card book-related-article-card">
+              <h3 class="book-article-card-title">
+                <a href="/tutorials/transformer/self-attention/">第3节 网络结构与自注意力实现</a>
+              </h3><p class="book-article-card-desc">本文是 Transformer 精读系列第3讲，详细讲解如何用 PyTorch 一步步实现 MultiHeadAttention 模块。先回顾多层 Transformer 与单层 Encoder-Decoder 结构，再系统拆解自注意力实现 …</p></article><article class="book-article-card book-related-article-card">
+              <h3 class="book-article-card-title">
+                <a href="/featured/kv-cache/">大模型为什么需要KV缓存？为什么Q不用缓存？</a>
+              </h3><p class="book-article-card-desc">本文是 LLaMA 2 模型原理铺垫篇，从大模型自回归解码的「重复计算」动机讲起，对比不采用 KV Cache 与采用 KV Cache 两套推理流程的算力开销，重点解答两个常见疑问：一是为什么只缓存 K 和 V 而不缓存 Q（Q 与当前位 …</p></article><article class="book-article-card book-related-article-card">
+              <h3 class="book-article-card-title">
+                <a href="/featured/multi-query-attention/">多查询注意力MQA动机原理与实现</a>
+              </h3><p class="book-article-card-desc">本文是 LLaMA 大模型推理优化系列铺垫篇，系统讲清 Multi-Query Attention MQA 这种改造自多头注意力 MHA 的注意力变体。核心做法是把 Q 仍按 head 数完整保留，但 K 和 V 在 head 维度上只保留 …</p></article></div>
+  </section></article>
+ 
+      
+
+
+      <footer class="book-footer">
+        
+  <div class="flex flex-wrap justify-between">
+
+<div>
+
+</div>
+
+<div>
+
+</div>
+
+</div>
+
+<div class="flex flex-wrap justify-between">
+    <span>
+    
+      <a href="/featured/self-supervised-vs-unsupervised/" class="flex align-center">
+        <img src="/icons/backward.svg" class="book-icon" alt="Backward" />
+        <span>看图秒懂自监督、有监督、无监督到底有什么区别？</span>
+      </a>
+    
+    </span>
+    <span>
+    
+      <a href="/featured/multi-query-attention/" class="flex align-center">
+        <span>多查询注意力MQA动机原理与实现</span>
+        <img src="/icons/forward.svg" class="book-icon" alt="Forward" />
+      </a>
+    
+    </span>
+  </div>
+
+ 
+        
+  
+  <div class="book-comments"><div class="giscus"></div>
+<script src="https://giscus.app/client.js"
+        data-repo="mlwithme/mlwithme.github.io"
+        data-repo-id="R_kgDOTBt94Q"
+        data-category="Announcements"
+        data-category-id="DIC_kwDOTBt94c4C_21V"
+        data-mapping="pathname"
+        data-strict="1"
+        data-reactions-enabled="1"
+        data-emit-metadata="0"
+        data-input-position="top"
+        data-theme="preferred_color_scheme"
+        data-lang="zh-CN"
+        data-loading="lazy"
+        crossorigin="anonymous"
+        async>
+</script>
+</div>
+  
+ 
+        
+  <link rel="stylesheet" href="https://mlwithme.github.io/katex/katex.min.css" />
+  <script defer src="https://mlwithme.github.io/katex/katex.min.js"></script>
+  <script defer src="https://mlwithme.github.io/katex/auto-render.min.js"></script>
+  
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        if (window.renderMathInElement) {
+          renderMathInElement(
+            document.querySelector(".book-page"),
+            Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
+          );
+        }
+      });
+    </script>
+  
+
+        
+  
+ 
+        
+  
+    <script>(function(){document.querySelectorAll("pre:has(code)").forEach(e=>{e.addEventListener("click",e.focus),e.addEventListener("copy",function(t){if(t.preventDefault(),navigator.clipboard){const t=window.getSelection().toString()||e.textContent;navigator.clipboard.writeText(t)}})})})()</script>
+  
+
+      </footer>
+
+      <label for="menu-control" class="hidden book-menu-overlay"></label>
+    </div>
+
+    
+  
+  <aside class="book-toc">
+    <div class="book-toc-content">
+      
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#1-动机">1. 动机</a>
+      <ul>
+        <li><a href="#11-mqa-既要快还要好">1.1 MQA 既要快还要好</a></li>
+        <li><a href="#12-比-mqa-更好的-gqa">1.2 比 MQA 更好的 GQA</a></li>
+      </ul>
+    </li>
+    <li><a href="#2-mqa-增量训练">2. MQA 增量训练</a>
+      <ul>
+        <li><a href="#21-mqa-增量训练原理">2.1 MQA 增量训练原理</a></li>
+        <li><a href="#22-mqa-增量训练实现">2.2 MQA 增量训练实现</a></li>
+      </ul>
+    </li>
+    <li><a href="#3-gqa-增量训练">3. GQA 增量训练</a>
+      <ul>
+        <li><a href="#31-gqa-原理">3.1 GQA 原理</a></li>
+        <li><a href="#32-gqa-实现过程">3.2 GQA 实现过程</a></li>
+        <li><a href="#33-gqa-增量训练实现">3.3 GQA 增量训练实现</a></li>
+      </ul>
+    </li>
+    <li><a href="#4-复杂度分析">4. 复杂度分析</a>
+      <ul>
+        <li><a href="#41-复杂度分析对比">4.1 复杂度分析对比</a></li>
+        <li><a href="#42-参数缓存对比">4.2 参数缓存对比</a></li>
+      </ul>
+    </li>
+    <li><a href="#5-总结">5. 总结</a></li>
+    <li><a href="#引用">引用</a></li>
+  </ul>
+</nav>
+
+
+
+
+    </div>
+  </aside>
+  
+ 
+  </main>
+
+  <button
+  type="button"
+  class="book-back-to-top"
+  aria-label="回到顶部"
+  title="回到顶部"
+>
+  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <path
+      d="M12 5.5l-5.25 5.25 1.5 1.5 2.7-2.7V18.5h2.1V9.55l2.7 2.7 1.5-1.5L12 5.5z"
+      fill="currentColor"
+    ></path>
+  </svg>
+</button>
+
+<script>
+  (function () {
+    var button = document.querySelector(".book-back-to-top");
+    if (!button) {
+      return;
+    }
+
+    var toggleButton = function () {
+      if (window.scrollY > 360) {
+        button.classList.add("is-visible");
+      } else {
+        button.classList.remove("is-visible");
+      }
+    };
+
+    button.addEventListener("click", function () {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+
+    toggleButton();
+    window.addEventListener("scroll", toggleButton, { passive: true });
+  })();
+</script>
+
+<div class="book-floating-toolbox" data-book-floating-toolbox>
+  <ul
+    class="book-floating-toolbox__items"
+    id="book-floating-toolbox-items"
+    role="menu"
+    aria-label="工具箱"
+    hidden
+  >
+    <li class="book-floating-toolbox__item" role="none" style="--book-toolbox-index: 0; --book-toolbox-count: 4;">
+      <a
+        class="book-floating-toolbox__action"
+        role="menuitem"
+        href="/glossary/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="术语百科"
+      >
+        <span class="book-floating-toolbox__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path
+              d="M5 4.5h11.5a2.5 2.5 0 0 1 2.5 2.5V20l-4-2.5L11 20l-4-2.5L3 20V7a2.5 2.5 0 0 1 2-2.5z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linejoin="round"
+            ></path>
+            <path
+              d="M7.5 9.5h7M7.5 12.5h5"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+            ></path>
+          </svg>
+        </span>
+      </a>
+      <span class="book-floating-toolbox__tip" aria-hidden="true">术语百科</span>
+    </li>
+    <li class="book-floating-toolbox__item" role="none" style="--book-toolbox-index: 2; --book-toolbox-count: 4;">
+      <a
+        class="book-floating-toolbox__action"
+        role="menuitem"
+        href="/code-templates/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="代码实现"
+      >
+        <span class="book-floating-toolbox__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path
+              d="M8.5 7.5 4 12l4.5 4.5M15.5 7.5 20 12l-4.5 4.5M13.5 5l-3 14"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            ></path>
+          </svg>
+        </span>
+      </a>
+      <span class="book-floating-toolbox__tip" aria-hidden="true">代码实现</span>
+    </li>
+    <li class="book-floating-toolbox__item" role="none" style="--book-toolbox-index: 1; --book-toolbox-count: 4;">
+      <a
+        class="book-floating-toolbox__action"
+        role="menuitem"
+        href="/syllabus/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="名校公开课"
+      >
+        <span class="book-floating-toolbox__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path
+              d="M12 3 1.5 9 12 14.5 22.5 9 12 3z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linejoin="round"
+            ></path>
+            <path
+              d="M6 11v4.2c0 1.5 2.7 2.8 6 2.8s6-1.3 6-2.8V11"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            ></path>
+            <path
+              d="M21 9.5V14"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+            ></path>
+          </svg>
+        </span>
+      </a>
+      <span class="book-floating-toolbox__tip" aria-hidden="true">名校公开课</span>
+    </li>
+    <li class="book-floating-toolbox__item" role="none" style="--book-toolbox-index: 3; --book-toolbox-count: 4;">
+      <a
+        class="book-floating-toolbox__action"
+        role="menuitem"
+        href="https://www.machinelearningwithme.com"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="开发中……"
+      >
+        <span class="book-floating-toolbox__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path
+              d="M9 3.5h6a1.5 1.5 0 0 1 1.5 1.5V7h2.25A1.75 1.75 0 0 1 20.5 8.75v9A1.75 1.75 0 0 1 18.75 19.5H5.25A1.75 1.75 0 0 1 3.5 17.75v-9A1.75 1.75 0 0 1 5.25 7H7.5V5A1.5 1.5 0 0 1 9 3.5z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linejoin="round"
+            ></path>
+            <path
+              d="M9 7h6"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+            ></path>
+            <circle cx="12" cy="13" r="3" fill="none" stroke="currentColor" stroke-width="1.6"></circle>
+          </svg>
+        </span>
+      </a>
+      <span class="book-floating-toolbox__tip" aria-hidden="true">开发中……</span>
+    </li>
+  </ul>
+  <button
+    type="button"
+    class="book-floating-toolbox__toggle"
+    aria-label="工具箱"
+    aria-haspopup="menu"
+    aria-expanded="false"
+    aria-controls="book-floating-toolbox-items"
+    title="工具箱"
+    data-book-toolbox-toggle
+  >
+    <svg class="book-floating-toolbox__toggle-icon-open" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        d="M14.7 6.3a4 4 0 0 0-5.4 5.4l-6.3 6.3a1 1 0 0 0 0 1.4l2 2a1 1 0 0 0 1.4 0l6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-2.4z"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linejoin="round"
+        stroke-linecap="round"
+      ></path>
+      <circle
+        class="book-floating-toolbox__badge-pulse"
+        cx="19.5"
+        cy="4.5"
+        r="2.2"
+        fill="#d84747"
+        stroke="#fff"
+        stroke-width="0.6"
+      ></circle>
+    </svg>
+    <svg class="book-floating-toolbox__toggle-icon-close" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        d="M6.5 6.5l11 11M17.5 6.5l-11 11"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.8"
+        stroke-linecap="round"
+      ></path>
+    </svg>
+  </button>
+</div>
+
+<script>
+  (function () {
+    var root = document.querySelector("[data-book-floating-toolbox]");
+    if (!root) {
+      return;
+    }
+    var toggle = root.querySelector("[data-book-toolbox-toggle]");
+    var items = root.querySelector(".book-floating-toolbox__items");
+    if (!toggle || !items) {
+      return;
+    }
+
+    var isOpen = function () {
+      return root.classList.contains("is-open");
+    };
+
+    var open = function () {
+      root.classList.add("is-open");
+      items.hidden = false;
+      toggle.setAttribute("aria-expanded", "true");
+    };
+
+    var close = function () {
+      root.classList.remove("is-open");
+      items.hidden = true;
+      toggle.setAttribute("aria-expanded", "false");
+    };
+
+    toggle.addEventListener("click", function (event) {
+      event.stopPropagation();
+      if (isOpen()) {
+        close();
+      } else {
+        open();
+      }
+    });
+
+    document.addEventListener("click", function (event) {
+      if (!isOpen()) {
+        return;
+      }
+      if (root.contains(event.target)) {
+        return;
+      }
+      close();
+    });
+
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape" && isOpen()) {
+        close();
+        toggle.focus();
+      }
+    });
+
+    items.addEventListener("click", function (event) {
+      if (event.target.closest("a")) {
+        close();
+      }
+    });
+
+    window.addEventListener("pageshow", close);
+  })();
+</script>
+
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,4841 @@
+<!DOCTYPE html>
+<html lang="zh_CN" dir="ltr">
+<head>
+  <!--
+Made with Book Theme
+https://github.com/alex-shpak/hugo-book
+--><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="本文是 BERT 精读系列第7讲，作为 BERT 第8讲 SQuAD 问答任务的过渡篇，系统讲清 Transformer 论文中提出的 Noam 动态学习率调整策略：从 warmup 公式 d_model^{-0.5} · min(step^{-0.5}, step · …">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="index,follow,max-image-preview:large">
+
+
+
+
+
+<meta property="og:url" content="https://mlwithme.github.io/tutorials/bert/learning-rate-schedule/">
+<meta property="og:site_name" content="《从零学AI指南手册》">
+<meta property="og:title" content="第7讲 Transformer 动态学习率教程：详解 warmup 公式与 PyTorch LambdaLR 自定义实现">
+<meta property="og:description" content="本文是 BERT 精读系列第7讲，作为 BERT 第8讲 SQuAD 问答任务的过渡篇，系统讲清 Transformer 论文中提出的 Noam 动态学习率调整策略：从 warmup 公式 d_model^{-0.5} · min(step^{-0.5}, step · …">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:type" content="article">
+<meta property="og:image" content="https://mlwithme.github.io/share-cover.png">
+<meta property="og:image:url" content="https://mlwithme.github.io/share-cover.png">
+<meta property="og:image:secure_url" content="https://mlwithme.github.io/share-cover.png">
+<meta property="og:image:width" content="759">
+<meta property="og:image:height" content="759">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:alt" content="《从零学AI指南手册》 - 第7讲 Transformer 动态学习率教程：详解 warmup 公式与 PyTorch LambdaLR 自定义实现">
+
+  <meta property="article:section" content="tutorials">
+  
+    <meta property="article:published_time" content="2026-07-22T19:35:22&#43;08:00">
+  
+  
+    <meta property="article:modified_time" content="2026-07-25T21:57:53&#43;08:00">
+  
+  
+
+
+<script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"WebSite","description":"面向机器学习、深度学习与 AI Agent 的中文系统化学习手册，包含原理讲解、代码示例与实战案例。","inLanguage":"zh_CN","name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
+  </script>
+  <script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.github.io/share-cover.png"},"name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
+  </script><script type="application/ld+json">
+      {"@context":"https://schema.org","@type":"Article","articleSection":"tutorials","author":{"@type":"Person","name":"WangCheng","url":"https://mlwithme.github.io/author/"},"dateModified":"2026-07-25T21:57:53+08:00","datePublished":"2026-07-22T19:35:22+08:00","description":"本文是 BERT 精读系列第7讲，作为 BERT 第8讲 SQuAD 问答任务的过渡篇，系统讲清 Transformer 论文中提出的 Noam 动态学习率调整策略：从 warmup 公式 d_model^{-0.5} · min(step^{-0.5}, step · …","headline":"第7讲 Transformer 动态学习率教程：详解 warmup 公式与 PyTorch LambdaLR 自定义实现","image":["https://mlwithme.github.io/share-cover.png"],"inLanguage":"zh_CN","mainEntityOfPage":"https://mlwithme.github.io/tutorials/bert/learning-rate-schedule/","publisher":{"@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.github.io/share-cover.png"},"name":"《从零学AI指南手册》"},"url":"https://mlwithme.github.io/tutorials/bert/learning-rate-schedule/"}
+    </script><script type="application/ld+json">
+        {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","item":"https://mlwithme.github.io/","name":"首页","position":1},{"@type":"ListItem","item":"https://mlwithme.github.io/tutorials/","name":"专题文章","position":2},{"@type":"ListItem","item":"https://mlwithme.github.io/tutorials/bert/","name":"从零玩转 Bert 详解6大下游任务","position":3},{"@type":"ListItem","item":"https://mlwithme.github.io/tutorials/bert/learning-rate-schedule/","name":"第7讲 Transformer 动态学习率教程：详解 warmup 公式与 PyTorch LambdaLR 自定义实现","position":4}]}
+      </script>
+
+<title>第7讲 Transformer 动态学习率教程：详解 warmup 公式与 PyTorch LambdaLR 自定义实现 • 《从零学AI指南手册》</title>
+<link rel="icon" href="https://mlwithme.github.io/favicon.png" type="image/png">
+<link rel="shortcut icon" href="https://mlwithme.github.io/favicon.png" type="image/png">
+<link rel="apple-touch-icon" href="https://mlwithme.github.io/favicon.png">
+
+<link rel="manifest" href="/manifest.json">
+<link rel="canonical" href="https://mlwithme.github.io/tutorials/bert/learning-rate-schedule/">
+<link rel="stylesheet" href="/book.min.04800c306c9a4025943ba95ba687acbf99c9a8d44d89ae79df98ad8111606047.css" integrity="sha256-BIAMMGyaQCWUO6lbpoesv5nJqNRNia5535itgRFgYEc=" crossorigin="anonymous">
+  <script defer type="module" src="/zh-cn.search.min.f1dcaf5ffb003a5d8d501b4c6c5a7e051bc6f1cb007aa9fe982329837af7afb3.js" integrity="sha256-8dyvX/sAOl2NUBtMbFp&#43;BRvG8csAeqn&#43;mCMpg3r3r7M=" crossorigin="anonymous"></script>
+
+  
+
+
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="第7讲 Transformer 动态学习率教程：详解 warmup 公式与 PyTorch LambdaLR 自定义实现">
+<meta name="twitter:description" content="本文是 BERT 精读系列第7讲，作为 BERT 第8讲 SQuAD 问答任务的过渡篇，系统讲清 Transformer 论文中提出的 Noam 动态学习率调整策略：从 warmup 公式 d_model^{-0.5} · min(step^{-0.5}, step · …">
+<meta name="twitter:url" content="https://mlwithme.github.io/tutorials/bert/learning-rate-schedule/">
+<meta name="twitter:image" content="https://mlwithme.github.io/share-cover.png">
+<meta name="twitter:image:alt" content="《从零学AI指南手册》 - 第7讲 Transformer 动态学习率教程：详解 warmup 公式与 PyTorch LambdaLR 自定义实现">
+<script>
+  var _hmt = _hmt || [];
+  (function() {
+    var hm = document.createElement("script");
+    hm.src = "https://hm.baidu.com/hm.js?19b2d342631cd14e3578ad00b4823e80";
+    var s = document.getElementsByTagName("script")[0];
+    s.parentNode.insertBefore(hm, s);
+  })();
+</script>
+<script>
+  var _hmt = _hmt || [];
+  (function() {
+    var hm = document.createElement("script");
+    hm.src = "https://hm.baidu.com/hm.js?74a336dd47fbbab3ceb99d4ad8afcb76";
+    var s = document.getElementsByTagName("script")[0];
+    s.parentNode.insertBefore(hm, s);
+  })();
+</script>
+<script async src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
+
+</head>
+<body dir="ltr" class="book-kind-page book-type-tutorials">
+  <input type="checkbox" class="hidden toggle" id="menu-control" />
+  <input type="checkbox" class="hidden toggle" id="toc-control" />
+  <main class="container flex">
+    
+<aside class="book-menu">
+  <div class="book-menu-content">
+    
+  <nav>
+<h2 class="book-brand">
+  <a class="flex align-center" href="/"><svg xmlns="http://www.w3.org/2000/svg" height="20" width="20" viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true" class="book-brand-icon" style="margin-right:.35em;flex:none">
+      <path d="M240-200h120v-240h240v240h120v-360L480-740 240-560v360Zm-80 80q-33 0-56.5-23.5T80-200v-360q0-27 11-49t31-39l280-220q21-17 47-25t51-8q25 0 51 8t47 25l280 220q20 17 31 39t11 49v360q0 33-23.5 56.5T840-120H600q-17 0-28.5-11.5T560-160v-200H400v200q0 17-11.5 28.5T360-120H160Zm320-280Z"/>
+    </svg>
+
+    <span>返回主页</span>
+
+  </a>
+</h2>
+
+
+<div class="book-search hidden">
+  <input id="book-search-input" type="text" 
+    placeholder="Search"
+    aria-label="Search"
+    maxlength="64" />
+  <div class="book-search-spinner hidden"></div>
+  <ul id="book-search-results"></ul>
+</div>
+<script>document.querySelector(".book-search").classList.remove("hidden")</script>
+
+
+
+
+
+
+
+
+
+
+
+  
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/featured/" class="">
+      <span class="book-menu-link-title">精选文章</span>
+</a>
+  
+
+          
+  <ul>
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bb7497cb5e222579131ad9ad959011cb" class="toggle" checked />
+    <label for="section-bb7497cb5e222579131ad9ad959011cb" class="flex">
+      <a href="/tutorials/" class="">
+        <span class="book-menu-link-title">专题文章</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/tutorials/transformer/" class="">
+      <span class="book-menu-link-title">图解 Transformer 入门指南教程</span>
+</a>
+  
+
+          
+  <ul>
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/tutorials/bert/" class="">
+      <span class="book-menu-link-title">从零玩转 Bert 详解6大下游任务</span>
+</a>
+  
+
+          
+  <ul>
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/tutorials/mini-chatgpt/" class="">
+      <span class="book-menu-link-title">手把手带你从零构建 ChatGPT</span>
+</a>
+  
+
+          
+  <ul>
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/" class="">
+      <span class="book-menu-link-title">大模型Agent开发（更新中……）</span>
+</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-279cf10e5100caa4f65ba3f7dd8888a4" class="toggle"  />
+    <label for="section-279cf10e5100caa4f65ba3f7dd8888a4" class="flex">
+      <a href="/agent/chapter01/" class="">
+        <span class="book-menu-link-title">第 1 章 RAG 基础概念</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/what-is-rag/" class="">
+      <span class="book-menu-link-title">1.1 RAG 提出背景</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/rag-pipeline-overview/" class="">
+      <span class="book-menu-link-title">1.2 RAG 流程概览</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-83c662c2764f1c19f8005eab77fee110" class="toggle"  />
+    <label for="section-83c662c2764f1c19f8005eab77fee110" class="flex">
+      <a href="/agent/chapter02/" class="">
+        <span class="book-menu-link-title">第 2 章 大模型接入与使用</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/intro-to-llm-sdk/" class="">
+      <span class="book-menu-link-title">2.1 SDK 介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/modern-llm-sdk/" class="">
+      <span class="book-menu-link-title">2.2 现代大模型中的 SDK</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/dashscope-api-overview/" class="">
+      <span class="book-menu-link-title">2.3 DashScope 接口体系</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/qwen-onboarding/" class="">
+      <span class="book-menu-link-title">2.4 千问大模型接入与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-1e583d7a26333453241d87c5c16592bd" class="toggle"  />
+    <label for="section-1e583d7a26333453241d87c5c16592bd" class="flex">
+      <a href="/agent/chapter03/" class="">
+        <span class="book-menu-link-title">第 3 章 文档标准化与语义检索</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/document-loading-and-preprocessing/" class="">
+      <span class="book-menu-link-title">3.1 文档加载与标准化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/text-splitting-strategies/" class="">
+      <span class="book-menu-link-title">3.2 常见文本切分策略</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/vector-database-selection/" class="">
+      <span class="book-menu-link-title">3.3 向量数据库选择</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/qwen-embedding-model/" class="">
+      <span class="book-menu-link-title">3.4 Qwen3 Embedding 模型介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/semantic-retrieval-pipeline/" class="">
+      <span class="book-menu-link-title">3.5 语义搜索引擎构建</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/milvus-tutorial/" class="">
+      <span class="book-menu-link-title">3.6  Milvus 模块解析</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="toggle"  />
+    <label for="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="flex">
+      <a href="/agent/chapter04/" class="">
+        <span class="book-menu-link-title">第 4 章 RAG 与 Agent</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/two-step-rag/" class="">
+      <span class="book-menu-link-title">4.1 两步式 RAG 搭建</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/function-calling-basics/" class="">
+      <span class="book-menu-link-title">4.2 Function Calling 概念介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/langchain-tool-decorator/" class="">
+      <span class="book-menu-link-title">4.3 LangChain 中的 Tool 修饰器</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/rag-agent-essentials/" class="">
+      <span class="book-menu-link-title">4.4 RAG Agent 原理与搭建</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/react-framework/" class="">
+      <span class="book-menu-link-title">4.5 复杂问题拆解与ReAct框架</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/two-stage-indexing/" class="">
+      <span class="book-menu-link-title">4.6 RAG 中的两阶段索引</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/qwen3-reranking/" class="">
+      <span class="book-menu-link-title">4.7 Qwen3 Reranking 原理与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/two-stage-rag-agent/" class="">
+      <span class="book-menu-link-title">4.8 基于两阶段索引的 RAG Agent</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/langgraph-basics/" class="">
+      <span class="book-menu-link-title">4.9 LangGraph 基本概念介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/langgraph-custom-rag-agent/" class="">
+      <span class="book-menu-link-title">4.10  基于 LangGraph 构建自定义 RAG Agent</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bf5130286ff0eee8f362b632167a5e6b" class="toggle"  />
+    <label for="section-bf5130286ff0eee8f362b632167a5e6b" class="flex">
+      <a href="/agent/chapter05/" class="">
+        <span class="book-menu-link-title">第 5 章 Agent 记忆机制与管理</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/agent-memory-overview/" class="">
+      <span class="book-menu-link-title">5.1 Agent 记忆机制概览</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/langchain-short-term-memory/" class="">
+      <span class="book-menu-link-title">5.2 短期记忆持久化与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/short-term-memory-management/" class="">
+      <span class="book-menu-link-title">5.3 短期记忆管理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/short-term-memory-rag-agent/" class="">
+      <span class="book-menu-link-title">5.4 拥有短期记忆的 RAG Agent</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/long-term-memory-strategies/" class="">
+      <span class="book-menu-link-title">5.5 长期记忆管理与持久化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/mini-chatgpt-from-scratch/" class="">
+      <span class="book-menu-link-title">5.6 从零实现 Mini ChatGPT 助手</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/pgvector-setup/" class="">
+      <span class="book-menu-link-title">5.7 pgvector 配置安装</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/long-term-memory-retrieval-and-forgetting/" class="">
+      <span class="book-menu-link-title">5.8 长期记忆检索与遗忘</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/langgraph-mini-chatgpt/" class="">
+      <span class="book-menu-link-title">5.9 基于 LangGraph 的Mini ChatGPT 助手</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/create-agent-mini-chatgpt/" class="">
+      <span class="book-menu-link-title">5.10 使用 create_agent 搭建 Mini ChatGPT</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/" class="">
+      <span class="book-menu-link-title">深度学习</span>
+</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/mindmap/" class="">
+      <span class="book-menu-link-title">目录思维导图</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-cf7621e8efb1f3153eaca44a113dcdb9" class="toggle"  />
+    <label for="section-cf7621e8efb1f3153eaca44a113dcdb9" class="flex">
+      <a href="/dl/chapter01/" class="">
+        <span class="book-menu-link-title">第 1 章 深度学习简介</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/dl-development-stages/" class="">
+      <span class="book-menu-link-title">1.1 深度学习的发展阶段</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/dl-key-figures/" class="">
+      <span class="book-menu-link-title">1.2 深度学习中的关键人物</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/mainstream-dl-frameworks/" class="">
+      <span class="book-menu-link-title">1.3 深度学习框架介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f9bf1a68c19405769f9c4a1495708a55" class="toggle"  />
+    <label for="section-f9bf1a68c19405769f9c4a1495708a55" class="flex">
+      <a href="/dl/chapter02/" class="">
+        <span class="book-menu-link-title">第 2 章 环境配置</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/dl-dev-environment-architecture/" class="">
+      <span class="book-menu-link-title">2.1 体系结构介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/dl-cuda-pytorch-install/" class="">
+      <span class="book-menu-link-title">2.2 深度学习环境安装</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/dl-cuda-training-env-setup/" class="">
+      <span class="book-menu-link-title">2.3 开发环境安装配置</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="toggle"  />
+    <label for="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="flex">
+      <a href="/dl/chapter03/" class="">
+        <span class="book-menu-link-title">第 3 章 深度学习基础</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/linear-regression-basics/" class="">
+      <span class="book-menu-link-title">3.1 线性回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/linear-regression-implementation/" class="">
+      <span class="book-menu-link-title">3.2 线性回归简洁实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/backpropagation-and-gradient-descent/" class="">
+      <span class="book-menu-link-title">3.3 梯度下降与反向传播</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/regression-from-scratch/" class="">
+      <span class="book-menu-link-title">3.4 从零实现回归模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/softmax-regression-basics/" class="">
+      <span class="book-menu-link-title">3.5 从逻辑回归到Softmax回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/softmax-regression-implementation/" class="">
+      <span class="book-menu-link-title">3.6 Softmax回归简洁实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/softmax-regression-from-scratch/" class="">
+      <span class="book-menu-link-title">3.7 从零实现分类模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/regression-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">3.8 回归模型评估指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/classification-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">3.9 分类模型评估指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/overfitting-and-regularization/" class="">
+      <span class="book-menu-link-title">3.10 过拟合与正则化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/hyperparameters-and-cross-validation/" class="">
+      <span class="book-menu-link-title">3.11 超参数与交叉验证</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/activation-functions/" class="">
+      <span class="book-menu-link-title">3.12 激活函数</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/multi-label-classification/" class="">
+      <span class="book-menu-link-title">3.13 多标签分类</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-7a12cee83820a928df00362d70804a97" class="toggle"  />
+    <label for="section-7a12cee83820a928df00362d70804a97" class="flex">
+      <a href="/dl/chapter04/" class="">
+        <span class="book-menu-link-title">第 4 章 卷积神经网络</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/cnn-basics/" class="">
+      <span class="book-menu-link-title">4.1 卷积的概念</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/convolution-operation/" class="">
+      <span class="book-menu-link-title">4.2 卷积的计算过程</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/convolution-and-pooling/" class="">
+      <span class="book-menu-link-title">4.3 填充和池化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/lenet5/" class="">
+      <span class="book-menu-link-title">4.4 LeNet5网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/alexnet/" class="">
+      <span class="book-menu-link-title">4.5 AlexNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/vgg/" class="">
+      <span class="book-menu-link-title">4.6 VGG网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/nin/" class="">
+      <span class="book-menu-link-title">4.7 NIN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/googlenet/" class="">
+      <span class="book-menu-link-title">4.8 GoogLeNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/resnet/" class="">
+      <span class="book-menu-link-title">4.9 ResNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/densenet/" class="">
+      <span class="book-menu-link-title">4.10 DenseNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-be9addfd3a15c372d609d09cabb94159" class="toggle"  />
+    <label for="section-be9addfd3a15c372d609d09cabb94159" class="flex">
+      <a href="/dl/chapter05/" class="">
+        <span class="book-menu-link-title">第 5 章 模型训练与复用</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/training-logs-management/" class="">
+      <span class="book-menu-link-title">5.1 参数及日志管理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/tensorboard-tutorial/" class="">
+      <span class="book-menu-link-title">5.2 Tensorboard可视化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/pytorch-model-save-load/" class="">
+      <span class="book-menu-link-title">5.3 模型的保存与复用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/transfer-learning-tutorial/" class="">
+      <span class="book-menu-link-title">5.4 模型的迁移学习</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/pretrained-model-reuse/" class="">
+      <span class="book-menu-link-title">5.5 开源模型复用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/multi-gpu-training/" class="">
+      <span class="book-menu-link-title">5.6 多GPU训练</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/training-data-preprocessing-cache/" class="">
+      <span class="book-menu-link-title">5.7 数据预处理与缓存</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="toggle"  />
+    <label for="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="flex">
+      <a href="/dl/chapter06/" class="">
+        <span class="book-menu-link-title">第 6 章 模型优化方法</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/learning-rate-scheduler/" class="">
+      <span class="book-menu-link-title">6.1 学习率调度器</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/gradient-clipping/" class="">
+      <span class="book-menu-link-title">6.2 梯度裁剪</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/batch-norm/" class="">
+      <span class="book-menu-link-title">6.3 批归一化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/layer-norm/" class="">
+      <span class="book-menu-link-title">6.4 层归一化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/group-norm/" class="">
+      <span class="book-menu-link-title">6.5 组归一化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/momentum/" class="">
+      <span class="book-menu-link-title">6.6 动量法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/ada-grad/" class="">
+      <span class="book-menu-link-title">6.7 AdaGrad算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/ada-delta/" class="">
+      <span class="book-menu-link-title">6.8 AdaDelta算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/adam/" class="">
+      <span class="book-menu-link-title">6.9 Adam算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/weight-initialization/" class="">
+      <span class="book-menu-link-title">6.10 初始化方法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-517b751d7c44a7ac77d25d295ed44271" class="toggle"  />
+    <label for="section-517b751d7c44a7ac77d25d295ed44271" class="flex">
+      <a href="/dl/chapter07/" class="">
+        <span class="book-menu-link-title">第 7 章 循环神经网络</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/rnn-basics/" class="">
+      <span class="book-menu-link-title">7.1 RNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/time-series-modeling/" class="">
+      <span class="book-menu-link-title">7.2 时序数据</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/lstm/" class="">
+      <span class="book-menu-link-title">7.3 LSTM网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/gru/" class="">
+      <span class="book-menu-link-title">7.4 GRU网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/bi-rnn/" class="">
+      <span class="book-menu-link-title">7.5 BiRNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/char-rnn/" class="">
+      <span class="book-menu-link-title">7.6 CharRNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-b9b861f64ba32bc68dfb977497de37d9" class="toggle"  />
+    <label for="section-b9b861f64ba32bc68dfb977497de37d9" class="flex">
+      <a href="/dl/chapter08/" class="">
+        <span class="book-menu-link-title">第 8 章 时序与模型融合</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/textcnn/" class="">
+      <span class="book-menu-link-title">8.1 TextCNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/textrnn/" class="">
+      <span class="book-menu-link-title">8.2 TextRNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/cnn-rnn/" class="">
+      <span class="book-menu-link-title">8.3 CNN-RNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/convlstm/" class="">
+      <span class="book-menu-link-title">8.4 ConvLSTM网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/3dcnn/" class="">
+      <span class="book-menu-link-title">8.5 3DCNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/stresnet/" class="">
+      <span class="book-menu-link-title">8.6 STResNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-e54a1e28b1438b8266637bcb8dac1a44" class="toggle"  />
+    <label for="section-e54a1e28b1438b8266637bcb8dac1a44" class="flex">
+      <a href="/dl/chapter09/" class="">
+        <span class="book-menu-link-title">第 9 章 自然语言处理</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/nlp-basics/" class="">
+      <span class="book-menu-link-title">9.1 自然语言处理介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/word2vec-principle/" class="">
+      <span class="book-menu-link-title">9.2 Word2Vec词向量</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/word2vec-training-and-usage/" class="">
+      <span class="book-menu-link-title">9.3 Word2Vec训练与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/glove/" class="">
+      <span class="book-menu-link-title">9.4 GloVe词向量</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/word-vector-finetuning/" class="">
+      <span class="book-menu-link-title">9.5 词向量的微调使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/fasttext/" class="">
+      <span class="book-menu-link-title">9.6 fastText网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/seq2seq-tutorial/" class="">
+      <span class="book-menu-link-title">9.7 Seq2Seq网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/seq-model-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">9.8 序列模型评价指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/nmt-seq2seq/" class="">
+      <span class="book-menu-link-title">9.9 NMT网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/attention-mechanism/" class="">
+      <span class="book-menu-link-title">9.10 注意力机制</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/nmt-with-attention/" class="">
+      <span class="book-menu-link-title">9.11 含注意力的NMT网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/rnn-with-attention/" class="">
+      <span class="book-menu-link-title">9.12 含注意力的RNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f6636b2f9dc1df93b9fa64dd201716d9" class="toggle"  />
+    <label for="section-f6636b2f9dc1df93b9fa64dd201716d9" class="flex">
+      <a href="/dl/chapter10/" class="">
+        <span class="book-menu-link-title">第 10 章 现代神经网络</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/elmo/" class="">
+      <span class="book-menu-link-title">10.1 ELMo网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-principle/" class="">
+      <span class="book-menu-link-title">10.2 Transformer网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-architecture/" class="">
+      <span class="book-menu-link-title">10.3 Transformer结构</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-implementation/" class="">
+      <span class="book-menu-link-title">10.4 Transformer实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-couplet-model/" class="">
+      <span class="book-menu-link-title">10.5 Transformer对联模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-principle/" class="">
+      <span class="book-menu-link-title">10.6 BERT网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-from-scratch/" class="">
+      <span class="book-menu-link-title">10.7 从零实现BERT</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-text-classification/" class="">
+      <span class="book-menu-link-title">10.8 BERT文本分类模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-sentence-pair-matching/" class="">
+      <span class="book-menu-link-title">10.9 BERT问题选择模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-question-answering/" class="">
+      <span class="book-menu-link-title">10.10 BERT问题回答模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-ner/" class="">
+      <span class="book-menu-link-title">10.11 BERT命名体识别模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-pretraining/" class="">
+      <span class="book-menu-link-title">10.12 BERT从零训练</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-1/" class="">
+      <span class="book-menu-link-title">10.13 GPT-1模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-2-and-gpt-3/" class="">
+      <span class="book-menu-link-title">10.14 GPT-2与GPT-3模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-2-chinese-pretraining/" class="">
+      <span class="book-menu-link-title">10.15 基于GPT-2的中文预训练模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/instructgpt-and-chatgpt/" class="">
+      <span class="book-menu-link-title">10.16 InstructGPT与ChatGPT</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/chatgpt-prompt-engineering/" class="">
+      <span class="book-menu-link-title">10.17 ChatGPT与提示词工程</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/baichuan-usage/" class="">
+      <span class="book-menu-link-title">10.18 百川大模型使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/baichuan-implementation/" class="">
+      <span class="book-menu-link-title">10.19 百川大模型实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-4-and-gpts/" class="">
+      <span class="book-menu-link-title">10.20 GPT-4与GPTs使用</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/" class="">
+      <span class="book-menu-link-title">机器学习</span>
+</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/mindmap/" class="">
+      <span class="book-menu-link-title">目录思维导图</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-48f56957e94e3cf66f3022103a7dd0ff" class="toggle"  />
+    <label for="section-48f56957e94e3cf66f3022103a7dd0ff" class="flex">
+      <a href="/ml/chapter01/" class="">
+        <span class="book-menu-link-title">第 1 章 环境配置</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/conda-install-tutorial/" class="">
+      <span class="book-menu-link-title">1.1 安装使用Conda</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/ml-conda-env-setup/" class="">
+      <span class="book-menu-link-title">1.2 开发环境安装配置</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-56a896338a1c41249d22a3efa0e0063c" class="toggle"  />
+    <label for="section-56a896338a1c41249d22a3efa0e0063c" class="flex">
+      <a href="/ml/chapter02/" class="">
+        <span class="book-menu-link-title">第 2 章 线性回归</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/linear-regression-basics/" class="">
+      <span class="book-menu-link-title">2.1 模型的建立与求解</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/multivariate-linear-regression/" class="">
+      <span class="book-menu-link-title">2.2 多变量线性回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/polynomial-regression/" class="">
+      <span class="book-menu-link-title">2.3 多项式回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/regression-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">2.4 回归模型评估</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/gradient-descent-derivation/" class="">
+      <span class="book-menu-link-title">2.5 梯度下降</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/normal-distribution/" class="">
+      <span class="book-menu-link-title">2.6 正态分布</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/linear-regression-loss-derivation/" class="">
+      <span class="book-menu-link-title">2.7 目标函数推导</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ccd0dc9386ea80613d4cedf91b30058d" class="toggle"  />
+    <label for="section-ccd0dc9386ea80613d4cedf91b30058d" class="flex">
+      <a href="/ml/chapter03/" class="">
+        <span class="book-menu-link-title">第 3 章 逻辑回归</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/logistic-regression-basics/" class="">
+      <span class="book-menu-link-title">3.1 模型的建立与求解</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/logistic-regression-multiclass/" class="">
+      <span class="book-menu-link-title">3.2 多分类任务</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/classification-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">3.3 常见的分类评估指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/logistic-regression-loss-derivation/" class="">
+      <span class="book-menu-link-title">3.4 目标函数推导</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="toggle"  />
+    <label for="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="flex">
+      <a href="/ml/chapter04/" class="">
+        <span class="book-menu-link-title">第 4 章 模型的改善与泛化</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/generalization-basics/" class="">
+      <span class="book-menu-link-title">4.1 基本概念</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/feature-scaling/" class="">
+      <span class="book-menu-link-title">4.2 特征标准化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/overfitting-solutions/" class="">
+      <span class="book-menu-link-title">4.3 过拟合</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/l1-l2-regularization/" class="">
+      <span class="book-menu-link-title">4.4 正则化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/bias-and-variance/" class="">
+      <span class="book-menu-link-title">4.5 偏差、方差与交叉验证</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/handwritten-digit-recognition-case/" class="">
+      <span class="book-menu-link-title">4.6 实例分析手写体识别</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-40f463d9d502d24b86ea6120b7030123" class="toggle"  />
+    <label for="section-40f463d9d502d24b86ea6120b7030123" class="flex">
+      <a href="/ml/chapter05/" class="">
+        <span class="book-menu-link-title">第 5 章 K近邻</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/knn-principle/" class="">
+      <span class="book-menu-link-title">5.1 K近邻思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/knn-algorithm-details/" class="">
+      <span class="book-menu-link-title">5.2 K近邻原理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/sklearn-knn-example/" class="">
+      <span class="book-menu-link-title">5.3 sklearn接口与示例代码</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/kd-tree-knn/" class="">
+      <span class="book-menu-link-title">5.4 kd树构建与搜索</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/knn-from-scratch/" class="">
+      <span class="book-menu-link-title">5.5 从零实现K近邻</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-5a460dc18f1e79253296cf2cd0498446" class="toggle"  />
+    <label for="section-5a460dc18f1e79253296cf2cd0498446" class="flex">
+      <a href="/ml/chapter06/" class="">
+        <span class="book-menu-link-title">第 6 章 文本特征与模型复用</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/bag-of-words/" class="">
+      <span class="book-menu-link-title">6.1 词袋模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/knn-spam-classification/" class="">
+      <span class="book-menu-link-title">6 .2 基于K近邻算法的垃圾邮件分类</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/tf-idf/" class="">
+      <span class="book-menu-link-title">6.3 考虑权重的词袋模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/wordcloud-generation/" class="">
+      <span class="book-menu-link-title">6.4 词云图</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-96f45a8b8c8b75adc70c78026d93dbf6" class="toggle"  />
+    <label for="section-96f45a8b8c8b75adc70c78026d93dbf6" class="flex">
+      <a href="/ml/chapter07/" class="">
+        <span class="book-menu-link-title">第 7 章 朴素贝叶斯</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/naive-bayes-basics/" class="">
+      <span class="book-menu-link-title">7.1 朴素贝叶斯算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/bayes-estimation/" class="">
+      <span class="book-menu-link-title">7.2 贝叶斯估计</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/naive-bayes-implementation/" class="">
+      <span class="book-menu-link-title">7.3 朴素贝叶斯实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/multinomial-naive-bayes/" class="">
+      <span class="book-menu-link-title">7.4 多项式朴素贝叶斯原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/gaussian-naive-bayes/" class="">
+      <span class="book-menu-link-title">7.5 高斯朴素贝叶斯原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-22476e49d5058c3e5e7e7366b7ab676f" class="toggle"  />
+    <label for="section-22476e49d5058c3e5e7e7366b7ab676f" class="flex">
+      <a href="/ml/chapter08/" class="">
+        <span class="book-menu-link-title">第 8 章 决策树</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-principle/" class="">
+      <span class="book-menu-link-title">8.1 决策树的基本思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-sklearn/" class="">
+      <span class="book-menu-link-title">8.2 决策树建模与可视化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/id3-vs-c45/" class="">
+      <span class="book-menu-link-title">8.3 决策树生成之ID3与C4.5</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-pruning/" class="">
+      <span class="book-menu-link-title">8.4 决策树剪枝过程</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-from-scratch/" class="">
+      <span class="book-menu-link-title">8.5 从零实现ID3与C4.5算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-continuous-features/" class="">
+      <span class="book-menu-link-title">8.6 连续型特征变量下决策树实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/cart-algorithm/" class="">
+      <span class="book-menu-link-title">8.7 CART生成与剪枝算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/cart-from-scratch/" class="">
+      <span class="book-menu-link-title">8.8 从零实现CART算法及剪枝示例</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-2feb6a51cabb61dba860f45c1881386b" class="toggle"  />
+    <label for="section-2feb6a51cabb61dba860f45c1881386b" class="flex">
+      <a href="/ml/chapter09/" class="">
+        <span class="book-menu-link-title">第 9 章 集成学习与提升算法</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/ensemble-learning-basics/" class="">
+      <span class="book-menu-link-title">9.1 集成学习算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/random-forest-principle/" class="">
+      <span class="book-menu-link-title">9.2 随机森林</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/random-forest-titanic/" class="">
+      <span class="book-menu-link-title">9.3 泰坦尼克号生还预测</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/adaboost/" class="">
+      <span class="book-menu-link-title">9.4 AdaBoost原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/multi-adaboost/" class="">
+      <span class="book-menu-link-title">9.5 MultiAdaBoost原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/gradient-boost/" class="">
+      <span class="book-menu-link-title">9.6 Gradient Boost 原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-938ae119c3849b03ccb6f91cef4243dd" class="toggle"  />
+    <label for="section-938ae119c3849b03ccb6f91cef4243dd" class="flex">
+      <a href="/ml/chapter10/" class="">
+        <span class="book-menu-link-title">第 10 章 支持向量机</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-principle/" class="">
+      <span class="book-menu-link-title">10.1 SVM思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-nonlinear-kernel/" class="">
+      <span class="book-menu-link-title">10.2 SVM线性不可分</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-max-margin/" class="">
+      <span class="book-menu-link-title">10.3 SVM原理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-soft-margin/" class="">
+      <span class="book-menu-link-title">10.4 SVM中的软间隔</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/lagrange-multipliers/" class="">
+      <span class="book-menu-link-title">10.5 拉格朗日乘数法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/kkt-conditions/" class="">
+      <span class="book-menu-link-title">10.6 对偶性与KKT条件</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-optimization/" class="">
+      <span class="book-menu-link-title">10.7 SVM优化问题</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-kernel-functions/" class="">
+      <span class="book-menu-link-title">10.8 SVM核函数原理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/smo-algorithm/" class="">
+      <span class="book-menu-link-title">10.9 SMO算法求解SVM</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-from-scratch/" class="">
+      <span class="book-menu-link-title">10.10 从零实现SVM分类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-9f4d9786d4ab755fde42c64d09b0d026" class="toggle"  />
+    <label for="section-9f4d9786d4ab755fde42c64d09b0d026" class="flex">
+      <a href="/ml/chapter11/" class="">
+        <span class="book-menu-link-title">第 11 章 聚类分析</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/clustering-basics/" class="">
+      <span class="book-menu-link-title">11.1 聚类算法的思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-principle/" class="">
+      <span class="book-menu-link-title">11.2 Kmeans聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-iteration/" class="">
+      <span class="book-menu-link-title">11.3 Kmeans算法求解</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-from-scratch/" class="">
+      <span class="book-menu-link-title">11.4 从零实现Kmeans聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-plus-plus/" class="">
+      <span class="book-menu-link-title">11.5 Kmeans&#43;&#43;聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/clustering-external-metrics/" class="">
+      <span class="book-menu-link-title">11.6 聚类外部评价指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/weighted-kmeans/" class="">
+      <span class="book-menu-link-title">11.7 加权Kmeans聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/clustering-internal-metrics/" class="">
+      <span class="book-menu-link-title">11.8 聚类内部评价指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-k-selection/" class="">
+      <span class="book-menu-link-title">11.9 聚类K值选取与分析</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/dbscan/" class="">
+      <span class="book-menu-link-title">11.10 基于密度的聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/hierarchical-clustering/" class="">
+      <span class="book-menu-link-title">11.11 基于层次的聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-d5e78c45312818bb3abd5c19c858f7e5" class="toggle"  />
+    <label for="section-d5e78c45312818bb3abd5c19c858f7e5" class="flex">
+      <a href="/ml/chapter12/" class="">
+        <span class="book-menu-link-title">第 12 章 降维算法</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/pca-principle/" class="">
+      <span class="book-menu-link-title">12.1 主成分分析</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/kpca/" class="">
+      <span class="book-menu-link-title">12.2 基于核函数的主成分分析</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-a82b41bb7eb95af72bc11e8a3d668acd" class="toggle"  />
+    <label for="section-a82b41bb7eb95af72bc11e8a3d668acd" class="flex">
+      <a href="/ml/chapter13/" class="">
+        <span class="book-menu-link-title">第 13 章 自训练与标签传播</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/self-training/" class="">
+      <span class="book-menu-link-title">13.1 Self-Training 自训练算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/label-propagation/" class="">
+      <span class="book-menu-link-title">13.2 Label Propagation算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/label-spreading/" class="">
+      <span class="book-menu-link-title">13.3 Label Spreading 算法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</nav>
+
+
+
+
+  <script>(function(){var e=document.querySelector("aside .book-menu-content");addEventListener("beforeunload",function(){localStorage.setItem("menu.scrollTop",e.scrollTop)}),e.scrollTop=localStorage.getItem("menu.scrollTop")})()</script>
+
+
+
+  </div>
+</aside>
+ 
+
+    <div class="book-page">
+      <header class="book-header hidden">
+        
+  <div class="flex align-center justify-between">
+  <label for="menu-control">
+    <img src="/icons/menu.svg" class="book-icon" alt="Menu" />
+  </label>
+
+  <h3>第7讲 Transformer 动态学习率教程：详解 warmup 公式与 PyTorch LambdaLR 自定义实现</h3>
+
+  <label for="toc-control">
+    
+    <img src="/icons/toc.svg" class="book-icon" alt="Table of Contents" />
+    
+  </label>
+</div>
+
+
+  
+  <aside class="hidden">
+    
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#71-引言">7.1 引言</a></li>
+    <li><a href="#72-动态学习率使用">7.2 动态学习率使用</a>
+      <ul>
+        <li><a href="#721-constant使用">7.2.1 constant使用</a></li>
+        <li><a href="#722-constant_with_warmup使用">7.2.2 constant_with_warmup使用</a></li>
+        <li><a href="#723-linear使用">7.2.3 linear使用</a></li>
+        <li><a href="#724-polynomial使用">7.2.4 polynomial使用</a></li>
+        <li><a href="#725-cosine使用">7.2.5 cosine使用</a></li>
+        <li><a href="#726-cosine_with_restarts使用">7.2.6 cosine_with_restarts使用</a></li>
+        <li><a href="#727-get_scheduler使用">7.2.7 get_scheduler使用</a></li>
+      </ul>
+    </li>
+    <li><a href="#73-动态学习率实现">7.3 动态学习率实现</a>
+      <ul>
+        <li><a href="#731-constant实现">7.3.1 constant实现</a></li>
+        <li><a href="#732-constant_with_warmup实现">7.3.2 constant_with_warmup实现</a></li>
+        <li><a href="#733-linear-实现">7.3.3 <code>linear</code> 实现</a></li>
+        <li><a href="#734-polynomial-实现">7.3.4 <code>polynomial</code> 实现</a></li>
+        <li><a href="#735-cosine实现">7.3.5 cosine实现</a></li>
+        <li><a href="#736-cosine_with_restarts-实现">7.3.6 <code>cosine_with_restarts</code> 实现</a></li>
+        <li><a href="#737-transfromer-学习率实现">7.3.7 transfromer 学习率实现</a></li>
+      </ul>
+    </li>
+    <li><a href="#74-lambdalr-原理">7.4 <code>LambdaLR</code> 原理</a>
+      <ul>
+        <li><a href="#741-实现逻辑">7.4.1 实现逻辑</a></li>
+        <li><a href="#742-学习率恢复">7.4.2 学习率恢复</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+
+
+
+
+  </aside>
+  
+ 
+      </header>
+
+      
+      
+  <article class="markdown book-article"><nav class="book-breadcrumbs text-small book-breadcrumbs--page" aria-label="面包屑导航">
+    <ol class="book-breadcrumbs__list"><li class="book-breadcrumbs__item"><a class="book-breadcrumbs__link" href="https://mlwithme.github.io/">首页</a></li><li class="book-breadcrumbs__item"><a class="book-breadcrumbs__link" href="https://mlwithme.github.io/tutorials/">专题文章</a></li><li class="book-breadcrumbs__item"><a class="book-breadcrumbs__link" href="https://mlwithme.github.io/tutorials/bert/">从零玩转 Bert 详解6大下游任务</a></li><li class="book-breadcrumbs__item"><span class="book-breadcrumbs__current" aria-current="page">第7节 自定义学习率动态调整</span></li></ol>
+  </nav><div class="book-article-lastmod text-small">
+        <span class="book-article-lastmod-label">更新于</span>
+        <span class="book-article-lastmod-value">2026年7月25日</span>
+      </div><h2 id="71-引言">7.1 引言<a class="anchor" href="#71-%e5%bc%95%e8%a8%80">#</a></h2>
+<p>在深度学习模型训练过程中，当模型效果不那么尽如人意时，相信大家第一时间想到的策略就是动态调整学习率。或者是在模型搭建之初就想好后面要通过动态调整学习率来训练模型。之所以要在这里介绍这部分内容是因为在下一个BERT微调任务场景（问题回答）中论文作者就用到了学习了动态调整的方式。同时，例如在Transformer论文中，也采用了如下公式来动态调整学习率：</p>
+$$
+\text{lr}\_\text{rate=d}_{\text{model}}^{-0.5}\cdot \min (\text{step}\_\text{nu}{{\text{m}}^{-0.5}},\text{step}\_\text{num}\cdot \text{warmup}\_\text{step}{{\text{s}}^{-1.5}})\tag{7-1}
+$$<p>根据公式(7-1)可知，模型训练过程中学习率的变化过程将类似图7-1所示。</p>
+<div align=center><img width="400" src="/images/tutorials/202607121219.jpg" alt="图 7-1. Transformer动态学习率变化图"/> </div><center>图 7-1. Transformer动态学习率变化图</center> 
+<p>由此可见，动态学习了调整是深度学习中一种场景的训练策略。同时，对于公式(7-1)所示的学习率调整策略，我们还可以通过如下代码来实现模型学习率在训练过程中的动态调整，如下所示：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">CustomSchedule</span>(<span style="color:#007020">object</span>):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">__init__</span>(<span style="color:#007020">self</span>, d_model, warmup_steps<span style="color:#666">=</span><span style="color:#40a070">4000</span>, optimizer<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>         <span style="color:#007020">super</span>(CustomSchedule, <span style="color:#007020">self</span>)<span style="color:#666">.</span><span style="color:#06287e">__init__</span>()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>d_model <span style="color:#666">=</span> torch<span style="color:#666">.</span>tensor(d_model, dtype<span style="color:#666">=</span>torch<span style="color:#666">.</span>float32)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>warmup_steps <span style="color:#666">=</span> warmup_steps
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>steps <span style="color:#666">=</span> <span style="color:#40a070">1.</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>optimizer <span style="color:#666">=</span> optimizer
+</span></span><span style="display:flex;"><span> 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">step</span>(<span style="color:#007020">self</span>):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>         arg1 <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>steps  <span style="color:#666">-</span><span style="color:#40a070">0.5</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>         arg2 <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>steps  (<span style="color:#007020">self</span><span style="color:#666">.</span>warmup_steps  <span style="color:#666">-</span><span style="color:#40a070">1.5</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>steps <span style="color:#666">+=</span> <span style="color:#40a070">1.</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>         lr <span style="color:#666">=</span> (<span style="color:#007020">self</span><span style="color:#666">.</span>d_model  <span style="color:#666">-</span><span style="color:#40a070">0.5</span>)  <span style="color:#007020">min</span>(arg1, arg2)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>         <span style="color:#007020;font-weight:bold">for</span> p <span style="color:#007020;font-weight:bold">in</span> <span style="color:#007020">self</span><span style="color:#666">.</span>optimizer<span style="color:#666">.</span>param_groups:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>             p[<span style="color:#4070a0">&#39;lr&#39;</span>] <span style="color:#666">=</span> lr
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>         <span style="color:#007020;font-weight:bold">return</span> lr
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">train</span>(config):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span>     optimizer <span style="color:#666">=</span> torch<span style="color:#666">.</span>optim<span style="color:#666">.</span>Adam(translation_model<span style="color:#666">.</span>parameters(),lr<span style="color:#666">=</span><span style="color:#40a070">0.</span>,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span>                     betas<span style="color:#666">=</span>(config<span style="color:#666">.</span>beta1, config<span style="color:#666">.</span>beta2),eps<span style="color:#666">=</span>config<span style="color:#666">.</span>epsilon)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">21</span>     lr_scheduler <span style="color:#666">=</span> CustomSchedule(config<span style="color:#666">.</span>d_model, optimizer<span style="color:#666">=</span>optimizer)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">22</span>     loss<span style="color:#666">.</span>backward()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">23</span>     lr_scheduler<span style="color:#666">.</span>step()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">24</span>     optimizer<span style="color:#666">.</span>step()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">25</span>     <span style="color:#666">...</span></span></span></code></pre></div><p>在上述代码中，第1~16行是整个自定义学习率的实现部分，其中warmup_steps表示学习率在达到最大值前的一个“热身步数”（例如图7-1中的直线部分）；第23行则是在每个训练的step中对学习率进行更新；第24行则是采用更新后的学习率对模型参数进行更新。</p>
+<p>当然，对于这类复杂或并不常见的学习率动态调整方式确实需要手动来实现，但是对于一些常见的常数、线性、余弦变换等学习率调整，我们可以直接借助Transformers框架中的optimization模块来实现。同时，即使是不常见的调整策略我们也可以借助PyTorch中相关模块来实现，以便更好的利用相关内置方法。</p>
+<p>在接下来的内容中，我们将会先来介绍如何直接使用Transformers框架中的optimization模块来快速实现学习率动态调整的目的；然后再来简单介绍一下各个方法背后的实现逻辑以及如何模仿来实现自定义的方法。</p>
+<h2 id="72-动态学习率使用">7.2 动态学习率使用<a class="anchor" href="#72-%e5%8a%a8%e6%80%81%e5%ad%a6%e4%b9%a0%e7%8e%87%e4%bd%bf%e7%94%a8">#</a></h2>
+<p>在Transformers框架中，我们可以通过如下方式来导入optimization模块：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">from</span> <span style="color:#0e84b5;font-weight:bold">transformers</span> <span style="color:#007020;font-weight:bold">import</span> optimization</span></span></code></pre></div><p>在optimization模块中，一共包含了6种常见的学习率动态调整方式，包括 <code>constant</code>、<code>constant_with_warmup</code>、<code>linear</code>、<code>polynomial</code>、<code>cosine</code> 和 <code>cosine_with_restarts</code> ，其分别通过一个函数来返回对应的实例化对象。</p>
+<p>下面我们就开始依次对这6种动态学习率调整方式进行介绍。</p>
+<h3 id="721-constant使用">7.2.1 constant使用<a class="anchor" href="#721-constant%e4%bd%bf%e7%94%a8">#</a></h3>
+<p>在optimization模块中可以通过 <code>get_constant_schedule</code> 函数来返回对应的常数动态学习率调整方法。顾名思义，常数学习率动态调整就是学习率是一个恒定不变的常数，也就是说相当于没用。为了方便后续对学习率的变化进行可视化，这里我们先随便定义一个网络模型，代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">import</span> <span style="color:#0e84b5;font-weight:bold">torch</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span> <span style="color:#007020;font-weight:bold">import</span> <span style="color:#0e84b5;font-weight:bold">torch.nn</span> <span style="color:#007020;font-weight:bold">as</span> <span style="color:#0e84b5;font-weight:bold">nn</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">Model</span>(nn<span style="color:#666">.</span>Module):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">__init__</span>(<span style="color:#007020">self</span>):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>         <span style="color:#007020">super</span>(Model, <span style="color:#007020">self</span>)<span style="color:#666">.</span><span style="color:#06287e">__init__</span>()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>fc <span style="color:#666">=</span> nn<span style="color:#666">.</span>Linear(<span style="color:#40a070">5</span>, <span style="color:#40a070">10</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">forward</span>(<span style="color:#007020">self</span>, x):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>         out <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>fc(x)<span style="color:#666">.</span>sum()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>         <span style="color:#007020;font-weight:bold">return</span> out</span></span></code></pre></div><p>进一步，在模型训练的过程中可以通过以下方式来进行使用：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">from</span> <span style="color:#0e84b5;font-weight:bold">transformers</span> <span style="color:#007020;font-weight:bold">import</span> optimization
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span> <span style="color:#007020;font-weight:bold">if</span> <span style="color:#bb60d5">__name__</span> <span style="color:#666">==</span> <span style="color:#4070a0">&#39;__main__&#39;</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>     x <span style="color:#666">=</span> torch<span style="color:#666">.</span>rand([<span style="color:#40a070">8</span>, <span style="color:#40a070">5</span>])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>     model <span style="color:#666">=</span> Model()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>     model<span style="color:#666">.</span>train()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>     steps <span style="color:#666">=</span> <span style="color:#40a070">1000</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>     optimizer <span style="color:#666">=</span> torch<span style="color:#666">.</span>optim<span style="color:#666">.</span>Adam(model<span style="color:#666">.</span>parameters(), lr<span style="color:#666">=</span><span style="color:#40a070">1.0</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>     scheduler <span style="color:#666">=</span> optimization<span style="color:#666">.</span>get_constant_schedule(optimizer, last_epoch<span style="color:#666">=-</span><span style="color:#40a070">1</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>     lrs <span style="color:#666">=</span> []
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>     <span style="color:#007020;font-weight:bold">for</span> _ <span style="color:#007020;font-weight:bold">in</span> <span style="color:#007020">range</span>(steps):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>         loss <span style="color:#666">=</span> model(x)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>         optimizer<span style="color:#666">.</span>zero_grad()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>         loss<span style="color:#666">.</span>backward()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>         optimizer<span style="color:#666">.</span>step()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>         scheduler<span style="color:#666">.</span>step()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>         lrs<span style="color:#666">.</span>append(scheduler<span style="color:#666">.</span>get_last_lr())</span></span></code></pre></div><p>在上述代码中，第9行便是用来得到对应的常数学习率变化的实例化对象，其中last_epoch用于在恢复训练时指定上次结束时的epoch数量，因为有些方法学习率的变化会与epoch数有关，如果不考虑模型恢复的话指定为-1即可，这部分内容将在本节最后进行详细介绍；第16行则是对学习率进行更新；第17行则是取出对应的学习率便于可视化。</p>
+<p>在模型训练结束后（或训练过程中采用tensorboard工具）便可以对学习率的变化过程进行可视化了，代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span>     plt<span style="color:#666">.</span>figure(figsize<span style="color:#666">=</span>(<span style="color:#40a070">7</span>, <span style="color:#40a070">4</span>))
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>     plt<span style="color:#666">.</span>plot(<span style="color:#007020">range</span>(steps), lrs, label<span style="color:#666">=</span>name)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>     plt<span style="color:#666">.</span>legend(fontsize<span style="color:#666">=</span><span style="color:#40a070">13</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span>     plt<span style="color:#666">.</span>show()</span></span></code></pre></div><div align=center><img width="400" src="/images/tutorials/202607222035.png" alt="图 7-2. constant学习率变化图"/> </div><center>图 7-2. constant学习率变化图</center>
+<p>上述方法的可视化结果如图7-2所示。</p>
+<p>如图7-2所示，模型在整个训练过程中的学习率并没有发生变化，都是保持着1.0的初始值。</p>
+<h3 id="722-constant_with_warmup使用">7.2.2 constant_with_warmup使用<a class="anchor" href="#722-constant_with_warmup%e4%bd%bf%e7%94%a8">#</a></h3>
+<p>在 <code>optimization</code> 模块中，我们可以通过 <code>get_constant_schedule_with_warmup</code> 函数来返回得到对应的动态学习率调整实例化方法。从名字可以看出来，该方法最终得到的是一个带warmup的常数学习率变化过程。在模型训练的过程中，我们可以通过以下方式来进行使用：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> scheduler <span style="color:#666">=</span> optimization<span style="color:#666">.</span>get_constant_schedule_with_warmup(optimizer, num_warmup_steps<span style="color:#666">=</span><span style="color:#40a070">300</span>)</span></span></code></pre></div><p>其中 <code>num_warmup_steps</code> 表示 <code>warmpup</code> 的数量。</p>
+<p>最后，该方法的可视化结果如图7-3所示.</p>
+<div align=center><img width="400" src="/images/tutorials/202607222036.png" alt="图 7-3. constant_with_warmup学习率变化图"/> </div><center>图 7-3. constant_with_warmup学习率变化图</center>
+<p>从图7-3可以看出 <code>constant_with_warmup</code> 仅仅只是在最初的 300 个steps中以线性的方式进行增长，之后便是同样保持为常数。</p>
+<h3 id="723-linear使用">7.2.3 linear使用<a class="anchor" href="#723-linear%e4%bd%bf%e7%94%a8">#</a></h3>
+<p>在 <code>optimization</code> 模块中可以通过 <code>get_linear_schedule_with_warmup</code> 函数来返回对应的动态学习率调整的实例化方法。从名字可以看出，该方法最终得到的是一个带warmup的常数学习率变化。在模型训练的过程中，我们可以通过以下方式来进行使用：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> scheduler <span style="color:#666">=</span> optimization<span style="color:#666">.</span>get_linear_schedule_with_warmup(optimizer,num_warmup_steps<span style="color:#666">=</span><span style="color:#40a070">300</span>, num_training_steps<span style="color:#666">=</span>steps)</span></span></code></pre></div><p>其中 <code>num_training_steps</code> 表示整个模型训练的step数。</p>
+<p>最后，该方法的可视化结果如下所示：</p>
+<div align=center><img width="400" src="/images/tutorials/202607222037.png" alt="图 7-4. linear学习率变化图"/> </div><center>图 7-4. linear学习率变化图</center>
+<p>从图7-4可以看出linear动态学习率调整先是在最初的300个steps中以线性的方式进行增长，之后便是同样以线性的方式进行递减，直到衰减到0为止。</p>
+<h3 id="724-polynomial使用">7.2.4 polynomial使用<a class="anchor" href="#724-polynomial%e4%bd%bf%e7%94%a8">#</a></h3>
+<p>在 <code>optimization</code> 模块中可以通过 <code>get_polynomial_decay_schedule_with_warmup</code> 函数来返回对应的动态学习率调整的实例化方法。从名字可以看出，该方法最终得到的是一个基于多项式的学习率动态调整策略。在模型训练的过程中，我们可以通过以下方式来进行使用：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> scheduler <span style="color:#666">=</span> optimization<span style="color:#666">.</span>get_polynomial_decay_schedule_with_warmup(optimizer,num_warmup_steps<span style="color:#666">=</span><span style="color:#40a070">300</span>,num_training_steps<span style="color:#666">=</span>steps,lr_end <span style="color:#666">=</span> <span style="color:#40a070">1e-7</span>,power<span style="color:#666">=</span><span style="color:#40a070">3</span>)</span></span></code></pre></div><p>其中 <code>power</code> 表示多项式的次数，当 <code>power=1</code> 时（默认）类似于 <code>get_linear_schedule_with_warmup</code> 函数；<code>lr_end</code> 表示学习率衰减到的最小值。</p>
+<p>最后，该方法的可视化结果如图7-5所示。</p>
+<div align=center><img width="400" src="/images/tutorials/202607222038.png" alt="图 7-5. polynomial学习率变化图（power=3）"/> </div><center>图 7-5. polynomial学习率变化图（power=3）</center>
+<p>从图7-5可以看出 <code>polynomial</code> 动态学习率调整先是在最初的300个steps中以线性的方式进行增长，之后便是多项式的方式进行递减，直到衰减到 <code>lr_end</code> 后保持不变。</p>
+<h3 id="725-cosine使用">7.2.5 cosine使用<a class="anchor" href="#725-cosine%e4%bd%bf%e7%94%a8">#</a></h3>
+<p>在 <code>optimization</code> 模块中可以通过 <code>get_cosine_schedule_with_warmup</code> 来返回基于 <code>cosine</code> 函数的动态学习率调整方法。在模型训练过程中我们可以通过如下方式来进行调用：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> scheduler <span style="color:#666">=</span> optimization<span style="color:#666">.</span>get_cosine_schedule_with_warmup(optimizer,num_warmup_steps<span style="color:#666">=</span><span style="color:#40a070">300</span>,num_training_steps<span style="color:#666">=</span>steps,num_cycles<span style="color:#666">=</span><span style="color:#40a070">2</span>)</span></span></code></pre></div><p>其中 <code>num_cycles</code> 表示循环的次数。</p>
+<p>最后，该方法的可视化结果如图7-6所示。</p>
+<div align=center><img width="400" src="/images/tutorials/202607222039.png" alt="图 7-6. cosine学习率变化图（num_cycles=2）"/> </div><center>图 7-6. cosine学习率变化图（num_cycles=2）</center>
+<p>从图7-6可以看出cosine动态学习率调整方法先是在最初的300个steps中以线性的方式进行增长，之后便是以余弦函数的方式进行周期性变换。</p>
+<h3 id="726-cosine_with_restarts使用">7.2.6 cosine_with_restarts使用<a class="anchor" href="#726-cosine_with_restarts%e4%bd%bf%e7%94%a8">#</a></h3>
+<p>在 <code>optimization</code> 模块中可以通过 <code>get_cosine_with_hard_restarts_schedule_with_warmup</code> 来返回基于 <code>cosine</code> 函数的硬重启动态学习率调整方法。所谓硬重启就是学习率衰减到0之后直接变回到最大值的方式。在模型训练过程中我们可以通过如下方式来进行调用：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> scheduler <span style="color:#666">=</span> optimization<span style="color:#666">.</span>get_cosine_with_hard_restarts_schedule_with_warmup(optimizer, num_warmup_steps<span style="color:#666">=</span><span style="color:#40a070">300</span>,num_training_steps<span style="color:#666">=</span>steps,num_cycles<span style="color:#666">=</span><span style="color:#40a070">2</span>)</span></span></code></pre></div><p>最后，该方法的可视化结果如图7-7所示。</p>
+<div align=center><img width="400" src="/images/tutorials/202607222040.png" alt="图 7-7. cosine_with_restarts学习率变化图（num_cycles=2）"/> </div><center>图 7-7. cosine_with_restarts学习率变化图（num_cycles=2）</center>
+<p>从图7-7可以看出 <code>cosine_with_restarts</code> 动态学习率调整方法先是在最初的300个steps中以线性的方式进行增长，之后便是以余弦函数的方式进行周期性衰减，当达到最小值时再直接恢复到初始学习率。</p>
+<h3 id="727-get_scheduler使用">7.2.7 get_scheduler使用<a class="anchor" href="#727-get_scheduler%e4%bd%bf%e7%94%a8">#</a></h3>
+<p>通过上述6个函数便能够返回得到相应的动态学习率调整方法。当然，如果你并不需要修改一些特定的参数，例如多项式中的 <code>power</code> 和余弦变换中的 <code>num_cycles</code> 等，那么还可以使用一个更加简单的统一接口来调用上述6个方法：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">from</span> <span style="color:#0e84b5;font-weight:bold">transformers</span> <span style="color:#007020;font-weight:bold">import</span> get_scheduler
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">get_scheduler</span>(
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>     name: Union[<span style="color:#007020">str</span>, SchedulerType],
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span>     optimizer: Optimizer,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">5</span>     num_warmup_steps: Optional[<span style="color:#007020">int</span>] <span style="color:#666">=</span> <span style="color:#007020;font-weight:bold">None</span>,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">6</span>     num_training_steps: Optional[<span style="color:#007020">int</span>] <span style="color:#666">=</span> <span style="color:#007020;font-weight:bold">None</span>):</span></span></code></pre></div><p>在上述代码中，第3行 <code>name</code> 表示指定学习率调整的方式，可选项就是上面介绍的6种，并且通过 <code>constant</code>、<code>constant_with_warmup</code>、<code>linear</code>、<code>polynomial</code>、<code>cosine</code> 和 <code>cosine_with_restarts</code> 这6个关键字就能够返回得到对应的方法；而对于其它特定的参数则会保持每个方法对应的默认值。例如通过 <code>get_scheduler</code> 函数返回 <code>get_cosine_with_hard_restarts_schedule_with_warmup</code> 时，<code>num_cycles</code> 则为1。</p>
+<p>例如：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> scheduler <span style="color:#666">=</span> optimization<span style="color:#666">.</span>get_cosine_with_hard_restarts_schedule_with_warmup(optimizer,num_warmup_steps<span style="color:#666">=</span><span style="color:#40a070">300</span>,num_training_steps<span style="color:#666">=</span>steps,num_cycles<span style="color:#666">=</span><span style="color:#40a070">1</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span> scheduler <span style="color:#666">=</span> get_scheduler(name<span style="color:#666">=</span><span style="color:#4070a0">&#34;cosine_with_restarts&#34;</span>, optimizer<span style="color:#666">=</span>optimizer,num_warmup_steps<span style="color:#666">=</span><span style="color:#40a070">300</span>, num_training_steps<span style="color:#666">=</span>steps)</span></span></code></pre></div><p>在上述代码中，两种方式返回得到的学习调整方式都是一样的；但是如果想要返回 <code>num_cycles=2</code> 的情况那就不能通过 <code>get_scheduler</code> 函数获得。</p>
+<p>到此，对于Transformes框架中常见的6种学习率动态调整方法及其使用示例就介绍完了。</p>
+<h2 id="73-动态学习率实现">7.3 动态学习率实现<a class="anchor" href="#73-%e5%8a%a8%e6%80%81%e5%ad%a6%e4%b9%a0%e7%8e%87%e5%ae%9e%e7%8e%b0">#</a></h2>
+<p>对于Transformers框架中实现的这6种学习率动态调整方法本质上也是基于PyTorch框架中的LambdaLR类而来。</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">from</span> <span style="color:#0e84b5;font-weight:bold">torch.optim.lr_scheduler</span> <span style="color:#007020;font-weight:bold">import</span> LambdaLR
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">LambdaLR</span>(_LRScheduler):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>         <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">__init__</span>(<span style="color:#007020">self</span>, optimizer, lr_lambda, last_epoch<span style="color:#666">=-</span><span style="color:#40a070">1</span>):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span>         <span style="color:#007020;font-weight:bold">pass</span></span></span></code></pre></div><p>通过这个接口，我们只需要指定优化器、学习率系数的计算方式（函数）以及 <code>last_epoch</code> 参数来实例化类 <code>LambdaLR</code> 便可以返回得到相应的实例化对象。下面就来依次进行一个简单的介绍。</p>
+<h3 id="731-constant实现">7.3.1 constant实现<a class="anchor" href="#731-constant%e5%ae%9e%e7%8e%b0">#</a></h3>
+<p>对于constant的计算过程来说比较简单， 只需要传入一个返回值始终为1.0的匿名函数即可。因为返回的1将会作为一个系数乘以我们初始设定的学习率。实现代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">get_constant_schedule</span>(Optimizer, last_epoch <span style="color:#666">=</span> <span style="color:#666">-</span><span style="color:#40a070">1</span>):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">return</span> LambdaLR(optimizer, <span style="color:#007020;font-weight:bold">lambda</span> _: <span style="color:#40a070">1</span>, last_epoch<span style="color:#666">=</span>last_epoch)</span></span></code></pre></div><p>在上述代码中，<code>lambda _:1</code> 就是对应返回值为1的匿名函数，也就是无论传入和值，它的返回值都是1.</p>
+<h3 id="732-constant_with_warmup实现">7.3.2 constant_with_warmup实现<a class="anchor" href="#732-constant_with_warmup%e5%ae%9e%e7%8e%b0">#</a></h3>
+<p>对于 <code>constant_with_warmup</code> 的计算过程来说同样也比较简单。整体逻辑便是在 <code>num_warmup_steps</code> 之前系数保持线性增长，在 <code>num_warmup_steps</code> 之后保持为1.0不变即可，即：</p>
+$$
+\text{lr}\_\text{coef=} \begin{cases}
+   \frac{\text{current}\_\text{step}}{\text{num}\_\text{warmup}\_\text{steps}}, & \text{current}\_\text{step}\ <\ \text{num}\_\text{warmup}\_\text{steps}  \\[4ex]
+   \text{1}.\text{0}, & \text{current}\_\text{step}\ \ge \ \text{num}\_\text{warmup}\_\text{steps}
+\end{cases} \tag{7-2}
+$$<p>根据公式(7-2)，最终实现代码如下所示：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">get_constant_schedule_with_warmup</span>(Optimizer, num_warmup_steps, last_epoch <span style="color:#666">=</span> <span style="color:#666">-</span><span style="color:#40a070">1</span>):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">lr_lambda</span>(current_step):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>         <span style="color:#007020;font-weight:bold">if</span> current_step <span style="color:#666">&lt;</span> num_warmup_steps:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span>             <span style="color:#007020;font-weight:bold">return</span> <span style="color:#007020">float</span>(current_step) <span style="color:#666">/</span> <span style="color:#007020">float</span>(<span style="color:#007020">max</span>(<span style="color:#40a070">1.0</span>, num_warmup_steps))
+</span></span><span style="display:flex;"><span><span style="color:#40a070">5</span>         <span style="color:#007020;font-weight:bold">return</span> <span style="color:#40a070">1.0</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">6</span>     <span style="color:#007020;font-weight:bold">return</span> LambdaLR(optimizer, lr_lambda, last_epoch<span style="color:#666">=</span>last_epoch)</span></span></code></pre></div><p>这里需要再次提醒大家的是，<code>lr_lambda()</code> 返回的是学习率的变换系数，该系数乘以初始的学习率才是最终模型用到的学习率。例如上述代码中当 <code>current_step</code> 大于等于 <code>num_warmup_steps</code> 时返回的系数就是1，这样就能保证在这之后学习率就会保持初始设定的学习率不变。</p>
+<h3 id="733-linear-实现">7.3.3 <code>linear</code> 实现<a class="anchor" href="#733-linear-%e5%ae%9e%e7%8e%b0">#</a></h3>
+<p>对于 <code>linear</code> 的系数计算过程来说只需要分别在 <code>num_warmup_steps</code> 之前和之后分别保持线性增加和线性减少即可，即：</p>
+$$
+\text{lr}\_\text{coef=}\begin{cases}
+   \frac{\text{current}\_\text{step}}{\text{num}\_\text{warmup}\_\text{steps}}, & \text{current}\_\text{step}\ <\ \text{num}\_\text{warmup}\_\text{steps}  \\[4ex]
+   \frac{\text{num}\_\text{training}\_\text{steps-current}\_\text{step}}{\text{num}\_\text{training}\_\text{steps-num}\_\text{warmup}\_\text{steps}}, & \text{current}\_\text{step}\ \ge \ \text{num}\_\text{warmup}\_\text{steps}  \\
+\end{cases} \tag{7-3}
+$$<p>根据公式(7-3)，最终实现代码如下所示：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">get_linear_schedule_with_warmup</span>(optimizer, num_warmup_steps, 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>                                 num_training_steps, last_epoch<span style="color:#666">=-</span><span style="color:#40a070">1</span>):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">lr_lambda</span>(current_step: <span style="color:#007020">int</span>):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span>         <span style="color:#007020;font-weight:bold">if</span> current_step <span style="color:#666">&lt;</span> num_warmup_steps:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">5</span>             <span style="color:#007020;font-weight:bold">return</span> <span style="color:#007020">float</span>(current_step) <span style="color:#666">/</span> <span style="color:#007020">float</span>(<span style="color:#007020">max</span>(<span style="color:#40a070">1</span>, num_warmup_steps))
+</span></span><span style="display:flex;"><span><span style="color:#40a070">6</span>         <span style="color:#007020;font-weight:bold">return</span> <span style="color:#007020">max</span>( <span style="color:#40a070">0.0</span>, <span style="color:#007020">float</span>(num_training_steps <span style="color:#666">-</span> current_step) <span style="color:#666">/</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">7</span>               <span style="color:#007020">float</span>(<span style="color:#007020">max</span>(<span style="color:#40a070">1</span>, num_training_steps <span style="color:#666">-</span> num_warmup_steps)))
+</span></span><span style="display:flex;"><span><span style="color:#40a070">8</span>     <span style="color:#007020;font-weight:bold">return</span> LambdaLR(optimizer, lr_lambda, last_epoch)</span></span></code></pre></div><h3 id="734-polynomial-实现">7.3.4 <code>polynomial</code> 实现<a class="anchor" href="#734-polynomial-%e5%ae%9e%e7%8e%b0">#</a></h3>
+<p>对于 <code>polynomial</code> 的系数计算过程来说则稍微复杂了一点，其整体逻辑便是在 <code>num_warmup_steps</code> 之前系数保持线性增长，在 <code>num_warmup_steps</code> 之后保持为定值不变，在两者之间则以对应的多项式函数进行变换，计算公式式如下：</p>
+$$
+\begin{aligned}
+\text{lr}\_\text{coef}= &\begin{cases}
+\frac{\text{current}\_\text{step}}{\text{num}\_\text{warmup}\_\text{steps}} \\[2ex]
+\frac{\text{lr}\_\text{end}}{\text{lr}\_\text{init}} \\[2ex] 
+\frac{(\text{lr}\_\text{init-lr}\_\text{end})\cdot {{\left[ \text{1-}\frac{\text{current}\_\text{step-num}\_\text{warmup}\_\text{steps}}{\text{num}\_\text{training}\_\text{steps-num}\_\text{warmup}\_\text{steps}} \right]}^{\text{power}}}\text{+lr}\_\text{end}}{\text{lr}\_\text{init}} \\ 
+\end{cases}  \\[2ex]  
+& \begin{cases}
+\text{current}\_\text{step}\ <\ \text{num}\_\text{warmup}\_\text{steps} \\[2ex]  
+\text{current}\_\text{step}\ >\ \text{num}\_\text{training}\_\text{steps} \\[2ex]  
+\text{num}\_\text{warmup}\_\text{steps}\ \le \ \text{current}\_\text{step}\ \le \ \text{num}\_\text{training}\_\text{steps} \\ 
+\end{cases}
+\end{aligned}\tag{7-4}
+$$<p>其中$\text{lr\_init}$表示初始设定的学习率。</p>
+<p>根据公式(7-4)，最终实现代码如下所示：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">get_polynomial_decay_schedule_with_warmup</span>(optimizer, 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>             num_warmup_steps, num_training_steps, lr_end<span style="color:#666">=</span><span style="color:#40a070">1e-7</span>, 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>             power<span style="color:#666">=</span><span style="color:#40a070">1.0</span>, last_epoch<span style="color:#666">=-</span><span style="color:#40a070">1</span>):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>     lr_init <span style="color:#666">=</span> optimizer<span style="color:#666">.</span>defaults[<span style="color:#4070a0">&#34;lr&#34;</span>]
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>     <span style="color:#007020;font-weight:bold">assert</span> lr_init <span style="color:#666">&gt;</span> lr_end, <span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;lr_end (</span><span style="color:#70a0d0">{</span>lr_end<span style="color:#70a0d0">}</span><span style="color:#4070a0">) must besmaller than initial lr (</span><span style="color:#70a0d0">{</span>lr_init<span style="color:#70a0d0">}</span><span style="color:#4070a0">)&#34;</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">lr_lambda</span>(current_step):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>         <span style="color:#007020;font-weight:bold">if</span> current_step <span style="color:#666">&lt;</span> num_warmup_steps:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>             <span style="color:#007020;font-weight:bold">return</span> <span style="color:#007020">float</span>(current_step) <span style="color:#666">/</span> <span style="color:#007020">float</span>(<span style="color:#007020">max</span>(<span style="color:#40a070">1</span>, num_warmup_steps))
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>         <span style="color:#007020;font-weight:bold">elif</span> current_step <span style="color:#666">&gt;</span> num_training_steps:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>             <span style="color:#007020;font-weight:bold">return</span> lr_end <span style="color:#666">/</span> lr_init
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>         <span style="color:#007020;font-weight:bold">else</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>             lr_range <span style="color:#666">=</span> lr_init <span style="color:#666">-</span> lr_end
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>             decay_steps <span style="color:#666">=</span> num_training_steps <span style="color:#666">-</span> num_warmup_steps
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>             pct_remaining <span style="color:#666">=</span> <span style="color:#40a070">1</span><span style="color:#666">-</span>(current_step<span style="color:#666">-</span>num_warmup_steps) <span style="color:#666">/</span> decay_steps
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>             decay <span style="color:#666">=</span> lr_range  pct_remaining  power <span style="color:#666">+</span> lr_end
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>             <span style="color:#007020;font-weight:bold">return</span> decay <span style="color:#666">/</span> lr_init  
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>     <span style="color:#007020;font-weight:bold">return</span> LambdaLR(optimizer, lr_lambda, last_epoch)</span></span></code></pre></div><h3 id="735-cosine实现">7.3.5 cosine实现<a class="anchor" href="#735-cosine%e5%ae%9e%e7%8e%b0">#</a></h3>
+<p>对于 <code>cosine</code> 学习率动态变换的系数计算过程来说就稍微更复杂了，其整体逻辑便是在 <code>num_warmup_steps</code> 之前系数保持线性增长，在 <code>num_warmup_steps</code> 之后则以对应的余弦函数进行变换，计算公式如下：</p>
+$$
+\begin{aligned}
+   \text{lr}\_\text{coef}=&\begin{cases}
+   \frac{\text{current}\_\text{step}}{\text{num}\_\text{warmup}\_\text{steps}} \\[2ex] 
+  \frac{1}{2}\cdot \left( 1+\cos \left( 2\cdot \pi \cdot \text{num}\_\text{cycles}\cdot \frac{\text{current}\_\text{step-num}\_\text{warmup}\_\text{steps}}{\text{num}\_\text{training}\_\text{steps-num}\_\text{warmup}\_\text{steps}} \right) \right) \\[2ex] 
+\end{cases}  \\[2ex] 
+  &\begin{cases}
+   \text{current}\_\text{step}\ <\ \text{num}\_\text{warmup}\_\text{steps} \\[2ex] 
+ \text{current}\_\text{step}\ \ge \ \text{num}\_\text{warmup}\_\text{steps}
+\end{cases}
+\end{aligned}\tag{7-5}
+$$<p>根据公式(7-5)，最终实现代码如下所示：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">get_cosine_schedule_with_warmup</span>(optimizer, num_warmup_steps,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>                       num_training_steps, num_cycles <span style="color:#666">=</span> <span style="color:#40a070">0.5</span>, last_epoch <span style="color:#666">=</span> <span style="color:#666">-</span><span style="color:#40a070">1</span>):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">lr_lambda</span>(current_step):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span>         <span style="color:#007020;font-weight:bold">if</span> current_step <span style="color:#666">&lt;</span> num_warmup_steps:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">5</span>             <span style="color:#007020;font-weight:bold">return</span> <span style="color:#007020">float</span>(current_step) <span style="color:#666">/</span> <span style="color:#007020">float</span>(<span style="color:#007020">max</span>(<span style="color:#40a070">1</span>, num_warmup_steps))
+</span></span><span style="display:flex;"><span><span style="color:#40a070">6</span>         progress <span style="color:#666">=</span> <span style="color:#007020">float</span>(current_step <span style="color:#666">-</span> num_warmup_steps) <span style="color:#666">/</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">7</span>                          <span style="color:#007020">float</span>(<span style="color:#007020">max</span>(<span style="color:#40a070">1</span>, num_training_steps <span style="color:#666">-</span> num_warmup_steps))
+</span></span><span style="display:flex;"><span><span style="color:#40a070">8</span>         <span style="color:#007020;font-weight:bold">return</span> <span style="color:#007020">max</span>(<span style="color:#40a070">0.0</span>, <span style="color:#40a070">0.5</span>  (<span style="color:#40a070">1.0</span> <span style="color:#666">+</span> math<span style="color:#666">.</span>cos(math<span style="color:#666">.</span>pi  <span style="color:#007020">float</span>(num_cycles)  <span style="color:#40a070">2.0</span>  progress)))
+</span></span><span style="display:flex;"><span><span style="color:#40a070">9</span>     <span style="color:#007020;font-weight:bold">return</span> LambdaLR(optimizer, lr_lambda, last_epoch)</span></span></code></pre></div><h3 id="736-cosine_with_restarts-实现">7.3.6 <code>cosine_with_restarts</code> 实现<a class="anchor" href="#736-cosine_with_restarts-%e5%ae%9e%e7%8e%b0">#</a></h3>
+<p>对于 <code>cosine_with_restarts</code> 学习率动态变换的系数计算过程来说，总体上与 <code>cosine</code> 方式的实现过程类似，仅仅只是多增加了一个条件判断，具体计算公式如下：</p>
+$$
+\begin{aligned}
+ \text{lr}\_\text{coef}=&\begin{cases}
+  \frac{\text{current}\_\text{step}}{\text{num}\_\text{warmup}\_\text{steps}} \\[2ex] 
+ 0.0 \\[2ex] 
+ \frac{1}{2}\cdot \left( 1+\cos \left( \pi \cdot \left( \text{num}\_\text{cycles}\cdot \frac{\text{current}\_\text{step-num}\_\text{warmup}\_\text{steps}}{\text{num}\_\text{training}\_\text{steps-num}\_\text{warmup}\_\text{steps}} \right) \%1.0 \right) \right) 
+\end{cases} \\[1ex]
+\\
+&\begin{cases}
+  \text{current}\_\text{step}\ <\ \text{num}\_\text{warmup}\_\text{steps} \\[2ex] 
+ \text{current}\_\text{step}\ >\ \text{num}\_\text{training}\_\text{steps} \\[2ex] 
+ \text{num}\_\text{warmup}\_\text{steps}\ \le \ \text{current}\_\text{step}\ \le \ \text{num}\_\text{training}\_\text{steps} 
+\end{cases}
+\end{aligned}\tag{7-6}
+$$<p>其中$\%$表示取余。</p>
+<p>根据公式(7-6)，最终实现代码如下所示：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">get_cosine_with_hard_restarts_schedule_with_warmup</span>(optimizer, 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>        num_warmup_steps,num_training_steps, num_cycles <span style="color:#666">=</span> <span style="color:#40a070">1</span>,last_epoch <span style="color:#666">=</span> <span style="color:#666">-</span><span style="color:#40a070">1</span>):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">lr_lambda</span>(current_step):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>         <span style="color:#007020;font-weight:bold">if</span> current_step <span style="color:#666">&lt;</span> num_warmup_steps:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>             <span style="color:#007020;font-weight:bold">return</span> <span style="color:#007020">float</span>(current_step) <span style="color:#666">/</span> <span style="color:#007020">float</span>(<span style="color:#007020">max</span>(<span style="color:#40a070">1</span>, num_warmup_steps))
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>         progress <span style="color:#666">=</span> <span style="color:#007020">float</span>(current_step <span style="color:#666">-</span> num_warmup_steps) <span style="color:#666">/</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>                       <span style="color:#007020">float</span>(<span style="color:#007020">max</span>(<span style="color:#40a070">1</span>, num_training_steps <span style="color:#666">-</span> num_warmup_steps))
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>         <span style="color:#007020;font-weight:bold">if</span> progress <span style="color:#666">&gt;=</span> <span style="color:#40a070">1.0</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>             <span style="color:#007020;font-weight:bold">return</span> <span style="color:#40a070">0.0</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>         <span style="color:#007020;font-weight:bold">return</span> <span style="color:#007020">max</span>(<span style="color:#40a070">0.0</span>, <span style="color:#40a070">0.5</span>  (<span style="color:#40a070">1.0</span> <span style="color:#666">+</span> math<span style="color:#666">.</span>cos(math<span style="color:#666">.</span>pi  
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>                             ((<span style="color:#007020">float</span>(num_cycles)  progress) <span style="color:#666">%</span> <span style="color:#40a070">1.0</span>))))
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>     <span style="color:#007020;font-weight:bold">return</span> LambdaLR(optimizer, lr_lambda, last_epoch)</span></span></code></pre></div><h3 id="737-transfromer-学习率实现">7.3.7 transfromer 学习率实现<a class="anchor" href="#737-transfromer-%e5%ad%a6%e4%b9%a0%e7%8e%87%e5%ae%9e%e7%8e%b0">#</a></h3>
+<p>经过上述几种动态学习率调整方法实现的介绍，对于公式(7-1)也就是Transformer论文中学习率的调整，我们也可以模仿上述的方式来进行实现：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">get_customized_schedule_with_warmup</span>(optimizer, num_warmup_steps,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>                          			d_model<span style="color:#666">=</span><span style="color:#40a070">1.0</span>, last_epoch<span style="color:#666">=-</span><span style="color:#40a070">1</span>):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">lr_lambda</span>(current_step):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span>         current_step <span style="color:#666">+=</span> <span style="color:#40a070">1</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">5</span>         arg1 <span style="color:#666">=</span> current_step  <span style="color:#666">-</span><span style="color:#40a070">0.5</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">6</span>         arg2 <span style="color:#666">=</span> current_step  (num_warmup_steps  <span style="color:#666">-</span><span style="color:#40a070">1.5</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">7</span>         <span style="color:#007020;font-weight:bold">return</span> (d_model  <span style="color:#666">-</span><span style="color:#40a070">0.5</span>)  <span style="color:#007020">min</span>(arg1, arg2)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">8</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">9</span>     <span style="color:#007020;font-weight:bold">return</span> LambdaLR(optimizer, lr_lambda, last_epoch)</span></span></code></pre></div><p>由于公式(7-1)中计算学习率的方法并不涉及到初始学习率的，所以在后面初始化Adam()时参数lr需要赋值为1.0，这样get_customized_schedule_with_warmup返回后的结果就直接是我们需要的学习率了。当然，也可以直接在上述代码第6行的返回值中再加上除以初始学习率，这样后续就不用有学习率必须设置为1的限制了，大家理解便是。</p>
+<p>进一步我们就可以通过上述类似方式来使用该方法：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> optimizer <span style="color:#666">=</span> torch<span style="color:#666">.</span>optim<span style="color:#666">.</span>Adam(model<span style="color:#666">.</span>parameters(), lr<span style="color:#666">=</span><span style="color:#40a070">1.0</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span> scheduler <span style="color:#666">=</span> get_customized_schedule_with_warmup(optimizer,num_warmup_steps<span style="color:#666">=</span><span style="color:#40a070">200</span>,d_model<span style="color:#666">=</span><span style="color:#40a070">728</span>)</span></span></code></pre></div><p>最终同样会得到如图7-8所示的学习率变化曲线。</p>
+<div align=center><img width="400" src="/images/tutorials/202607222041.png" alt="图 7-8. 自定义学习率动态调整图"/> </div><center>图 7-8. 自定义学习率动态调整图</center>
+<h2 id="74-lambdalr-原理">7.4 <code>LambdaLR</code> 原理<a class="anchor" href="#74-lambdalr-%e5%8e%9f%e7%90%86">#</a></h2>
+<p>在介绍完上述几种动态学习率调整及自定义的用法后，我们再来大致看看底层 <code>LambdaLR</code> 的实现逻辑，这样更有利于我们灵活的使用上述方法。当然，如果有客官暂时只想停留在对上述6种方式的使用层面，那么后续内容可以先行略过，等有需要再来查阅。</p>
+<h3 id="741-实现逻辑">7.4.1 实现逻辑<a class="anchor" href="#741-%e5%ae%9e%e7%8e%b0%e9%80%bb%e8%be%91">#</a></h3>
+<p>翻阅 <code>LambdaLR</code> 类的实现代码可以发现，类 <code>LambdaLR</code> 是继承自类 <code>_LRScheduler</code> ，两者之中各自重要的类方法和类成员变量如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">_LRScheduler</span>(<span style="color:#007020">object</span>):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">__init__</span>(<span style="color:#007020">self</span>, optimizer, last_epoch<span style="color:#666">=-</span><span style="color:#40a070">1</span>):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>         <span style="color:#007020;font-weight:bold">if</span> last_epoch <span style="color:#666">==</span> <span style="color:#666">-</span><span style="color:#40a070">1</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>             <span style="color:#007020;font-weight:bold">for</span> group <span style="color:#007020;font-weight:bold">in</span> optimizer<span style="color:#666">.</span>param_groups:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>                 group<span style="color:#666">.</span>setdefault(<span style="color:#4070a0">&#39;initial_lr&#39;</span>, group[<span style="color:#4070a0">&#39;lr&#39;</span>])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>         <span style="color:#666">......</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>base_lrs <span style="color:#666">=</span> <span style="color:#007020">list</span>(<span style="color:#007020">map</span>(<span style="color:#007020;font-weight:bold">lambda</span> group: group[<span style="color:#4070a0">&#39;initial_lr&#39;</span>], optimizer<span style="color:#666">.</span>param_groups))
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>last_epoch <span style="color:#666">=</span> last_epoch
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>                 <span style="color:#666">......</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>step()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">get_lr</span>(<span style="color:#007020">self</span>):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>         <span style="color:#007020;font-weight:bold">raise</span> <span style="color:#007020">NotImplementedError</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">step</span>(<span style="color:#007020">self</span>, epoch<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>                 <span style="color:#666">......</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>_step_count <span style="color:#666">+=</span> <span style="color:#40a070">1</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span>         <span style="color:#007020;font-weight:bold">with</span> _enable_get_lr_call(<span style="color:#007020">self</span>):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span>             <span style="color:#007020;font-weight:bold">if</span> epoch <span style="color:#007020;font-weight:bold">is</span> <span style="color:#007020;font-weight:bold">None</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">21</span>                 <span style="color:#007020">self</span><span style="color:#666">.</span>last_epoch <span style="color:#666">+=</span> <span style="color:#40a070">1</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">22</span>                 values <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>get_lr()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">23</span>             <span style="color:#007020;font-weight:bold">else</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">24</span>                 <span style="color:#007020">self</span><span style="color:#666">.</span>last_epoch <span style="color:#666">=</span> epoch
+</span></span><span style="display:flex;"><span><span style="color:#40a070">25</span>                 <span style="color:#007020;font-weight:bold">if</span> <span style="color:#007020">hasattr</span>(<span style="color:#007020">self</span>, <span style="color:#4070a0">&#34;_get_closed_form_lr&#34;</span>):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">26</span>                     values <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>_get_closed_form_lr()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">27</span>                 <span style="color:#007020;font-weight:bold">else</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">28</span>                     values <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>get_lr()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">29</span>         <span style="color:#007020;font-weight:bold">for</span> param_group, lr <span style="color:#007020;font-weight:bold">in</span> <span style="color:#007020">zip</span>(<span style="color:#007020">self</span><span style="color:#666">.</span>optimizer<span style="color:#666">.</span>param_groups, values):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">30</span>             param_group[<span style="color:#4070a0">&#39;lr&#39;</span>] <span style="color:#666">=</span> lr
+</span></span><span style="display:flex;"><span><span style="color:#40a070">31</span>         <span style="color:#666">......</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">32</span> <span style="color:#666">......</span>  
+</span></span><span style="display:flex;"><span><span style="color:#40a070">33</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">LambdaLR</span>(_LRScheduler):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">34</span>   
+</span></span><span style="display:flex;"><span><span style="color:#40a070">35</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">__init__</span>(<span style="color:#007020">self</span>, optimizer, lr_lambda, last_epoch<span style="color:#666">=-</span><span style="color:#40a070">1</span>):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">36</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>optimizer <span style="color:#666">=</span> optimizer
+</span></span><span style="display:flex;"><span><span style="color:#40a070">37</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>last_epoch <span style="color:#666">=</span> last_epoch
+</span></span><span style="display:flex;"><span><span style="color:#40a070">38</span>         <span style="color:#007020">super</span>(LambdaLR, <span style="color:#007020">self</span>)<span style="color:#666">.</span><span style="color:#06287e">__init__</span>(optimizer, last_epoch)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">39</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">40</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">get_lr</span>(<span style="color:#007020">self</span>):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">41</span>         <span style="color:#007020;font-weight:bold">return</span> [base_lr  lmbda(<span style="color:#007020">self</span><span style="color:#666">.</span>last_epoch)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">42</span>                 <span style="color:#007020;font-weight:bold">for</span> lmbda, base_lr <span style="color:#007020;font-weight:bold">in</span> <span style="color:#007020">zip</span>(<span style="color:#007020">self</span><span style="color:#666">.</span>lr_lambdas, <span style="color:#007020">self</span><span style="color:#666">.</span>base_lrs)]</span></span></code></pre></div><p>注：上述代码并非完整部分，我们只是对其中的关键部分进行摘取。</p>
+<p>要理解整个动态学习率的计算过程最重要的就是弄清楚 <code>get_lr()</code> 和 <code>step()</code> 这两个方法。从第7.3节中的使用示例可以发现，模型在训练过程中是通过 <code>step()</code> 这个方法来实现学习率更新的，因此这里我们就从 <code>step()</code> 方法入手来进行研究。</p>
+<p>从上述代码第16行可以发现，其实 <code>step()</code> 方法在调用时还会接受一个 <code>epoch</code> 参数，但我们在前面的使用过程中并没有传入，那它又有什么用呢？进一步，从第20~22行可以当 <code>epoch</code> 为 <code>None</code> 时，那么 <code>self.last_epoch</code> 就会累计加1；而如果 <code>epoch</code> 不为 <code>None</code> 那么 <code>self.last_epoch</code> 就会直接取 <code>epoch</code> 的值；接着便是通过 <code>self.get_lr()</code> 函数来获取当前的学习率。在得到当前学习率的计算结果后，再通过第29~30行代码将其传入到优化器中便实现了学习率的动态调整。</p>
+<p>接着再来看 <code>LambdaLR</code> 中 <code>get_lr()</code> 部分的实现代码。从第40~42行代码可知，<code>self.lr_lambdas</code> 就是 <code>LambdaLR</code> 实例化时传入的参数 <code>lr_lambda</code>，也就是第7.3节中介绍的学习率系数的计算函数；而 <code>self.last_epoch</code> 就是前面对应的 <code>current_step</code> 参数。从这里我们就可以发现，<code>LambdaLR</code> 中 <code>epoch</code> 这个概念不仅仅有我们平常训练时所说的迭代“轮”数，也可以理解成训练时参数更新的次数。</p>
+<p>从第20~28行的逻辑可以看出，如果在使用过程中需要学习率在每个 batch参数更新时都发生变化，那么最简单的做法就是调用 <code>step()</code> 方法时不指定 <code>epoch</code> ；如果仅仅是需要在每个 epoch（轮）后学习率才发生变化，那么在调用 <code>step()</code> 方法时指定 <code>epoch</code> 为当前的轮数即可，例如：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">for</span> epoch <span style="color:#007020;font-weight:bold">in</span> epoches:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">for</span> data <span style="color:#007020;font-weight:bold">in</span> data_iter:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>         optimizer<span style="color:#666">.</span>step()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span>         scheduler<span style="color:#666">.</span>step(epoch<span style="color:#666">=</span>epoch)</span></span></code></pre></div><p>通常来说，前一种方式（在每batch参数更新后学习率都发生改变）用到的时候更多，也就是第7.3节中介绍到的示例。</p>
+<p>同时，根据上述代码第3~8行可知，当last_epoch=-1时，_LRScheduler就默认当前为模型刚开始训练时的状态，并把optimizer中的lr参数作为初始学习率initial_lr，也就是后续的self.base_lrs，就被用于在第42行中计算当前的学习率。当last_epoch不为-1时，也就意味着此时是的模型可能需要恢复到之前的某个时刻继续进行训练，那么此时学习率也就需要恢复到之前结束的那一刻。</p>
+<p>到此，对于类LambdaLR的实现逻辑就算是基本介绍完了。下面我们再来介绍最后一个示例，即如何通过指定last_epoch来恢复到学习率之前的状态继续进行追加训练。</p>
+<h3 id="742-学习率恢复">7.4.2 学习率恢复<a class="anchor" href="#742-%e5%ad%a6%e4%b9%a0%e7%8e%87%e6%81%a2%e5%a4%8d">#</a></h3>
+<p>假如某位客官正在采用cosine方法作为学习率动态调整策略来训练模型，并且在训练3个epoch后便结束了训练。同时也得到了如图7-9所示的学习率变化曲线。</p>
+<div align=center><img width="400" src="/images/tutorials/202607222042.png" alt="图 7-9. 学习率变化曲线"/> </div><center>图 7-9. 学习率变化曲线</center>
+<p>在这位客官认真分析完训练产生的相关数据后认为，模型如果继续进行训练应该还能获得更好的结果于是就打算对之前保存的模型进行追加训练。但是学习率要怎么样才能恢复到之前结束时的状态呢？也就是说模型在进行追加训练时学习率应该接着之前的状态继续进行，而不是像图7-9那样又从头开始。
+此时，我们便可以通过如下代码来实现上述目的：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span>         last_epoch <span style="color:#666">=</span> <span style="color:#666">-</span><span style="color:#40a070">1</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>         <span style="color:#007020;font-weight:bold">if</span> os<span style="color:#666">.</span>path<span style="color:#666">.</span>exists(<span style="color:#4070a0">&#39;./model.pt&#39;</span>):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>             checkpoint <span style="color:#666">=</span> torch<span style="color:#666">.</span>load(<span style="color:#4070a0">&#39;./model.pt&#39;</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>             last_epoch <span style="color:#666">=</span> checkpoint[<span style="color:#4070a0">&#39;last_epoch&#39;</span>]
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>             <span style="color:#007020">self</span><span style="color:#666">.</span>model<span style="color:#666">.</span>load_state_dict(checkpoint[<span style="color:#4070a0">&#39;model_state_dict&#39;</span>])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>         num_training_steps <span style="color:#666">=</span> <span style="color:#007020">len</span>(train_iter)  <span style="color:#007020">self</span><span style="color:#666">.</span>epochs
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>         optimizer <span style="color:#666">=</span> torch<span style="color:#666">.</span>optim<span style="color:#666">.</span>Adam([{<span style="color:#4070a0">&#34;params&#34;</span>: <span style="color:#007020">self</span><span style="color:#666">.</span>model<span style="color:#666">.</span>parameters(),
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>                                        <span style="color:#4070a0">&#34;initial_lr&#34;</span>: <span style="color:#007020">self</span><span style="color:#666">.</span>learning_rate}])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>         scheduler <span style="color:#666">=</span> get_cosine_schedule_with_warmup(optimizer, num_warmup_steps<span style="color:#666">=</span><span style="color:#40a070">300</span>,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>                                   num_training_steps<span style="color:#666">=</span>num_training_steps,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>                                   num_cycles<span style="color:#666">=</span><span style="color:#40a070">2</span>, last_epoch<span style="color:#666">=</span>last_epoch)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>         <span style="color:#007020;font-weight:bold">for</span> epoch <span style="color:#007020;font-weight:bold">in</span> <span style="color:#007020">range</span>(<span style="color:#007020">self</span><span style="color:#666">.</span>epochs):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>             <span style="color:#007020;font-weight:bold">for</span> i, (x, y) <span style="color:#007020;font-weight:bold">in</span> <span style="color:#007020">enumerate</span>(train_iter):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>                 loss, logits <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>model(x, y)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>                 optimizer<span style="color:#666">.</span>zero_grad()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>                 loss<span style="color:#666">.</span>backward()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>                 optimizer<span style="color:#666">.</span>step()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span>                 scheduler<span style="color:#666">.</span>step()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span>                 lrs<span style="color:#666">.</span>append(scheduler<span style="color:#666">.</span>get_last_lr())
+</span></span><span style="display:flex;"><span><span style="color:#40a070">21</span>         <span style="color:#666">......</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">22</span>         torch<span style="color:#666">.</span>save({<span style="color:#4070a0">&#39;last_epoch&#39;</span>: scheduler<span style="color:#666">.</span>last_epoch,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">23</span>                     <span style="color:#4070a0">&#39;model_state_dict&#39;</span>: <span style="color:#007020">self</span><span style="color:#666">.</span>model<span style="color:#666">.</span>state_dict()},
+</span></span><span style="display:flex;"><span><span style="color:#40a070">24</span>                    <span style="color:#4070a0">&#39;./model.pt&#39;</span>)</span></span></code></pre></div><p>在上述代码中，第2~5行用来判断本地是否存在模型，如果存在则获取对应的参数值；第7~12行则分别用来定义和实例化相关方法，当本地不存在模型时 <code>last_epoch</code> 将作为-1被传递到 <code>get_cosine_schedule_with_warmup</code> 中，即此时学习率从头开始变换；第22~24行则是对训练结束后的模型参数进行保存，同时也保存了 <code>last_epoch</code> 的值。</p>
+<p>这里需要注意一点的是，只要在优化器中指定了 <code>initial_lr</code> 参数， 那么 <code>LambdaLR</code> 在动态计算学习率时的 <code>base_lr</code> 就是 <code>initial_lr</code> 对应的值，与优化器中的指定的 <code>lr</code> 参数也就没有了关系。</p>
+<p>当后续再对模型进行追加训练时，第4行代码便获取得到了 <code>last_epoch</code> 上一次训练结束后的值，接着后续训练时学习率就可以接着上一次结束时的状态继续进行。最终我们也可以得到如图7-10所示的学习率变化曲线。</p>
+<div align=center><img width="400" src="/images/tutorials/202607222042.png" alt="图 7-10. 学习率恢复曲线"/> </div><center>图 7-10. 学习率恢复曲线</center>
+<p>从图7-10可以看出，学习率的初始值就是接着图7-9中学习率的结束值开始进行的变换。</p>
+<p>到此，对于动态学习率的使用方法就介绍完毕了。在下一节内容中，将会详细介绍如何在问题回答任务（即输入一段文本描述和一个问题，让模型给出答案在文本中的起止位置）场景下进行BERT预训练模型的微调。</p>
+<section class="book-promo-banner" aria-labelledby="book-promo-identity">
+      <div class="book-promo-banner__body">
+        <p class="book-promo-banner__identity" id="book-promo-identity">您当前阅读的系列内容有完整版高清 PDF ，点击右侧了解</p>
+        <p class="book-promo-banner__selling-point">近200页高清 PDF &#43; 80页配套PPT、高清无水印网络结构图，打印学习更方便！</p>
+      </div>
+      <a class="book-promo-banner__cta" href="/goods/bert" target="_blank" rel="noopener noreferrer">
+        查看详情
+      </a>
+    </section><div class="book-page-pv text-small" id="busuanzi_container_page_pv">
+      <span class="book-page-pv-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" focusable="false">
+          <path d="M1.5 12s3.9-6.5 10.5-6.5S22.5 12 22.5 12s-3.9 6.5-10.5 6.5S1.5 12 1.5 12Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7"/>
+          <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.7"/>
+        </svg>
+      </span>
+      <span class="book-page-pv-label">阅读</span>
+      <span class="book-page-pv-value" id="busuanzi_value_page_pv">--</span>
+    </div><section class="book-article-index book-related-articles" aria-labelledby="related-articles-title">
+    <h2 id="related-articles-title">相关阅读</h2>
+    <div class="book-article-grid"><article class="book-article-card book-related-article-card">
+              <h3 class="book-article-card-title">
+                <a href="/tutorials/bert/bert-transfer/">第3节 模型的保存与迁移</a>
+              </h3><p class="book-article-card-desc">本文是 BERT 精读系列第3讲，作为 BERT 下游任务微调前的过渡篇，系统讲清 PyTorch 中模型保存与加载的三大运用场景（模型推理、再训练、迁移学习）。内容覆盖 nn.Module 参数字典 state_dict 的结构与遍历 …</p></article><article class="book-article-card book-related-article-card">
+              <h3 class="book-article-card-title">
+                <a href="/tutorials/bert/bert-for-text-classification/">第4节 基于BERT预训练模型的文本分类任务</a>
+              </h3><p class="book-article-card-desc">本文是 BERT 精读系列第4讲，也是 BERT 下游任务微调第一篇，详细讲解如何基于 huggingface bert-base-chinese 预训练权重在文本分类任务上做微调。覆盖 …</p></article><article class="book-article-card book-related-article-card">
+              <h3 class="book-article-card-title">
+                <a href="/tutorials/bert/bert-for-text-entailment/">第5节 基于BERT预训练模型的文本蕴含任务</a>
+              </h3><p class="book-article-card-desc">本文是 BERT 精读系列第5讲，详细讲解如何基于 huggingface bert-base-uncased 预训练权重在 MNLI 自然语言推断任务上微调文本蕴含模型。覆盖文本对分类与单文本分类的核心差异：Segment …</p></article><article class="book-article-card book-related-article-card">
+              <h3 class="book-article-card-title">
+                <a href="/tutorials/bert/bert-for-swag/">第6节 基于BERT预训练模型的SWAG选择任务</a>
+              </h3><p class="book-article-card-desc">本文是 BERT 精读系列第6讲，详细讲解如何基于 huggingface bert-base-uncased 预训练权重在 SWAG 常识推理四选一任务上微调。覆盖问答选择与文本蕴含的核心差异：将问题与每个候选答案分别拼接成 4 个序列， …</p></article></div>
+  </section></article>
+ 
+      
+
+
+      <footer class="book-footer">
+        
+  <div class="flex flex-wrap justify-between">
+
+<div>
+
+</div>
+
+<div>
+
+</div>
+
+</div>
+
+<div class="flex flex-wrap justify-between">
+    <span>
+    
+      <a href="/tutorials/bert/bert-for-swag/" class="flex align-center">
+        <img src="/icons/backward.svg" class="book-icon" alt="Backward" />
+        <span>第6节 基于BERT预训练模型的SWAG选择任务</span>
+      </a>
+    
+    </span>
+    <span>
+    
+      <a href="/tutorials/bert/bert-for-squad/" class="flex align-center">
+        <span>第8节 基于BERT预训练模型的SQuAD问答任务</span>
+        <img src="/icons/forward.svg" class="book-icon" alt="Forward" />
+      </a>
+    
+    </span>
+  </div>
+
+ 
+        
+  
+  <div class="book-comments"><div class="giscus"></div>
+<script src="https://giscus.app/client.js"
+        data-repo="mlwithme/mlwithme.github.io"
+        data-repo-id="R_kgDOTBt94Q"
+        data-category="Announcements"
+        data-category-id="DIC_kwDOTBt94c4C_21V"
+        data-mapping="pathname"
+        data-strict="1"
+        data-reactions-enabled="1"
+        data-emit-metadata="0"
+        data-input-position="top"
+        data-theme="preferred_color_scheme"
+        data-lang="zh-CN"
+        data-loading="lazy"
+        crossorigin="anonymous"
+        async>
+</script>
+</div>
+  
+ 
+        
+  <link rel="stylesheet" href="https://mlwithme.github.io/katex/katex.min.css" />
+  <script defer src="https://mlwithme.github.io/katex/katex.min.js"></script>
+  <script defer src="https://mlwithme.github.io/katex/auto-render.min.js"></script>
+  
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        if (window.renderMathInElement) {
+          renderMathInElement(
+            document.querySelector(".book-page"),
+            Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
+          );
+        }
+      });
+    </script>
+  
+
+        
+  
+ 
+        
+  
+    <script>(function(){document.querySelectorAll("pre:has(code)").forEach(e=>{e.addEventListener("click",e.focus),e.addEventListener("copy",function(t){if(t.preventDefault(),navigator.clipboard){const t=window.getSelection().toString()||e.textContent;navigator.clipboard.writeText(t)}})})})()</script>
+  
+
+      </footer>
+
+      <label for="menu-control" class="hidden book-menu-overlay"></label>
+    </div>
+
+    
+  
+  <aside class="book-toc">
+    <div class="book-toc-content">
+      
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#71-引言">7.1 引言</a></li>
+    <li><a href="#72-动态学习率使用">7.2 动态学习率使用</a>
+      <ul>
+        <li><a href="#721-constant使用">7.2.1 constant使用</a></li>
+        <li><a href="#722-constant_with_warmup使用">7.2.2 constant_with_warmup使用</a></li>
+        <li><a href="#723-linear使用">7.2.3 linear使用</a></li>
+        <li><a href="#724-polynomial使用">7.2.4 polynomial使用</a></li>
+        <li><a href="#725-cosine使用">7.2.5 cosine使用</a></li>
+        <li><a href="#726-cosine_with_restarts使用">7.2.6 cosine_with_restarts使用</a></li>
+        <li><a href="#727-get_scheduler使用">7.2.7 get_scheduler使用</a></li>
+      </ul>
+    </li>
+    <li><a href="#73-动态学习率实现">7.3 动态学习率实现</a>
+      <ul>
+        <li><a href="#731-constant实现">7.3.1 constant实现</a></li>
+        <li><a href="#732-constant_with_warmup实现">7.3.2 constant_with_warmup实现</a></li>
+        <li><a href="#733-linear-实现">7.3.3 <code>linear</code> 实现</a></li>
+        <li><a href="#734-polynomial-实现">7.3.4 <code>polynomial</code> 实现</a></li>
+        <li><a href="#735-cosine实现">7.3.5 cosine实现</a></li>
+        <li><a href="#736-cosine_with_restarts-实现">7.3.6 <code>cosine_with_restarts</code> 实现</a></li>
+        <li><a href="#737-transfromer-学习率实现">7.3.7 transfromer 学习率实现</a></li>
+      </ul>
+    </li>
+    <li><a href="#74-lambdalr-原理">7.4 <code>LambdaLR</code> 原理</a>
+      <ul>
+        <li><a href="#741-实现逻辑">7.4.1 实现逻辑</a></li>
+        <li><a href="#742-学习率恢复">7.4.2 学习率恢复</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+
+
+
+
+    </div>
+  </aside>
+  
+ 
+  </main>
+
+  <button
+  type="button"
+  class="book-back-to-top"
+  aria-label="回到顶部"
+  title="回到顶部"
+>
+  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <path
+      d="M12 5.5l-5.25 5.25 1.5 1.5 2.7-2.7V18.5h2.1V9.55l2.7 2.7 1.5-1.5L12 5.5z"
+      fill="currentColor"
+    ></path>
+  </svg>
+</button>
+
+<script>
+  (function () {
+    var button = document.querySelector(".book-back-to-top");
+    if (!button) {
+      return;
+    }
+
+    var toggleButton = function () {
+      if (window.scrollY > 360) {
+        button.classList.add("is-visible");
+      } else {
+        button.classList.remove("is-visible");
+      }
+    };
+
+    button.addEventListener("click", function () {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+
+    toggleButton();
+    window.addEventListener("scroll", toggleButton, { passive: true });
+  })();
+</script>
+
+<div class="book-floating-toolbox" data-book-floating-toolbox>
+  <ul
+    class="book-floating-toolbox__items"
+    id="book-floating-toolbox-items"
+    role="menu"
+    aria-label="工具箱"
+    hidden
+  >
+    <li class="book-floating-toolbox__item" role="none" style="--book-toolbox-index: 0; --book-toolbox-count: 4;">
+      <a
+        class="book-floating-toolbox__action"
+        role="menuitem"
+        href="/glossary/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="术语百科"
+      >
+        <span class="book-floating-toolbox__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path
+              d="M5 4.5h11.5a2.5 2.5 0 0 1 2.5 2.5V20l-4-2.5L11 20l-4-2.5L3 20V7a2.5 2.5 0 0 1 2-2.5z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linejoin="round"
+            ></path>
+            <path
+              d="M7.5 9.5h7M7.5 12.5h5"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+            ></path>
+          </svg>
+        </span>
+      </a>
+      <span class="book-floating-toolbox__tip" aria-hidden="true">术语百科</span>
+    </li>
+    <li class="book-floating-toolbox__item" role="none" style="--book-toolbox-index: 2; --book-toolbox-count: 4;">
+      <a
+        class="book-floating-toolbox__action"
+        role="menuitem"
+        href="/code-templates/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="代码实现"
+      >
+        <span class="book-floating-toolbox__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path
+              d="M8.5 7.5 4 12l4.5 4.5M15.5 7.5 20 12l-4.5 4.5M13.5 5l-3 14"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            ></path>
+          </svg>
+        </span>
+      </a>
+      <span class="book-floating-toolbox__tip" aria-hidden="true">代码实现</span>
+    </li>
+    <li class="book-floating-toolbox__item" role="none" style="--book-toolbox-index: 1; --book-toolbox-count: 4;">
+      <a
+        class="book-floating-toolbox__action"
+        role="menuitem"
+        href="/syllabus/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="名校公开课"
+      >
+        <span class="book-floating-toolbox__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path
+              d="M12 3 1.5 9 12 14.5 22.5 9 12 3z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linejoin="round"
+            ></path>
+            <path
+              d="M6 11v4.2c0 1.5 2.7 2.8 6 2.8s6-1.3 6-2.8V11"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            ></path>
+            <path
+              d="M21 9.5V14"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+            ></path>
+          </svg>
+        </span>
+      </a>
+      <span class="book-floating-toolbox__tip" aria-hidden="true">名校公开课</span>
+    </li>
+    <li class="book-floating-toolbox__item" role="none" style="--book-toolbox-index: 3; --book-toolbox-count: 4;">
+      <a
+        class="book-floating-toolbox__action"
+        role="menuitem"
+        href="https://www.machinelearningwithme.com"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="开发中……"
+      >
+        <span class="book-floating-toolbox__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path
+              d="M9 3.5h6a1.5 1.5 0 0 1 1.5 1.5V7h2.25A1.75 1.75 0 0 1 20.5 8.75v9A1.75 1.75 0 0 1 18.75 19.5H5.25A1.75 1.75 0 0 1 3.5 17.75v-9A1.75 1.75 0 0 1 5.25 7H7.5V5A1.5 1.5 0 0 1 9 3.5z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linejoin="round"
+            ></path>
+            <path
+              d="M9 7h6"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+            ></path>
+            <circle cx="12" cy="13" r="3" fill="none" stroke="currentColor" stroke-width="1.6"></circle>
+          </svg>
+        </span>
+      </a>
+      <span class="book-floating-toolbox__tip" aria-hidden="true">开发中……</span>
+    </li>
+  </ul>
+  <button
+    type="button"
+    class="book-floating-toolbox__toggle"
+    aria-label="工具箱"
+    aria-haspopup="menu"
+    aria-expanded="false"
+    aria-controls="book-floating-toolbox-items"
+    title="工具箱"
+    data-book-toolbox-toggle
+  >
+    <svg class="book-floating-toolbox__toggle-icon-open" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        d="M14.7 6.3a4 4 0 0 0-5.4 5.4l-6.3 6.3a1 1 0 0 0 0 1.4l2 2a1 1 0 0 0 1.4 0l6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-2.4z"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linejoin="round"
+        stroke-linecap="round"
+      ></path>
+      <circle
+        class="book-floating-toolbox__badge-pulse"
+        cx="19.5"
+        cy="4.5"
+        r="2.2"
+        fill="#d84747"
+        stroke="#fff"
+        stroke-width="0.6"
+      ></circle>
+    </svg>
+    <svg class="book-floating-toolbox__toggle-icon-close" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        d="M6.5 6.5l11 11M17.5 6.5l-11 11"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.8"
+        stroke-linecap="round"
+      ></path>
+    </svg>
+  </button>
+</div>
+
+<script>
+  (function () {
+    var root = document.querySelector("[data-book-floating-toolbox]");
+    if (!root) {
+      return;
+    }
+    var toggle = root.querySelector("[data-book-toolbox-toggle]");
+    var items = root.querySelector(".book-floating-toolbox__items");
+    if (!toggle || !items) {
+      return;
+    }
+
+    var isOpen = function () {
+      return root.classList.contains("is-open");
+    };
+
+    var open = function () {
+      root.classList.add("is-open");
+      items.hidden = false;
+      toggle.setAttribute("aria-expanded", "true");
+    };
+
+    var close = function () {
+      root.classList.remove("is-open");
+      items.hidden = true;
+      toggle.setAttribute("aria-expanded", "false");
+    };
+
+    toggle.addEventListener("click", function (event) {
+      event.stopPropagation();
+      if (isOpen()) {
+        close();
+      } else {
+        open();
+      }
+    });
+
+    document.addEventListener("click", function (event) {
+      if (!isOpen()) {
+        return;
+      }
+      if (root.contains(event.target)) {
+        return;
+      }
+      close();
+    });
+
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape" && isOpen()) {
+        close();
+        toggle.focus();
+      }
+    });
+
+    items.addEventListener("click", function (event) {
+      if (event.target.closest("a")) {
+        close();
+      }
+    });
+
+    window.addEventListener("pageshow", close);
+  })();
+</script>
+
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

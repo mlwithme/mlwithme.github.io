@@ -1,0 +1,4874 @@
+<!DOCTYPE html>
+<html lang="zh_CN" dir="ltr">
+<head>
+  <!--
+Made with Book Theme
+https://github.com/alex-shpak/hugo-book
+--><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="本文系统讲清 RoPE 旋转位置编码 Rotary Position Embedding 的提出动机、数学推导与工程实现。先回顾绝对位置编码与相对位置编码在 Transformer 中的差异，并通过 BERT 文本分类实验展示位置编码的边际收益，随后通过复数乘法与旋转矩阵给出 …">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="index,follow,max-image-preview:large">
+
+
+
+
+
+<meta property="og:url" content="https://mlwithme.github.io/featured/rope/">
+<meta property="og:site_name" content="《从零学AI指南手册》">
+<meta property="og:title" content="RoPE 旋转位置编码原理与从零实现：详解 LLaMA/ChatGLM/Mistral 大模型为何离不开它">
+<meta property="og:description" content="本文系统讲清 RoPE 旋转位置编码 Rotary Position Embedding 的提出动机、数学推导与工程实现。先回顾绝对位置编码与相对位置编码在 Transformer 中的差异，并通过 BERT 文本分类实验展示位置编码的边际收益，随后通过复数乘法与旋转矩阵给出 …">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:type" content="article">
+<meta property="og:image" content="https://mlwithme.github.io/share-cover.png">
+<meta property="og:image:url" content="https://mlwithme.github.io/share-cover.png">
+<meta property="og:image:secure_url" content="https://mlwithme.github.io/share-cover.png">
+<meta property="og:image:width" content="759">
+<meta property="og:image:height" content="759">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:alt" content="《从零学AI指南手册》 - RoPE 旋转位置编码原理与从零实现：详解 LLaMA/ChatGLM/Mistral 大模型为何离不开它">
+
+  <meta property="article:section" content="featured">
+  
+    <meta property="article:published_time" content="2026-07-19T20:12:42&#43;08:00">
+  
+  
+    <meta property="article:modified_time" content="2026-07-21T21:36:08&#43;08:00">
+  
+  
+
+
+<script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"WebSite","description":"面向机器学习、深度学习与 AI Agent 的中文系统化学习手册，包含原理讲解、代码示例与实战案例。","inLanguage":"zh_CN","name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
+  </script>
+  <script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.github.io/share-cover.png"},"name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
+  </script><script type="application/ld+json">
+      {"@context":"https://schema.org","@type":"Article","articleSection":"featured","author":{"@type":"Person","name":"WangCheng","url":"https://mlwithme.github.io/author/"},"dateModified":"2026-07-21T21:36:08+08:00","datePublished":"2026-07-19T20:12:42+08:00","description":"本文系统讲清 RoPE 旋转位置编码 Rotary Position Embedding 的提出动机、数学推导与工程实现。先回顾绝对位置编码与相对位置编码在 Transformer 中的差异，并通过 BERT 文本分类实验展示位置编码的边际收益，随后通过复数乘法与旋转矩阵给出 …","headline":"RoPE 旋转位置编码原理与从零实现：详解 LLaMA/ChatGLM/Mistral 大模型为何离不开它","image":["https://mlwithme.github.io/share-cover.png"],"inLanguage":"zh_CN","mainEntityOfPage":"https://mlwithme.github.io/featured/rope/","publisher":{"@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.github.io/share-cover.png"},"name":"《从零学AI指南手册》"},"url":"https://mlwithme.github.io/featured/rope/"}
+    </script><script type="application/ld+json">
+        {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","item":"https://mlwithme.github.io/","name":"首页","position":1},{"@type":"ListItem","item":"https://mlwithme.github.io/featured/","name":"精选文章","position":2},{"@type":"ListItem","item":"https://mlwithme.github.io/featured/rope/","name":"RoPE 旋转位置编码原理与从零实现：详解 LLaMA/ChatGLM/Mistral 大模型为何离不开它","position":3}]}
+      </script>
+
+<title>RoPE 旋转位置编码原理与从零实现：详解 LLaMA/ChatGLM/Mistral 大模型为何离不开它 • 《从零学AI指南手册》</title>
+<link rel="icon" href="https://mlwithme.github.io/favicon.png" type="image/png">
+<link rel="shortcut icon" href="https://mlwithme.github.io/favicon.png" type="image/png">
+<link rel="apple-touch-icon" href="https://mlwithme.github.io/favicon.png">
+
+<link rel="manifest" href="/manifest.json">
+<link rel="canonical" href="https://mlwithme.github.io/featured/rope/">
+<link rel="stylesheet" href="/book.min.04800c306c9a4025943ba95ba687acbf99c9a8d44d89ae79df98ad8111606047.css" integrity="sha256-BIAMMGyaQCWUO6lbpoesv5nJqNRNia5535itgRFgYEc=" crossorigin="anonymous">
+  <script defer type="module" src="/zh-cn.search.min.f1dcaf5ffb003a5d8d501b4c6c5a7e051bc6f1cb007aa9fe982329837af7afb3.js" integrity="sha256-8dyvX/sAOl2NUBtMbFp&#43;BRvG8csAeqn&#43;mCMpg3r3r7M=" crossorigin="anonymous"></script>
+
+  
+
+
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="RoPE 旋转位置编码原理与从零实现：详解 LLaMA/ChatGLM/Mistral 大模型为何离不开它">
+<meta name="twitter:description" content="本文系统讲清 RoPE 旋转位置编码 Rotary Position Embedding 的提出动机、数学推导与工程实现。先回顾绝对位置编码与相对位置编码在 Transformer 中的差异，并通过 BERT 文本分类实验展示位置编码的边际收益，随后通过复数乘法与旋转矩阵给出 …">
+<meta name="twitter:url" content="https://mlwithme.github.io/featured/rope/">
+<meta name="twitter:image" content="https://mlwithme.github.io/share-cover.png">
+<meta name="twitter:image:alt" content="《从零学AI指南手册》 - RoPE 旋转位置编码原理与从零实现：详解 LLaMA/ChatGLM/Mistral 大模型为何离不开它">
+<script>
+  var _hmt = _hmt || [];
+  (function() {
+    var hm = document.createElement("script");
+    hm.src = "https://hm.baidu.com/hm.js?19b2d342631cd14e3578ad00b4823e80";
+    var s = document.getElementsByTagName("script")[0];
+    s.parentNode.insertBefore(hm, s);
+  })();
+</script>
+<script>
+  var _hmt = _hmt || [];
+  (function() {
+    var hm = document.createElement("script");
+    hm.src = "https://hm.baidu.com/hm.js?74a336dd47fbbab3ceb99d4ad8afcb76";
+    var s = document.getElementsByTagName("script")[0];
+    s.parentNode.insertBefore(hm, s);
+  })();
+</script>
+<script async src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
+
+</head>
+<body dir="ltr" class="book-kind-page book-type-featured">
+  <input type="checkbox" class="hidden toggle" id="menu-control" />
+  <input type="checkbox" class="hidden toggle" id="toc-control" />
+  <main class="container flex">
+    
+<aside class="book-menu">
+  <div class="book-menu-content">
+    
+  <nav>
+<h2 class="book-brand">
+  <a class="flex align-center" href="/"><svg xmlns="http://www.w3.org/2000/svg" height="20" width="20" viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true" class="book-brand-icon" style="margin-right:.35em;flex:none">
+      <path d="M240-200h120v-240h240v240h120v-360L480-740 240-560v360Zm-80 80q-33 0-56.5-23.5T80-200v-360q0-27 11-49t31-39l280-220q21-17 47-25t51-8q25 0 51 8t47 25l280 220q20 17 31 39t11 49v360q0 33-23.5 56.5T840-120H600q-17 0-28.5-11.5T560-160v-200H400v200q0 17-11.5 28.5T360-120H160Zm320-280Z"/>
+    </svg>
+
+    <span>返回主页</span>
+
+  </a>
+</h2>
+
+
+<div class="book-search hidden">
+  <input id="book-search-input" type="text" 
+    placeholder="Search"
+    aria-label="Search"
+    maxlength="64" />
+  <div class="book-search-spinner hidden"></div>
+  <ul id="book-search-results"></ul>
+</div>
+<script>document.querySelector(".book-search").classList.remove("hidden")</script>
+
+
+
+
+
+
+
+
+
+
+
+  
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/featured/" class="">
+      <span class="book-menu-link-title">精选文章</span>
+</a>
+  
+
+          
+  <ul>
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bb7497cb5e222579131ad9ad959011cb" class="toggle"  />
+    <label for="section-bb7497cb5e222579131ad9ad959011cb" class="flex">
+      <a href="/tutorials/" class="">
+        <span class="book-menu-link-title">专题文章</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/tutorials/transformer/" class="">
+      <span class="book-menu-link-title">图解 Transformer 入门指南教程</span>
+</a>
+  
+
+          
+  <ul>
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/tutorials/bert/" class="">
+      <span class="book-menu-link-title">从零玩转 Bert 详解6大下游任务</span>
+</a>
+  
+
+          
+  <ul>
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/tutorials/mini-chatgpt/" class="">
+      <span class="book-menu-link-title">手把手带你从零构建 ChatGPT</span>
+</a>
+  
+
+          
+  <ul>
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/" class="">
+      <span class="book-menu-link-title">大模型Agent开发（更新中……）</span>
+</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-279cf10e5100caa4f65ba3f7dd8888a4" class="toggle"  />
+    <label for="section-279cf10e5100caa4f65ba3f7dd8888a4" class="flex">
+      <a href="/agent/chapter01/" class="">
+        <span class="book-menu-link-title">第 1 章 RAG 基础概念</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/what-is-rag/" class="">
+      <span class="book-menu-link-title">1.1 RAG 提出背景</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/rag-pipeline-overview/" class="">
+      <span class="book-menu-link-title">1.2 RAG 流程概览</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-83c662c2764f1c19f8005eab77fee110" class="toggle"  />
+    <label for="section-83c662c2764f1c19f8005eab77fee110" class="flex">
+      <a href="/agent/chapter02/" class="">
+        <span class="book-menu-link-title">第 2 章 大模型接入与使用</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/intro-to-llm-sdk/" class="">
+      <span class="book-menu-link-title">2.1 SDK 介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/modern-llm-sdk/" class="">
+      <span class="book-menu-link-title">2.2 现代大模型中的 SDK</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/dashscope-api-overview/" class="">
+      <span class="book-menu-link-title">2.3 DashScope 接口体系</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/qwen-onboarding/" class="">
+      <span class="book-menu-link-title">2.4 千问大模型接入与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-1e583d7a26333453241d87c5c16592bd" class="toggle"  />
+    <label for="section-1e583d7a26333453241d87c5c16592bd" class="flex">
+      <a href="/agent/chapter03/" class="">
+        <span class="book-menu-link-title">第 3 章 文档标准化与语义检索</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/document-loading-and-preprocessing/" class="">
+      <span class="book-menu-link-title">3.1 文档加载与标准化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/text-splitting-strategies/" class="">
+      <span class="book-menu-link-title">3.2 常见文本切分策略</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/vector-database-selection/" class="">
+      <span class="book-menu-link-title">3.3 向量数据库选择</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/qwen-embedding-model/" class="">
+      <span class="book-menu-link-title">3.4 Qwen3 Embedding 模型介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/semantic-retrieval-pipeline/" class="">
+      <span class="book-menu-link-title">3.5 语义搜索引擎构建</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/milvus-tutorial/" class="">
+      <span class="book-menu-link-title">3.6  Milvus 模块解析</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="toggle"  />
+    <label for="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="flex">
+      <a href="/agent/chapter04/" class="">
+        <span class="book-menu-link-title">第 4 章 RAG 与 Agent</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/two-step-rag/" class="">
+      <span class="book-menu-link-title">4.1 两步式 RAG 搭建</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/function-calling-basics/" class="">
+      <span class="book-menu-link-title">4.2 Function Calling 概念介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/langchain-tool-decorator/" class="">
+      <span class="book-menu-link-title">4.3 LangChain 中的 Tool 修饰器</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/rag-agent-essentials/" class="">
+      <span class="book-menu-link-title">4.4 RAG Agent 原理与搭建</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/react-framework/" class="">
+      <span class="book-menu-link-title">4.5 复杂问题拆解与ReAct框架</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/two-stage-indexing/" class="">
+      <span class="book-menu-link-title">4.6 RAG 中的两阶段索引</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/qwen3-reranking/" class="">
+      <span class="book-menu-link-title">4.7 Qwen3 Reranking 原理与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/two-stage-rag-agent/" class="">
+      <span class="book-menu-link-title">4.8 基于两阶段索引的 RAG Agent</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/langgraph-basics/" class="">
+      <span class="book-menu-link-title">4.9 LangGraph 基本概念介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/langgraph-custom-rag-agent/" class="">
+      <span class="book-menu-link-title">4.10  基于 LangGraph 构建自定义 RAG Agent</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bf5130286ff0eee8f362b632167a5e6b" class="toggle"  />
+    <label for="section-bf5130286ff0eee8f362b632167a5e6b" class="flex">
+      <a href="/agent/chapter05/" class="">
+        <span class="book-menu-link-title">第 5 章 Agent 记忆机制与管理</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/agent-memory-overview/" class="">
+      <span class="book-menu-link-title">5.1 Agent 记忆机制概览</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/langchain-short-term-memory/" class="">
+      <span class="book-menu-link-title">5.2 短期记忆持久化与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/short-term-memory-management/" class="">
+      <span class="book-menu-link-title">5.3 短期记忆管理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/short-term-memory-rag-agent/" class="">
+      <span class="book-menu-link-title">5.4 拥有短期记忆的 RAG Agent</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/long-term-memory-strategies/" class="">
+      <span class="book-menu-link-title">5.5 长期记忆管理与持久化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/mini-chatgpt-from-scratch/" class="">
+      <span class="book-menu-link-title">5.6 从零实现 Mini ChatGPT 助手</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/pgvector-setup/" class="">
+      <span class="book-menu-link-title">5.7 pgvector 配置安装</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/long-term-memory-retrieval-and-forgetting/" class="">
+      <span class="book-menu-link-title">5.8 长期记忆检索与遗忘</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/langgraph-mini-chatgpt/" class="">
+      <span class="book-menu-link-title">5.9 基于 LangGraph 的Mini ChatGPT 助手</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/create-agent-mini-chatgpt/" class="">
+      <span class="book-menu-link-title">5.10 使用 create_agent 搭建 Mini ChatGPT</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/" class="">
+      <span class="book-menu-link-title">深度学习</span>
+</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/mindmap/" class="">
+      <span class="book-menu-link-title">目录思维导图</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-cf7621e8efb1f3153eaca44a113dcdb9" class="toggle"  />
+    <label for="section-cf7621e8efb1f3153eaca44a113dcdb9" class="flex">
+      <a href="/dl/chapter01/" class="">
+        <span class="book-menu-link-title">第 1 章 深度学习简介</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/dl-development-stages/" class="">
+      <span class="book-menu-link-title">1.1 深度学习的发展阶段</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/dl-key-figures/" class="">
+      <span class="book-menu-link-title">1.2 深度学习中的关键人物</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/mainstream-dl-frameworks/" class="">
+      <span class="book-menu-link-title">1.3 深度学习框架介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f9bf1a68c19405769f9c4a1495708a55" class="toggle"  />
+    <label for="section-f9bf1a68c19405769f9c4a1495708a55" class="flex">
+      <a href="/dl/chapter02/" class="">
+        <span class="book-menu-link-title">第 2 章 环境配置</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/dl-dev-environment-architecture/" class="">
+      <span class="book-menu-link-title">2.1 体系结构介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/dl-cuda-pytorch-install/" class="">
+      <span class="book-menu-link-title">2.2 深度学习环境安装</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/dl-cuda-training-env-setup/" class="">
+      <span class="book-menu-link-title">2.3 开发环境安装配置</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="toggle"  />
+    <label for="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="flex">
+      <a href="/dl/chapter03/" class="">
+        <span class="book-menu-link-title">第 3 章 深度学习基础</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/linear-regression-basics/" class="">
+      <span class="book-menu-link-title">3.1 线性回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/linear-regression-implementation/" class="">
+      <span class="book-menu-link-title">3.2 线性回归简洁实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/backpropagation-and-gradient-descent/" class="">
+      <span class="book-menu-link-title">3.3 梯度下降与反向传播</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/regression-from-scratch/" class="">
+      <span class="book-menu-link-title">3.4 从零实现回归模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/softmax-regression-basics/" class="">
+      <span class="book-menu-link-title">3.5 从逻辑回归到Softmax回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/softmax-regression-implementation/" class="">
+      <span class="book-menu-link-title">3.6 Softmax回归简洁实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/softmax-regression-from-scratch/" class="">
+      <span class="book-menu-link-title">3.7 从零实现分类模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/regression-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">3.8 回归模型评估指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/classification-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">3.9 分类模型评估指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/overfitting-and-regularization/" class="">
+      <span class="book-menu-link-title">3.10 过拟合与正则化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/hyperparameters-and-cross-validation/" class="">
+      <span class="book-menu-link-title">3.11 超参数与交叉验证</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/activation-functions/" class="">
+      <span class="book-menu-link-title">3.12 激活函数</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/multi-label-classification/" class="">
+      <span class="book-menu-link-title">3.13 多标签分类</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-7a12cee83820a928df00362d70804a97" class="toggle"  />
+    <label for="section-7a12cee83820a928df00362d70804a97" class="flex">
+      <a href="/dl/chapter04/" class="">
+        <span class="book-menu-link-title">第 4 章 卷积神经网络</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/cnn-basics/" class="">
+      <span class="book-menu-link-title">4.1 卷积的概念</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/convolution-operation/" class="">
+      <span class="book-menu-link-title">4.2 卷积的计算过程</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/convolution-and-pooling/" class="">
+      <span class="book-menu-link-title">4.3 填充和池化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/lenet5/" class="">
+      <span class="book-menu-link-title">4.4 LeNet5网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/alexnet/" class="">
+      <span class="book-menu-link-title">4.5 AlexNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/vgg/" class="">
+      <span class="book-menu-link-title">4.6 VGG网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/nin/" class="">
+      <span class="book-menu-link-title">4.7 NIN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/googlenet/" class="">
+      <span class="book-menu-link-title">4.8 GoogLeNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/resnet/" class="">
+      <span class="book-menu-link-title">4.9 ResNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/densenet/" class="">
+      <span class="book-menu-link-title">4.10 DenseNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-be9addfd3a15c372d609d09cabb94159" class="toggle"  />
+    <label for="section-be9addfd3a15c372d609d09cabb94159" class="flex">
+      <a href="/dl/chapter05/" class="">
+        <span class="book-menu-link-title">第 5 章 模型训练与复用</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/training-logs-management/" class="">
+      <span class="book-menu-link-title">5.1 参数及日志管理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/tensorboard-tutorial/" class="">
+      <span class="book-menu-link-title">5.2 Tensorboard可视化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/pytorch-model-save-load/" class="">
+      <span class="book-menu-link-title">5.3 模型的保存与复用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/transfer-learning-tutorial/" class="">
+      <span class="book-menu-link-title">5.4 模型的迁移学习</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/pretrained-model-reuse/" class="">
+      <span class="book-menu-link-title">5.5 开源模型复用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/multi-gpu-training/" class="">
+      <span class="book-menu-link-title">5.6 多GPU训练</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/training-data-preprocessing-cache/" class="">
+      <span class="book-menu-link-title">5.7 数据预处理与缓存</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="toggle"  />
+    <label for="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="flex">
+      <a href="/dl/chapter06/" class="">
+        <span class="book-menu-link-title">第 6 章 模型优化方法</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/learning-rate-scheduler/" class="">
+      <span class="book-menu-link-title">6.1 学习率调度器</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/gradient-clipping/" class="">
+      <span class="book-menu-link-title">6.2 梯度裁剪</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/batch-norm/" class="">
+      <span class="book-menu-link-title">6.3 批归一化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/layer-norm/" class="">
+      <span class="book-menu-link-title">6.4 层归一化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/group-norm/" class="">
+      <span class="book-menu-link-title">6.5 组归一化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/momentum/" class="">
+      <span class="book-menu-link-title">6.6 动量法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/ada-grad/" class="">
+      <span class="book-menu-link-title">6.7 AdaGrad算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/ada-delta/" class="">
+      <span class="book-menu-link-title">6.8 AdaDelta算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/adam/" class="">
+      <span class="book-menu-link-title">6.9 Adam算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/weight-initialization/" class="">
+      <span class="book-menu-link-title">6.10 初始化方法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-517b751d7c44a7ac77d25d295ed44271" class="toggle"  />
+    <label for="section-517b751d7c44a7ac77d25d295ed44271" class="flex">
+      <a href="/dl/chapter07/" class="">
+        <span class="book-menu-link-title">第 7 章 循环神经网络</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/rnn-basics/" class="">
+      <span class="book-menu-link-title">7.1 RNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/time-series-modeling/" class="">
+      <span class="book-menu-link-title">7.2 时序数据</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/lstm/" class="">
+      <span class="book-menu-link-title">7.3 LSTM网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/gru/" class="">
+      <span class="book-menu-link-title">7.4 GRU网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/bi-rnn/" class="">
+      <span class="book-menu-link-title">7.5 BiRNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/char-rnn/" class="">
+      <span class="book-menu-link-title">7.6 CharRNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-b9b861f64ba32bc68dfb977497de37d9" class="toggle"  />
+    <label for="section-b9b861f64ba32bc68dfb977497de37d9" class="flex">
+      <a href="/dl/chapter08/" class="">
+        <span class="book-menu-link-title">第 8 章 时序与模型融合</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/textcnn/" class="">
+      <span class="book-menu-link-title">8.1 TextCNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/textrnn/" class="">
+      <span class="book-menu-link-title">8.2 TextRNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/cnn-rnn/" class="">
+      <span class="book-menu-link-title">8.3 CNN-RNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/convlstm/" class="">
+      <span class="book-menu-link-title">8.4 ConvLSTM网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/3dcnn/" class="">
+      <span class="book-menu-link-title">8.5 3DCNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/stresnet/" class="">
+      <span class="book-menu-link-title">8.6 STResNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-e54a1e28b1438b8266637bcb8dac1a44" class="toggle"  />
+    <label for="section-e54a1e28b1438b8266637bcb8dac1a44" class="flex">
+      <a href="/dl/chapter09/" class="">
+        <span class="book-menu-link-title">第 9 章 自然语言处理</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/nlp-basics/" class="">
+      <span class="book-menu-link-title">9.1 自然语言处理介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/word2vec-principle/" class="">
+      <span class="book-menu-link-title">9.2 Word2Vec词向量</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/word2vec-training-and-usage/" class="">
+      <span class="book-menu-link-title">9.3 Word2Vec训练与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/glove/" class="">
+      <span class="book-menu-link-title">9.4 GloVe词向量</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/word-vector-finetuning/" class="">
+      <span class="book-menu-link-title">9.5 词向量的微调使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/fasttext/" class="">
+      <span class="book-menu-link-title">9.6 fastText网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/seq2seq-tutorial/" class="">
+      <span class="book-menu-link-title">9.7 Seq2Seq网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/seq-model-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">9.8 序列模型评价指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/nmt-seq2seq/" class="">
+      <span class="book-menu-link-title">9.9 NMT网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/attention-mechanism/" class="">
+      <span class="book-menu-link-title">9.10 注意力机制</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/nmt-with-attention/" class="">
+      <span class="book-menu-link-title">9.11 含注意力的NMT网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/rnn-with-attention/" class="">
+      <span class="book-menu-link-title">9.12 含注意力的RNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f6636b2f9dc1df93b9fa64dd201716d9" class="toggle"  />
+    <label for="section-f6636b2f9dc1df93b9fa64dd201716d9" class="flex">
+      <a href="/dl/chapter10/" class="">
+        <span class="book-menu-link-title">第 10 章 现代神经网络</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/elmo/" class="">
+      <span class="book-menu-link-title">10.1 ELMo网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-principle/" class="">
+      <span class="book-menu-link-title">10.2 Transformer网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-architecture/" class="">
+      <span class="book-menu-link-title">10.3 Transformer结构</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-implementation/" class="">
+      <span class="book-menu-link-title">10.4 Transformer实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-couplet-model/" class="">
+      <span class="book-menu-link-title">10.5 Transformer对联模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-principle/" class="">
+      <span class="book-menu-link-title">10.6 BERT网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-from-scratch/" class="">
+      <span class="book-menu-link-title">10.7 从零实现BERT</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-text-classification/" class="">
+      <span class="book-menu-link-title">10.8 BERT文本分类模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-sentence-pair-matching/" class="">
+      <span class="book-menu-link-title">10.9 BERT问题选择模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-question-answering/" class="">
+      <span class="book-menu-link-title">10.10 BERT问题回答模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-ner/" class="">
+      <span class="book-menu-link-title">10.11 BERT命名体识别模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-pretraining/" class="">
+      <span class="book-menu-link-title">10.12 BERT从零训练</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-1/" class="">
+      <span class="book-menu-link-title">10.13 GPT-1模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-2-and-gpt-3/" class="">
+      <span class="book-menu-link-title">10.14 GPT-2与GPT-3模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-2-chinese-pretraining/" class="">
+      <span class="book-menu-link-title">10.15 基于GPT-2的中文预训练模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/instructgpt-and-chatgpt/" class="">
+      <span class="book-menu-link-title">10.16 InstructGPT与ChatGPT</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/chatgpt-prompt-engineering/" class="">
+      <span class="book-menu-link-title">10.17 ChatGPT与提示词工程</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/baichuan-usage/" class="">
+      <span class="book-menu-link-title">10.18 百川大模型使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/baichuan-implementation/" class="">
+      <span class="book-menu-link-title">10.19 百川大模型实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-4-and-gpts/" class="">
+      <span class="book-menu-link-title">10.20 GPT-4与GPTs使用</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/" class="">
+      <span class="book-menu-link-title">机器学习</span>
+</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/mindmap/" class="">
+      <span class="book-menu-link-title">目录思维导图</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-48f56957e94e3cf66f3022103a7dd0ff" class="toggle"  />
+    <label for="section-48f56957e94e3cf66f3022103a7dd0ff" class="flex">
+      <a href="/ml/chapter01/" class="">
+        <span class="book-menu-link-title">第 1 章 环境配置</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/conda-install-tutorial/" class="">
+      <span class="book-menu-link-title">1.1 安装使用Conda</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/ml-conda-env-setup/" class="">
+      <span class="book-menu-link-title">1.2 开发环境安装配置</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-56a896338a1c41249d22a3efa0e0063c" class="toggle"  />
+    <label for="section-56a896338a1c41249d22a3efa0e0063c" class="flex">
+      <a href="/ml/chapter02/" class="">
+        <span class="book-menu-link-title">第 2 章 线性回归</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/linear-regression-basics/" class="">
+      <span class="book-menu-link-title">2.1 模型的建立与求解</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/multivariate-linear-regression/" class="">
+      <span class="book-menu-link-title">2.2 多变量线性回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/polynomial-regression/" class="">
+      <span class="book-menu-link-title">2.3 多项式回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/regression-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">2.4 回归模型评估</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/gradient-descent-derivation/" class="">
+      <span class="book-menu-link-title">2.5 梯度下降</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/normal-distribution/" class="">
+      <span class="book-menu-link-title">2.6 正态分布</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/linear-regression-loss-derivation/" class="">
+      <span class="book-menu-link-title">2.7 目标函数推导</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ccd0dc9386ea80613d4cedf91b30058d" class="toggle"  />
+    <label for="section-ccd0dc9386ea80613d4cedf91b30058d" class="flex">
+      <a href="/ml/chapter03/" class="">
+        <span class="book-menu-link-title">第 3 章 逻辑回归</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/logistic-regression-basics/" class="">
+      <span class="book-menu-link-title">3.1 模型的建立与求解</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/logistic-regression-multiclass/" class="">
+      <span class="book-menu-link-title">3.2 多分类任务</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/classification-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">3.3 常见的分类评估指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/logistic-regression-loss-derivation/" class="">
+      <span class="book-menu-link-title">3.4 目标函数推导</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="toggle"  />
+    <label for="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="flex">
+      <a href="/ml/chapter04/" class="">
+        <span class="book-menu-link-title">第 4 章 模型的改善与泛化</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/generalization-basics/" class="">
+      <span class="book-menu-link-title">4.1 基本概念</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/feature-scaling/" class="">
+      <span class="book-menu-link-title">4.2 特征标准化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/overfitting-solutions/" class="">
+      <span class="book-menu-link-title">4.3 过拟合</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/l1-l2-regularization/" class="">
+      <span class="book-menu-link-title">4.4 正则化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/bias-and-variance/" class="">
+      <span class="book-menu-link-title">4.5 偏差、方差与交叉验证</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/handwritten-digit-recognition-case/" class="">
+      <span class="book-menu-link-title">4.6 实例分析手写体识别</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-40f463d9d502d24b86ea6120b7030123" class="toggle"  />
+    <label for="section-40f463d9d502d24b86ea6120b7030123" class="flex">
+      <a href="/ml/chapter05/" class="">
+        <span class="book-menu-link-title">第 5 章 K近邻</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/knn-principle/" class="">
+      <span class="book-menu-link-title">5.1 K近邻思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/knn-algorithm-details/" class="">
+      <span class="book-menu-link-title">5.2 K近邻原理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/sklearn-knn-example/" class="">
+      <span class="book-menu-link-title">5.3 sklearn接口与示例代码</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/kd-tree-knn/" class="">
+      <span class="book-menu-link-title">5.4 kd树构建与搜索</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/knn-from-scratch/" class="">
+      <span class="book-menu-link-title">5.5 从零实现K近邻</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-5a460dc18f1e79253296cf2cd0498446" class="toggle"  />
+    <label for="section-5a460dc18f1e79253296cf2cd0498446" class="flex">
+      <a href="/ml/chapter06/" class="">
+        <span class="book-menu-link-title">第 6 章 文本特征与模型复用</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/bag-of-words/" class="">
+      <span class="book-menu-link-title">6.1 词袋模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/knn-spam-classification/" class="">
+      <span class="book-menu-link-title">6 .2 基于K近邻算法的垃圾邮件分类</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/tf-idf/" class="">
+      <span class="book-menu-link-title">6.3 考虑权重的词袋模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/wordcloud-generation/" class="">
+      <span class="book-menu-link-title">6.4 词云图</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-96f45a8b8c8b75adc70c78026d93dbf6" class="toggle"  />
+    <label for="section-96f45a8b8c8b75adc70c78026d93dbf6" class="flex">
+      <a href="/ml/chapter07/" class="">
+        <span class="book-menu-link-title">第 7 章 朴素贝叶斯</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/naive-bayes-basics/" class="">
+      <span class="book-menu-link-title">7.1 朴素贝叶斯算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/bayes-estimation/" class="">
+      <span class="book-menu-link-title">7.2 贝叶斯估计</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/naive-bayes-implementation/" class="">
+      <span class="book-menu-link-title">7.3 朴素贝叶斯实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/multinomial-naive-bayes/" class="">
+      <span class="book-menu-link-title">7.4 多项式朴素贝叶斯原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/gaussian-naive-bayes/" class="">
+      <span class="book-menu-link-title">7.5 高斯朴素贝叶斯原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-22476e49d5058c3e5e7e7366b7ab676f" class="toggle"  />
+    <label for="section-22476e49d5058c3e5e7e7366b7ab676f" class="flex">
+      <a href="/ml/chapter08/" class="">
+        <span class="book-menu-link-title">第 8 章 决策树</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-principle/" class="">
+      <span class="book-menu-link-title">8.1 决策树的基本思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-sklearn/" class="">
+      <span class="book-menu-link-title">8.2 决策树建模与可视化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/id3-vs-c45/" class="">
+      <span class="book-menu-link-title">8.3 决策树生成之ID3与C4.5</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-pruning/" class="">
+      <span class="book-menu-link-title">8.4 决策树剪枝过程</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-from-scratch/" class="">
+      <span class="book-menu-link-title">8.5 从零实现ID3与C4.5算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-continuous-features/" class="">
+      <span class="book-menu-link-title">8.6 连续型特征变量下决策树实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/cart-algorithm/" class="">
+      <span class="book-menu-link-title">8.7 CART生成与剪枝算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/cart-from-scratch/" class="">
+      <span class="book-menu-link-title">8.8 从零实现CART算法及剪枝示例</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-2feb6a51cabb61dba860f45c1881386b" class="toggle"  />
+    <label for="section-2feb6a51cabb61dba860f45c1881386b" class="flex">
+      <a href="/ml/chapter09/" class="">
+        <span class="book-menu-link-title">第 9 章 集成学习与提升算法</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/ensemble-learning-basics/" class="">
+      <span class="book-menu-link-title">9.1 集成学习算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/random-forest-principle/" class="">
+      <span class="book-menu-link-title">9.2 随机森林</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/random-forest-titanic/" class="">
+      <span class="book-menu-link-title">9.3 泰坦尼克号生还预测</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/adaboost/" class="">
+      <span class="book-menu-link-title">9.4 AdaBoost原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/multi-adaboost/" class="">
+      <span class="book-menu-link-title">9.5 MultiAdaBoost原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/gradient-boost/" class="">
+      <span class="book-menu-link-title">9.6 Gradient Boost 原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-938ae119c3849b03ccb6f91cef4243dd" class="toggle"  />
+    <label for="section-938ae119c3849b03ccb6f91cef4243dd" class="flex">
+      <a href="/ml/chapter10/" class="">
+        <span class="book-menu-link-title">第 10 章 支持向量机</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-principle/" class="">
+      <span class="book-menu-link-title">10.1 SVM思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-nonlinear-kernel/" class="">
+      <span class="book-menu-link-title">10.2 SVM线性不可分</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-max-margin/" class="">
+      <span class="book-menu-link-title">10.3 SVM原理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-soft-margin/" class="">
+      <span class="book-menu-link-title">10.4 SVM中的软间隔</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/lagrange-multipliers/" class="">
+      <span class="book-menu-link-title">10.5 拉格朗日乘数法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/kkt-conditions/" class="">
+      <span class="book-menu-link-title">10.6 对偶性与KKT条件</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-optimization/" class="">
+      <span class="book-menu-link-title">10.7 SVM优化问题</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-kernel-functions/" class="">
+      <span class="book-menu-link-title">10.8 SVM核函数原理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/smo-algorithm/" class="">
+      <span class="book-menu-link-title">10.9 SMO算法求解SVM</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-from-scratch/" class="">
+      <span class="book-menu-link-title">10.10 从零实现SVM分类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-9f4d9786d4ab755fde42c64d09b0d026" class="toggle"  />
+    <label for="section-9f4d9786d4ab755fde42c64d09b0d026" class="flex">
+      <a href="/ml/chapter11/" class="">
+        <span class="book-menu-link-title">第 11 章 聚类分析</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/clustering-basics/" class="">
+      <span class="book-menu-link-title">11.1 聚类算法的思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-principle/" class="">
+      <span class="book-menu-link-title">11.2 Kmeans聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-iteration/" class="">
+      <span class="book-menu-link-title">11.3 Kmeans算法求解</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-from-scratch/" class="">
+      <span class="book-menu-link-title">11.4 从零实现Kmeans聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-plus-plus/" class="">
+      <span class="book-menu-link-title">11.5 Kmeans&#43;&#43;聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/clustering-external-metrics/" class="">
+      <span class="book-menu-link-title">11.6 聚类外部评价指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/weighted-kmeans/" class="">
+      <span class="book-menu-link-title">11.7 加权Kmeans聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/clustering-internal-metrics/" class="">
+      <span class="book-menu-link-title">11.8 聚类内部评价指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-k-selection/" class="">
+      <span class="book-menu-link-title">11.9 聚类K值选取与分析</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/dbscan/" class="">
+      <span class="book-menu-link-title">11.10 基于密度的聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/hierarchical-clustering/" class="">
+      <span class="book-menu-link-title">11.11 基于层次的聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-d5e78c45312818bb3abd5c19c858f7e5" class="toggle"  />
+    <label for="section-d5e78c45312818bb3abd5c19c858f7e5" class="flex">
+      <a href="/ml/chapter12/" class="">
+        <span class="book-menu-link-title">第 12 章 降维算法</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/pca-principle/" class="">
+      <span class="book-menu-link-title">12.1 主成分分析</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/kpca/" class="">
+      <span class="book-menu-link-title">12.2 基于核函数的主成分分析</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-a82b41bb7eb95af72bc11e8a3d668acd" class="toggle"  />
+    <label for="section-a82b41bb7eb95af72bc11e8a3d668acd" class="flex">
+      <a href="/ml/chapter13/" class="">
+        <span class="book-menu-link-title">第 13 章 自训练与标签传播</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/self-training/" class="">
+      <span class="book-menu-link-title">13.1 Self-Training 自训练算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/label-propagation/" class="">
+      <span class="book-menu-link-title">13.2 Label Propagation算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/label-spreading/" class="">
+      <span class="book-menu-link-title">13.3 Label Spreading 算法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</nav>
+
+
+
+
+  <script>(function(){var e=document.querySelector("aside .book-menu-content");addEventListener("beforeunload",function(){localStorage.setItem("menu.scrollTop",e.scrollTop)}),e.scrollTop=localStorage.getItem("menu.scrollTop")})()</script>
+
+
+
+  </div>
+</aside>
+ 
+
+    <div class="book-page">
+      <header class="book-header hidden">
+        
+  <div class="flex align-center justify-between">
+  <label for="menu-control">
+    <img src="/icons/menu.svg" class="book-icon" alt="Menu" />
+  </label>
+
+  <h3>RoPE 旋转位置编码原理与从零实现：详解 LLaMA/ChatGLM/Mistral 大模型为何离不开它</h3>
+
+  <label for="toc-control">
+    
+    <img src="/icons/toc.svg" class="book-icon" alt="Table of Contents" />
+    
+  </label>
+</div>
+
+
+  
+  <aside class="hidden">
+    
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#1-位置编码方法">1. 位置编码方法</a>
+      <ul>
+        <li><a href="#11-绝对位置编码">1.1 绝对位置编码</a></li>
+        <li><a href="#12-相对位置编码">1.2 相对位置编码</a></li>
+      </ul>
+    </li>
+    <li><a href="#2-旋转位置编码">2. 旋转位置编码</a>
+      <ul>
+        <li><a href="#21-旋转编码动机">2.1 旋转编码动机</a></li>
+        <li><a href="#22-旋转编码思想">2.2 旋转编码思想</a></li>
+        <li><a href="#23-旋转编码原理">2.3 旋转编码原理</a></li>
+        <li><a href="#24-从零实现旋转编码">2.4 从零实现旋转编码</a></li>
+        <li><a href="#25-旋转编码的运用">2.5 旋转编码的运用</a></li>
+      </ul>
+    </li>
+    <li><a href="#3-推导过程">3. 推导过程</a>
+      <ul>
+        <li><a href="#31-合理假设">3.1 合理假设</a></li>
+        <li><a href="#32-证明过程">3.2 证明过程</a></li>
+        <li><a href="#33-线性注意力">3.3 线性注意力</a></li>
+      </ul>
+    </li>
+    <li><a href="#4-总结">4. 总结</a></li>
+    <li><a href="#引用">引用</a></li>
+  </ul>
+</nav>
+
+
+
+
+  </aside>
+  
+ 
+      </header>
+
+      
+      
+  <article class="markdown book-article"><nav class="book-breadcrumbs text-small book-breadcrumbs--page" aria-label="面包屑导航">
+    <ol class="book-breadcrumbs__list"><li class="book-breadcrumbs__item"><a class="book-breadcrumbs__link" href="https://mlwithme.github.io/">首页</a></li><li class="book-breadcrumbs__item"><a class="book-breadcrumbs__link" href="https://mlwithme.github.io/featured/">精选文章</a></li><li class="book-breadcrumbs__item"><span class="book-breadcrumbs__current" aria-current="page">RoPE 旋转编码原理与从零实现</span></li></ol>
+  </nav><div class="book-article-lastmod text-small">
+        <span class="book-article-lastmod-label">更新于</span>
+        <span class="book-article-lastmod-value">2026年7月21日</span>
+      </div><p>在之前的系列文章当中，我们已经详细介绍了 Transformer 的原理及实现过程，其中我们就谈到自注意力机制（self-attention）的一个弊端之一就是无法捕捉到序列之间的位置关系，换句话说如过我们交换了序列中词元 token 之间的位置，self-attention 是无法感知到这一变化的，因此作者提出了通过位置编码来解决这一问题。</p>
+<p>不过在后来有研究发现[1]，即使去掉位置编码，基于 Transformer 架构的语言模型在各个任务上的效果仍旧不会有明显下降（影响不大），换句话说自注意力机制本身也能够感知到序列中 token 位置的变化，只是感知能力不够强，关于这一点大家可以自行去分析self-attention 的计算过程。</p>
+<blockquote class='book-hint '>
+<p>Causal transformer language models (LMs), such as GPT-3, typically require some form of positional encoding, such as positional embeddings. However, we show that LMs without any explicit positional encoding are still competitive with standard models, and that this phenomenon is robust across different datasets, model sizes, and sequence lengths. [1]</p>
+</blockquote><p>当然，我们自己也通过一个实际的实验来验证了这一点。在基于 Bert 模型的文本分类任务中，我们发现发现去掉 Positional embedding 和保留 Positional embedding 时，模型在 5 个 epoch 中 validation 上的准确率分别是(0.872, 0.877, 0.878 ) 和 (0.884, 0.885, 0.883)，也就是并没有太大的影响。</p>
+<p>不过虽说影响不是很大，但总归是有影响的，或者说现有的位置编码技术并没有很好的解决这一问题，因此也就陆续出现了各种不同的位置编码算法。</p>
+<p>在接下来的内容中，将会介绍一种几乎已经成为了现在各个大模型标配的位置编码方法——旋转位置编码（Rotary Position Embedding ，RoPE）[2]。</p>
+<p><strong>关键字：旋转位置编码、RoPE、位置编码、LLM、Transformer、绝对位置编码、相对位置编码</strong></p>
+<h2 id="1-位置编码方法">1. 位置编码方法<a class="anchor" href="#1-%e4%bd%8d%e7%bd%ae%e7%bc%96%e7%a0%81%e6%96%b9%e6%b3%95">#</a></h2>
+<p>在正式介绍介绍旋转位置编码之前，我们先来回顾一下在 Transformer 模型中常见的绝对位置编码（ Absolute Position Encoding）和相对位置编码（Relative Position Encoding） 的区别与含义。</p>
+<h3 id="11-绝对位置编码">1.1 绝对位置编码<a class="anchor" href="#11-%e7%bb%9d%e5%af%b9%e4%bd%8d%e7%bd%ae%e7%bc%96%e7%a0%81">#</a></h3>
+<p>上面我们说到 Transformer 中自注意力机制本身结构是无序的（不像 RNN 有顺序），所以必须人为地加入位置信息来弥补这一点，因此便引入了绝对位置编码。绝对位置编码是指：我们为序列中每个 token 显式指定它在句子中的具体位置，例如第 1 个 token 的位置是什么、第 2 个 token 的位置是什么……并编码进输入中，可以看出这从全局的角度来考虑每个 token 的位置信息。</p>
+<p>在原始的 Transformer 中，作者通过使用固定的三角函数编码的方式来计算每个 token 对应的位置信息，即</p>
+$$
+PE_{(pos, 2i)} = \sin \left( \frac{pos}{10000^{2i/d_{\text{model}}}} \right), \quad PE_{(pos, 2i+1)} = \cos \left( \frac{pos}{10000^{2i/d_{\text{model}}}} \right)\tag{1}
+$$<p>其中 $pos$ 表示每个 token 的位置编号，$i$ 表示该位置上对应的向量维度。</p>
+<p>最后，将计算出的位置信息以加法操作的方式与原始序列的 token embedding 结果进行融合，便得到了序列含有位置信息的向量化表示。</p>
+<p>所以，绝对位置编码的好处是不同位置的编码是唯一的，并且可以外推到更长的序列中。</p>
+<p>尽管在后来的 Bert 模型中，固定的三角函数编码方式被替换成了可训练的权重参数，但是本质上依旧是为每个位置分配了一个固定的位置向量。</p>
+<h3 id="12-相对位置编码">1.2 相对位置编码<a class="anchor" href="#12-%e7%9b%b8%e5%af%b9%e4%bd%8d%e7%bd%ae%e7%bc%96%e7%a0%81">#</a></h3>
+<p>那什么又是相对位置编码呢？</p>
+<p>简单来说在相对位置编码中，与其告诉模型你在第几个位置，它更关心的是大家彼此间的相对位置。绝对位置编码是在词向量中告诉模型“这是第几个词”，而相对位置编码则是告诉模型“你和别的词相隔几个词”。</p>
+<p>假设你是一个列车员，车厢里有编号 0 到 3 的座位。</p>
+<ul>
+<li>
+<p>用绝对位置编码，你知道：“A” 坐在 1 号位，“B” 坐在 3 号位，”C“ 坐在 2 号位置；</p>
+</li>
+<li>
+<p>用相对位置编码，你知道：“B” 离 ”A“ 的座位距离为 2，”C“ 离 ”A“ 的座位距离为 1，而这些相对距离就会影响模型分配注意力的程度。</p>
+</li>
+</ul>
+<p>可以看出，相对位置信息对于位置的变化其实是更敏感的，更容易刻画其位置的变换。当然，某种程度上说绝对位置其实也是一种单一的相对位置，即仅以全局某个固定位置为参考点。</p>
+<p>不过对于不同的相对位置编码方法其具体计算过程也存在着不小的差异，但是总体思想基本都是类似。</p>
+<h2 id="2-旋转位置编码">2. 旋转位置编码<a class="anchor" href="#2-%e6%97%8b%e8%bd%ac%e4%bd%8d%e7%bd%ae%e7%bc%96%e7%a0%81">#</a></h2>
+<p>在简单介绍完绝对位置编码和相对位置编码的基本思想以后，我们继续来看为什么要提出旋转位置编码，动机到底是什么。</p>
+<h3 id="21-旋转编码动机">2.1 旋转编码动机<a class="anchor" href="#21-%e6%97%8b%e8%bd%ac%e7%bc%96%e7%a0%81%e5%8a%a8%e6%9c%ba">#</a></h3>
+<p>作者在文章中谈到，尽管现在各种各样的位置编码方法都具有一定的成效，但是它们通常都是将位置信息以加的形式融入到上下文表示中，因此并不适合线性自注意力机制架构。同时，相对位置编码相对于绝对位置编码更有优势，因此作者提出了首个既采用相对位置编码又同时支持线性自注意力机制架构的旋转位置编码技术。</p>
+<blockquote class='book-hint '>
+<p>Despite the effectiveness of these approaches, they commonly add the position information to the context representation and thus render them unsuitable for the linear self-attention architecture.</p>
+</blockquote><p>那什么又是线性自注意力呢？</p>
+<p>简单总结就是，尽管自注意力机制有着非常好的效果，计算过程如式(2)所示，但是随着模型参数量的不断增加，整个过程的时间复杂度变成了一个不容忽视的缺陷。</p>
+$$
+\text{Attention}(Q,K,V)=\text{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V\in\mathbb{R}^{n\times d_v}
+\tag{2}
+$$<p>其中 $Q\in\mathbb{R}^{n\times d_{q}}$，$K\in\mathbb{R}^{n\times d_{k}}$，$V\in\mathbb{R}^{n\times d_{v}}$，且通常 $d_q=d_k=d_v=d$ 。</p>
+<p>根据式(2)可知，在计算注意力权重矩阵 $QK^T$ 的时候，其时间复杂度为 $O(n^2d)$。但是，我们观察发现，如过式(2)中没有 $\text{softmax}$ 这个操作，那么整个自注意力计算过程便可以改写为 $QK^TV$  （暂时忽略scale）。同时，矩阵乘法满足结合律所以可以先计算 $K^TV$ 得到一个 $d\times d$ 的矩阵，然后再左乘一个 $Q$ 便得到了最后的结果，此时的时间复杂度为 $O(nd^2)$ 。</p>
+<p>这，就是线性注意力，也是自注意力机制最终将要优化的方向。</p>
+<p>例如，我们考虑矩阵链 $Q \cdot K^T \cdot V$ 的两种乘法顺序，其中 $Q \in \mathbb{R}^{100 \times 10}, K \in \mathbb{R}^{100 \times 10}, V \in \mathbb{R}^{100 \times 10}$</p>
+<p>情况一： $(QK^T)V$ 顺序</p>
+<p>在这样的情况下，计算 $QK^T$ 的时间复杂度为 $100\times10\times100=100000$ ；再计算 $(QK^T)V$，时间复杂度为 $100\times100\times10=100000$ ；总的复杂度为 $100000+100000=200000$ 。</p>
+<p>情况二： $Q(K^TV)$ 顺序</p>
+<p>在这样的情况下，计算 $K^TV$ 的时间复杂度为 $10 \times 100 \times 10 = 10000$ ；再计算 $Q(K^TV)$，时间复杂度为 $100 \times 10 \times 10 = 10000$；总的复杂度为 $10000 + 10000 = 20000$  。</p>
+<p>可以看到，最后两种计算顺序的结果虽然一样，但是时间复杂度差距却高达 10 倍！</p>
+<p>至于为什么已有的位置编码不适合线性自注意力框架，我们后面再进行介绍。</p>
+<p>基于这样的动机，Jianlin Su 等人提出了旋转位置编码，并且证明它适用于线性自注意力框架。</p>
+<p>不过，可能是由于效果的原因，最后作者在实现的 Roformer 模型时使用的依旧是原始的自注意力计算过程，只是位置编码使用的是 RoPE 编码，但这并不影响 RoPE 是一种更优的相对位置编码方式。</p>
+<p>因此，本文也将只会介绍 RoPE 的原理及实现过程！</p>
+<h3 id="22-旋转编码思想">2.2 旋转编码思想<a class="anchor" href="#22-%e6%97%8b%e8%bd%ac%e7%bc%96%e7%a0%81%e6%80%9d%e6%83%b3">#</a></h3>
+<p>一般来说，绝对位置编码具有实现简单、计算速度快等优点，而相对位置编码则直接地体现了相对位置的变化，这也跟我们的直观理解吻合。</p>
+<p>在这样的背景和动机下，作者便开始假设，既然自注意力的核心就是内积，也就是注意力的计算过程，那么我们能不能假设向量 $q^Tk$ 计算完成以后的注意力权重结果自然就带有了相对位置的信息呢？</p>
+<p>这个大家听起来可能觉得有点奇怪，但其实一点也不怪！</p>
+<p>因为注意力的分配其实就是和序列中每个 token 的顺序是有关系的，同一个 token 集合以不同的顺序组合成不同的序列语义不一样，分配到同一个 token 上的权重肯定也是不一样的，所以注意力值中自然也就包含了序列的位置信息。</p>
+<p>因此，作者就假设存在函数 $f(x,pos)$，它能够给向量 $q$ 和 $k$  分别施加上在位置 $m$ 和 $n$ 处的绝对位置信息，即 $\tilde{q}_m=f(q,m)$ 和 $\tilde{k}_n=f(k,n)$；最后，通过 $\tilde{q}_m^T\tilde{k}_n$ 在完成注意力权重计算以后就自然包含有了 $m$ 与 $n$ 之间的相对位置信息 $m-n$。</p>
+<p>由此可见，作者想以一种表面上看似是绝对编码的计算过程，实则背后隐含着相对位置编码的本质，即<strong>通过绝对位置编码的计算过程，来实现相对位置编码的结果。</strong></p>
+<p>最后，之所以整个编码过程被取名为“旋转位置编码”是因为作者按照上述构想，求解得到的计算公式带有矩阵旋转的过程，所以取名为旋转位置编码。</p>
+<h3 id="23-旋转编码原理">2.3 旋转编码原理<a class="anchor" href="#23-%e6%97%8b%e8%bd%ac%e7%bc%96%e7%a0%81%e5%8e%9f%e7%90%86">#</a></h3>
+<p>在<a href="/tutorials/transformer/positional-encoding">「第2讲 Transformer 位置编码教程：图解正弦 Positional Encoding 与编解码过程」</a>中，我们已经详细介绍了多头注意力机制的原理和过程。不过为了后面能够一步步得出 RoPE 的计算原理，这里我们先再来以一种更加广义的方式来回顾一下自注意力机制的计算过程。</p>
+<h4 id="231-自注意力计算过程">2.3.1 自注意力计算过程<a class="anchor" href="#231-%e8%87%aa%e6%b3%a8%e6%84%8f%e5%8a%9b%e8%ae%a1%e7%ae%97%e8%bf%87%e7%a8%8b">#</a></h4>
+<p>设 $\mathbb{S}_N=\{w_i\}^N_{i=1}$ 表示长度为 $N$ 的原始输入序列， $w_i$ 则表示第 $i$ 个 token，同时 $\mathbb{S}_N$ 对应的词嵌入表示为 $\mathbb{E}_N=\{x_i\}^N_{i=1}$ ，$x_i\in \mathbb{R}^d$ 则表示第 $i$ 个 token $w_i$ 对应的词嵌入形式（不包含位置信息）。</p>
+<p>此时，自注意力机制会首先对序列的词嵌入表示融入位置信息，然后计算得到 queries、keys 和 values</p>
+$$
+\begin{aligned}
+q_m&=f_q(x_m,m)\\[2ex]
+k_n&=f_k(x_n,n)\\[2ex]
+v_n&=f_v(x_n,n)
+\end{aligned}\tag{3}
+$$<p>其中 $q_m$ ，$k_n$ 和 $v_n$ 分别表示通过 $f_q$ ， $f_k$ 和 $f_v$ 给 $x_i$ 的第 $m$ 和 $n$ 个位置融入位置信息后的结果。</p>
+<p>进一步，开始计算注意力权重及输出</p>
+$$
+\begin{aligned}
+\alpha_{m,n}&=\frac{\exp\left(\frac{q^T_mk_n}{\sqrt{d}}\right)}{\sum_{j=1}^N\exp\left(\frac{q^T_mk_j}{\sqrt{d}}\right)}\\[3ex]
+o_m&=\sum^N_{n=1}a_{m,n}v_n
+\end{aligned}\tag{4}
+$$<p>下面，我们继续来看在基于上述计算框架下的不同编码方式。</p>
+<h4 id="232-绝对位置编码计算过程">2.3.2 绝对位置编码计算过程<a class="anchor" href="#232-%e7%bb%9d%e5%af%b9%e4%bd%8d%e7%bd%ae%e7%bc%96%e7%a0%81%e8%ae%a1%e7%ae%97%e8%bf%87%e7%a8%8b">#</a></h4>
+<p>在基于上述计算框架下，一种典型的绝对位置编码便是 Transformer 论文中所提出的位置编码方式，此时有</p>
+$$
+f_{t:t\in\{q,k,v\}}(x_i,i):=W_{t:t\in\{q,k,v\}}(x_i+p_i)\tag{5}
+$$<p>其中 $W_t$ 表示线性变化中的权重， $p_i\in\mathbb{R}^d$ 便是对应的绝对位置编码信息，即</p>
+$$
+\begin{cases}
+p_{i,2t}&=\sin(k/10000^{2t/d})\\[3ex]
+p_{i,2t+1}&=\cos(k/10000^{2t/d})
+\end{cases}\tag{6}
+$$<p>此时可以看出，式(4)~式(6)便是 Transformer 中自注意力机制的计算过程。</p>
+<p>从式(5)中我们可以看出，因为有 $x_i+p_i$ 中加操作的存在，所以在计算注意力权重矩阵的时候会拆开得到多项，因此并不适合线性自注意力框架。</p>
+<h4 id="233-相对位置编码计算过程">2.3.3 相对位置编码计算过程<a class="anchor" href="#233-%e7%9b%b8%e5%af%b9%e4%bd%8d%e7%bd%ae%e7%bc%96%e7%a0%81%e8%ae%a1%e7%ae%97%e8%bf%87%e7%a8%8b">#</a></h4>
+<p>然而，RoPE 并不直接将位置信息通过相加的方式融入到上下文表示中，而是直接通过乘以正弦函数来合并相对位置信息。</p>
+<blockquote class='book-hint '>
+<p>However, instead of directly adding the position to the context representation, RoPE proposes to incorporate the relative position information by multiplying with the sinusoidal functions.</p>
+</blockquote><p>为了在自注意力机制中融入相对位置信息，我们可以设想有一个函数 $g$，并以 $x_m,x_n$ 以及它们的相对位置信息 $m-n$ 作为 $g$ 的输入，最终计算得到输出 $q_m$ 和 $k_n$ 内积的结果。换句话说我们希望存在这样一个函数 $g$，使得它满足</p>
+<blockquote class='book-hint '>
+<p>In order to incorporate relative position information, we require the inner product of query $q_m$ and key $k_n$ to be formulated by a function $g$,  which takes only the word embeddings $x_m, x_n$ and their relative position $m-n$ as input variables.</p>
+</blockquote>$$
+\langle f_q(x_m,m),f_k(x_n,n)\rangle= g(x_m,x_n,m-n)\tag{7}
+$$<p>上面式(7)的含义是，我们假定存在 $g(x_m,x_n,m-n)$ 这样的相对位置信息编码方式，它能够等价地通过左侧绝对位置编码内积的计算方式来计算得到，也就是论文中描述的“通过绝对位置编码的计算过程，来实现相对位置编码的结果”的含义。</p>
+<blockquote class='book-hint '>
+<p>RoPE encodes the absolute position with a rotation matrix and meanwhile incorporates the explicit relative position dependency in self-attention formulation.</p>
+</blockquote><p>这里需要注意的一点是，RoPE 考量的是 queries 中的向量 $q_m$ 和 keys 中的向量 $k_n$ 之间的相对位置位置关系。</p>
+<p>因此，对于式(7)中的假设，其最终目标便是在满足上面猜想的情况下，寻找得到 $f_q(x_m,m)$ 和 $f_k(x_n,n)$  这两个函数。</p>
+<blockquote class='book-hint '>
+<p>The ultimate goal is to find an equivalent encoding mechanism to solve the functions $f_q(x_m,m)$ and $f_k(x_n,n)$ to conform the aforementioned relation.</p>
+</blockquote><p>那最终找到的  $f_q(x_m,m)$ 和 $f_k(x_n,n)$  长什么样呢？</p>
+<p>以二维平面为例，作者最终推导得到的 $f_q(x_m,m)$ 和 $f_k(x_n,n)$ 为</p>
+$$
+f_{\{q,k\}}(x_m,m)=
+\begin{bmatrix}\cos m\theta&-\sin m\theta\\[2ex]
+\sin m\theta&\cos m\theta
+\end{bmatrix}
+\begin{bmatrix}
+W^{(11)}_{\{q,k\}}&W^{(12)}_{\{q,k\}}\\[2ex]
+W^{(21)}_{\{q,k\}}&W^{(22)}_{\{q,k\}}
+\end{bmatrix}
+\begin{bmatrix}
+x^{(1)}_m\\[2ex]x^{(2)}_m
+\end{bmatrix}\tag{8}
+$$<p>其中 $\theta\in\mathbb{R}$ 是一个非零常数，$(x^{(1)}_m,x^{(2)}_m)$ 是 $x_m$ 在二维平面下的表示。</p>
+<p>从式(8)可以看出，最右侧两个矩阵相乘其实就是原始词嵌入表示经过一次线性变换后的结果；然后其左侧的这个矩阵被称为旋转矩阵，其作用是让其右侧的向量逆时针旋转 $m\theta$ 的角度，其中 $\theta$ 计算方式为</p>
+$$
+\Theta=\{\theta_i=10000^{-2(i-1)/d},i\in[1,2,...,d/2]\}\tag{9}
+$$<p>当然，对于多维情况下的计算过程，可以把整个维度分成两组来完成计算，如图1所示。</p>
+<div align=center><img width="560" src="/images/featured/202506251933.png" alt="图 1. 旋转编码计算过程图"/> </div><center>图 1. 旋转编码计算过程图</center>
+<p>在图1中，对于左下角中的每一个词向量，每两个维度为一组使用同一个 $\theta$ 由 $x_1,x_2$ 旋转为 $x_1^{\prime},x_2^{\prime}$ 得到新的结果，然后再进行后续同样的注意力计算。</p>
+<h4 id="234-图示计算示例">2.3.4 图示计算示例<a class="anchor" href="#234-%e5%9b%be%e7%a4%ba%e8%ae%a1%e7%ae%97%e7%a4%ba%e4%be%8b">#</a></h4>
+<p>假设现在样本序列长度为 5 ，那么首先需要根据式(9)给每个位置构建一个旋转角度即 $m\theta$ ， 且因为这是二维情况所以只需要计算 $\theta_1=1$ 即可，如果是4维则还需要计算 $\theta_2$；然后便可计算其对应的正弦和余弦值，整个过程如图2所示。</p>
+<div align=center><img width="550" src="/images/featured/202506220948.png" alt="图 2. 旋转矩阵计算图"/> </div><center>图 2. 旋转矩阵计算图</center>
+<p>在图2中，左侧的 $m$ 表示的便是序列中每个 token 的位置序号，再将其与不同维度上的 $\theta$ 相乘便得到了不同位置不同维度上所需要旋转的最终角度。</p>
+<p>最后，再对旋转矩阵右乘 $q$ 或 $k$ 即可得到其融入绝对位置信息后的编码结果，如图3所示。</p>
+<div align=center><img width="550" src="/images/featured/202506290827.png" alt="图 3. 旋转编码计算图"/> </div><center>图 3. 旋转编码计算图</center>
+<p>注意，此时得到结果只是包含绝对位置信息编码的结果。</p>
+<p>在计算得到旋转后的 queries 和 keys 后，再按照式(2)完成后续计算即可。</p>
+<p>以上便是旋转编码的原理及计算示例过程，当然在实际编码实现时还可以表示成图4所示的更加高效的形式。</p>
+<div align=center><img width="300" src="/images/featured/202506220955.png" alt="图 4. 旋转编码展开计算图"/> </div><center>图 4. 旋转编码展开计算图</center>
+<h3 id="24-从零实现旋转编码">2.4 从零实现旋转编码<a class="anchor" href="#24-%e4%bb%8e%e9%9b%b6%e5%ae%9e%e7%8e%b0%e6%97%8b%e8%bd%ac%e7%bc%96%e7%a0%81">#</a></h3>
+<p>在清楚 RoPE 的原理以后，我们再来看如何从零实现这一过程。根据上面的计算示例可以知道，整个过程一共需要两步：① 计算每个位置在不同维度上的旋转角度；② 将其作用于  $q$ 或 $k$ 得到绝对位置信息编码后的输出。</p>
+<p>首先，编码实现计算每个位置在不同维度上的旋转角度，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">precompute_freqs_cos_sin</span>(dim: <span style="color:#007020">int</span>, seq_len: <span style="color:#007020">int</span>, theta: <span style="color:#007020">float</span> <span style="color:#666">=</span> <span style="color:#40a070">10000.0</span>):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>     freqs <span style="color:#666">=</span> <span style="color:#40a070">1.0</span> <span style="color:#666">/</span> (theta <span style="color:#666">**</span> (torch<span style="color:#666">.</span>arange(<span style="color:#40a070">0</span>, dim, <span style="color:#40a070">2</span>)<span style="color:#666">.</span>float() <span style="color:#666">/</span> dim)) <span style="color:#60a0b0;font-style:italic">#  [dim/2,]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>     position <span style="color:#666">=</span> torch<span style="color:#666">.</span>arange(seq_len)<span style="color:#666">.</span>unsqueeze(<span style="color:#40a070">1</span>)  <span style="color:#60a0b0;font-style:italic"># [seq_len,1]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span>     rot_theta <span style="color:#666">=</span> position <span style="color:#666">*</span> freqs  <span style="color:#60a0b0;font-style:italic"># (seq_len, dim/2)</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">5</span>     cos <span style="color:#666">=</span> rot_theta<span style="color:#666">.</span>cos()  <span style="color:#60a0b0;font-style:italic"># [seq_len, dim/2]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">6</span>     sin <span style="color:#666">=</span> rot_theta<span style="color:#666">.</span>sin()  <span style="color:#60a0b0;font-style:italic"># [seq_len, dim/2]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">7</span>     <span style="color:#007020;font-weight:bold">return</span> cos, sin</span></span></code></pre></div><p>在上述代码中，第1行 <code>dim</code> 表示每个 token 对应的维度且必须要为偶数，因为整体是将维度分为两部分来进行计算。第2~4行便是实现式(8)中 $m\theta$ 的计算过程，其中第2行是计算每个维度对应的旋转频率，维度越高频率越低旋转角度也就越小。第5~6行则是计算对应的正弦和余弦值。</p>
+<p>如过大家对 Transformer 中的编码方式还有印象的话，会发现上述计算步骤两者相差无几，如下便是 Transformer 中对应的计算过程。</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> pe <span style="color:#666">=</span> torch<span style="color:#666">.</span>zeros(max_len, d_model) 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span> position <span style="color:#666">=</span> torch<span style="color:#666">.</span>arange(<span style="color:#40a070">0</span>, max_len, dtype<span style="color:#666">=</span>torch<span style="color:#666">.</span>float)<span style="color:#666">.</span>unsqueeze(<span style="color:#40a070">1</span>)  
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span> div_term <span style="color:#666">=</span> torch<span style="color:#666">.</span>exp(torch<span style="color:#666">.</span>arange(<span style="color:#40a070">0</span>,d_model,<span style="color:#40a070">2</span>)<span style="color:#666">.</span>float()<span style="color:#666">*</span>(<span style="color:#666">-</span>math<span style="color:#666">.</span>log(<span style="color:#40a070">10000.0</span>)<span style="color:#666">/</span>d_model))
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span> pe[:, <span style="color:#40a070">0</span>::<span style="color:#40a070">2</span>] <span style="color:#666">=</span> torch<span style="color:#666">.</span>sin(position <span style="color:#666">*</span> div_term)  
+</span></span><span style="display:flex;"><span><span style="color:#40a070">5</span> pe[:, <span style="color:#40a070">1</span>::<span style="color:#40a070">2</span>] <span style="color:#666">=</span> torch<span style="color:#666">.</span>cos(position <span style="color:#666">*</span> div_term)</span></span></code></pre></div><p>进一步，我们在完成 <code>cos, sin</code> 值的计算以后，便可以完成旋转编码过程，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">apply_rope_matrix</span>(x, cos, sin):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     bsz, seq_len, dim <span style="color:#666">=</span> x<span style="color:#666">.</span>shape
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>     x <span style="color:#666">=</span> x<span style="color:#666">.</span>view(bsz, seq_len, dim <span style="color:#666">//</span> <span style="color:#40a070">2</span>, <span style="color:#40a070">2</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>     x1 <span style="color:#666">=</span> x[<span style="color:#666">...</span>, <span style="color:#40a070">0</span>]  <span style="color:#60a0b0;font-style:italic"># [bsz, seq_len, dim // 2]</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>     x2 <span style="color:#666">=</span> x[<span style="color:#666">...</span>, <span style="color:#40a070">1</span>]  <span style="color:#60a0b0;font-style:italic"># </span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>     cos <span style="color:#666">=</span> cos<span style="color:#666">.</span>unsqueeze(<span style="color:#40a070">0</span>)  <span style="color:#60a0b0;font-style:italic"># [1, seq_len, dim/2]</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>     sin <span style="color:#666">=</span> sin<span style="color:#666">.</span>unsqueeze(<span style="color:#40a070">0</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>     x_rotated_x <span style="color:#666">=</span> x1 <span style="color:#666">*</span> cos <span style="color:#666">-</span> x2 <span style="color:#666">*</span> sin
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>     x_rotated_y <span style="color:#666">=</span> x1 <span style="color:#666">*</span> sin <span style="color:#666">+</span> x2 <span style="color:#666">*</span> cos
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>     x_rotated <span style="color:#666">=</span> torch<span style="color:#666">.</span>stack([x_rotated_x, x_rotated_y], dim<span style="color:#666">=-</span><span style="color:#40a070">1</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>     <span style="color:#007020;font-weight:bold">return</span> x_rotated<span style="color:#666">.</span>view(bsz, seq_len, dim)</span></span></code></pre></div><p>在上述代码中，第3~5行便是将输入在最后一个维度（也就是词向了维度）分成两部分，其中 <code>x[..., 0]</code> 里的 <code>...</code> 表示前面的所有维度，此处等价于 <code>x[:,:,:,0]</code>。第6~7行是对<code>cos, sin</code> 进行维度扩充。第8~9行便是完成旋转计算过程。第10~11行则是完成拼接，并重塑成 <code>[bsz, seq_len, dim]</code> 的形状。</p>
+<p>在这里我们可以看出，对于 Transformer 中的位置编码方法来说，它是将计算得到的正弦和余弦值直接作为绝对位置信息并相加到输入向量中；而对于 RoPE 来说它是将计算得到的正弦和余弦值作为旋转因子，以旋转的方式来给输入融入绝对位置信息。</p>
+<p>最后，我们可以通过如下方式来进行使用，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">rope_matrix</span>(xq, xk):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     bsz, seq_len, dim <span style="color:#666">=</span> xq<span style="color:#666">.</span>shape
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>     cos, sin <span style="color:#666">=</span> precompute_freqs_cos_sin(dim, seq_len)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>     q_rot <span style="color:#666">=</span> apply_rope_matrix(xq, cos, sin)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>     k_rot <span style="color:#666">=</span> apply_rope_matrix(xk, cos, sin)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>     <span style="color:#007020">print</span>(q_rot)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span> <span style="color:#007020;font-weight:bold">if</span> <span style="color:#bb60d5">__name__</span> <span style="color:#666">==</span> <span style="color:#4070a0">&#39;__main__&#39;</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>     dim <span style="color:#666">=</span> <span style="color:#40a070">8</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>     seq_len <span style="color:#666">=</span> <span style="color:#40a070">5</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>     xq <span style="color:#666">=</span> torch<span style="color:#666">.</span>randn(<span style="color:#40a070">2</span>, seq_len, dim)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>     xk <span style="color:#666">=</span> torch<span style="color:#666">.</span>randn(<span style="color:#40a070">2</span>, seq_len, dim)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>     rope_matrix(xq, xk)</span></span></code></pre></div><p>上述代码运行结束后便会得到类似如下结果：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span>tensor([[[<span style="color:#666">-</span><span style="color:#40a070">0.6874</span>,  <span style="color:#40a070">0.3616</span>,  <span style="color:#40a070">1.5172</span>, <span style="color:#666">-</span><span style="color:#40a070">0.8326</span>, <span style="color:#666">-</span><span style="color:#40a070">0.6149</span>,  <span style="color:#40a070">1.2178</span>,  <span style="color:#40a070">1.3626</span>, <span style="color:#666">-</span><span style="color:#40a070">0.8120</span>],
+</span></span><span style="display:flex;"><span>         [<span style="color:#666">-</span><span style="color:#40a070">0.2720</span>,  <span style="color:#40a070">0.6102</span>,  <span style="color:#40a070">0.2150</span>, <span style="color:#666">-</span><span style="color:#40a070">0.2891</span>, <span style="color:#666">-</span><span style="color:#40a070">0.8054</span>, <span style="color:#666">-</span><span style="color:#40a070">0.5313</span>,  <span style="color:#40a070">1.0437</span>, <span style="color:#40a070">0.3801</span>],
+</span></span><span style="display:flex;"><span>         [ <span style="color:#40a070">2.0354</span>, <span style="color:#666">-</span><span style="color:#40a070">0.2829</span>,  <span style="color:#40a070">0.1590</span>, <span style="color:#666">-</span><span style="color:#40a070">2.0516</span>, <span style="color:#666">-</span><span style="color:#40a070">0.0071</span>, <span style="color:#666">-</span><span style="color:#40a070">0.1854</span>, <span style="color:#666">-</span><span style="color:#40a070">0.8610</span>, <span style="color:#666">-</span><span style="color:#40a070">0.6257</span>],
+</span></span><span style="display:flex;"><span>         [ <span style="color:#40a070">1.0256</span>, <span style="color:#666">-</span><span style="color:#40a070">0.6891</span>,  <span style="color:#40a070">0.8885</span>, <span style="color:#666">-</span><span style="color:#40a070">0.5522</span>, <span style="color:#666">-</span><span style="color:#40a070">0.3403</span>,  <span style="color:#40a070">0.6830</span>, <span style="color:#666">-</span><span style="color:#40a070">0.9162</span>, <span style="color:#666">-</span><span style="color:#40a070">0.1615</span>],
+</span></span><span style="display:flex;"><span>         [ <span style="color:#40a070">0.3622</span>,  <span style="color:#40a070">0.4205</span>, <span style="color:#666">-</span><span style="color:#40a070">0.7930</span>,  <span style="color:#40a070">0.6242</span>,  <span style="color:#40a070">0.0189</span>, <span style="color:#666">-</span><span style="color:#40a070">0.1573</span>,  <span style="color:#40a070">0.6351</span>, <span style="color:#666">-</span><span style="color:#40a070">0.7674</span>]],
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        [[ <span style="color:#40a070">0.6201</span>, <span style="color:#666">-</span><span style="color:#40a070">0.7417</span>, <span style="color:#666">-</span><span style="color:#40a070">0.8371</span>,  <span style="color:#40a070">0.0958</span>, <span style="color:#666">-</span><span style="color:#40a070">0.1005</span>, <span style="color:#666">-</span><span style="color:#40a070">1.8306</span>,  <span style="color:#40a070">0.3344</span>, <span style="color:#40a070">0.5319</span>],
+</span></span><span style="display:flex;"><span>         [ <span style="color:#40a070">1.5699</span>,  <span style="color:#40a070">0.6796</span>, <span style="color:#666">-</span><span style="color:#40a070">1.5662</span>,  <span style="color:#40a070">0.2982</span>, <span style="color:#666">-</span><span style="color:#40a070">0.3243</span>,  <span style="color:#40a070">1.7357</span>, <span style="color:#666">-</span><span style="color:#40a070">0.5256</span>, <span style="color:#666">-</span><span style="color:#40a070">1.7252</span>],
+</span></span><span style="display:flex;"><span>         [<span style="color:#666">-</span><span style="color:#40a070">1.2461</span>,  <span style="color:#40a070">1.1995</span>,  <span style="color:#40a070">0.0210</span>,  <span style="color:#40a070">0.5950</span>, <span style="color:#666">-</span><span style="color:#40a070">0.0178</span>,  <span style="color:#40a070">0.8088</span>,  <span style="color:#40a070">0.0184</span>, <span style="color:#666">-</span><span style="color:#40a070">0.3366</span>],
+</span></span><span style="display:flex;"><span>         [ <span style="color:#40a070">2.2306</span>, <span style="color:#666">-</span><span style="color:#40a070">0.4862</span>, <span style="color:#666">-</span><span style="color:#40a070">0.5815</span>, <span style="color:#666">-</span><span style="color:#40a070">0.8906</span>,  <span style="color:#40a070">0.6232</span>, <span style="color:#666">-</span><span style="color:#40a070">2.3946</span>, <span style="color:#666">-</span><span style="color:#40a070">0.3258</span>, <span style="color:#40a070">1.1161</span>],
+</span></span><span style="display:flex;"><span>         [<span style="color:#666">-</span><span style="color:#40a070">2.4300</span>, <span style="color:#666">-</span><span style="color:#40a070">0.6247</span>,  <span style="color:#40a070">0.1077</span>,  <span style="color:#40a070">1.9647</span>, <span style="color:#666">-</span><span style="color:#40a070">1.3716</span>, <span style="color:#666">-</span><span style="color:#40a070">0.7104</span>, <span style="color:#666">-</span><span style="color:#40a070">1.0277</span>, <span style="color:#666">-</span><span style="color:#40a070">0.2207</span>]]])</span></span></code></pre></div><p>上述完整实现代码，可参见</p>
+<h3 id="25-旋转编码的运用">2.5 旋转编码的运用<a class="anchor" href="#25-%e6%97%8b%e8%bd%ac%e7%bc%96%e7%a0%81%e7%9a%84%e8%bf%90%e7%94%a8">#</a></h3>
+<p>对于旋转编码在模型中的实际运用方式与传统的绝对位置编码方式有着很大的差异，主要集中在两个方面：</p>
+<p>① 旋转编码在每个注意力层中都会用到</p>
+<p>在之前介绍的 Transformer 或 Bert 模型中，对于绝对位置编码来说整个过程都可以看作是输入模型前的 Embedding 操作，是一次性的；而对于 RoPE 来说，它则是在每一个注意力层中都会用到。因为相对位置编码是在计算注意力权重矩阵之前根据 $Q$ 和 $K$ 计算得到的，所以在每一次计算注意力权重矩阵之前都应该使用一次相对位置信息编码，然后再作用 $V$ 得到输出。</p>
+<div align=center><img width="300" src="/images/featured/231226195049.jpg" alt="图 5. 百川大模型网络结构图"/> </div><center>图 5. 百川大模型网络结构图</center>
+<p>如图5所示便是百川大模型的网络结构示意图，可以看到在每一个注意力层当中都使用到了 RoPE 位置编码（即图中的 RotaryEmb）。</p>
+<p>② 旋转编码只对 $Q$ 和 $K$ 进行编码</p>
+<p>因为旋转编码的初始动机便是想让注意力权重 $\text{softmax}(QK^T)$ 具备相对位置的敏感性，而注意力分数 $\text{softmax}(QK^T)$ 只依赖 $Q$ 和 $K$。换句话说，$V$  是作为一系列信息的集合可以是没有位置信息的，而注意力权重是通过 $(Q, K)$ 计算得到，不同的位置关系计算得到的权重矩阵肯定是不一样的，这些权重乘到 $V$ 上已经可以反映出一个 token 该不该被关注、关注多少，得到的结果也自然是考虑了位置信息后的，所以没必要再额外对 $V$ 做旋转或者改动。</p>
+<p>当然，其实在深度学习中很多做法并没有严格理论，如过一定要回答为什么要这样做，那就是：<strong>实验表明</strong>，然后记住用就行。</p>
+<p>若果你只想学会如何使用，那么接下来的内容可以直接略过！</p>
+<h2 id="3-推导过程">3. 推导过程<a class="anchor" href="#3-%e6%8e%a8%e5%af%bc%e8%bf%87%e7%a8%8b">#</a></h2>
+<p>先学会用，再探究为什么。我们在知晓 RoPE 的一个基本原理以及使用方法以后，我们再来大致看一下它到底是怎么来的，作者到底是怎么想的。</p>
+<h3 id="31-合理假设">3.1 合理假设<a class="anchor" href="#31-%e5%90%88%e7%90%86%e5%81%87%e8%ae%be">#</a></h3>
+<p>现在，我们假设<strong>二维平面</strong>中有两个词嵌入表示向量（或再经过一次线性变换后） $x_q$ 和 $x_k$，并且根据式(3)可以得到它们分别在位置 $m$ 和 $n$ 处的编码结果为</p>
+$$
+\begin{aligned}
+q_m&=f_q(x_q,m)\\[2ex]
+k_n&=f_k(x_k,n)
+\end{aligned}\tag{10}
+$$<p>此时， $q_m$ 和 $k_n$  就带有了位置 $m$ 和 $n$ 处的<strong>绝对位置信息</strong>。</p>
+<p>并且，在这样一个体系下我们给出一个合理的初始条件</p>
+$$
+\begin{aligned}
+q_0&=f_q(x_q,0)=x_q\\[2ex]
+k_0&=f_k(x_k,0)=x_k
+\end{aligned}\tag{11}
+$$<p>也就是说，在位置 0 处的向量添加位置信息后依旧是其本身。</p>
+<p>因为自注意力机制的核心运算是内积，所以我们希望内积后的结果自然就带有了相对位置信息。我们假设存在一个函数 $g$ ，它定义了上面两个分别由 $f_q$ 和 $f_k$ 计算得到的向量之间的一种运算，且最后的结果就是  $q_m$ 和 $k_n$  之间的内积，即</p>
+$$
+q^T_mk_n=\langle f_q(x_m,m),f_k(x_n,n)\rangle= g(x_m,x_n,m-n)\tag{12}
+$$<p>式(12)到底什么意思呢？怎么看起来有点怪。</p>
+<p>需要特别解释一下的是，式(11)中 $f_q(x_m,m)$ 指代向量 $x_q$ 在 $m$ 处进行绝对位置编码后的结果 $q_m$； $f_k(x_n,m)$ 指代向量 $x_k$ 在 $n$ 处进行绝对位置编码后的结果 $k_n$；$g(x_m,x_n,m-n)$ 中 $x_m$ 指向量 $x_q$ 在位置 $m$ 处时的情况，$x_n$ 指向量 $k_n$ 在 $n$ 处时的情况。</p>
+<p>各个向量之间的关系可以通过图6来进行示意。</p>
+<div align=center><img width="400" src="/images/featured/202506221658.png"/> </div><center>图 6. 式(12)解释图</center>
+<p>因此，式(12)的含义就是说，两个向量 $x_m$ 和 $x_n$ 经过绝对位置信息编码后的结果 $q_m$ 和 $k_n$ ，再经过一次内积运算 $q^T_mk_n$ 计算得到的注意力值便带有相对位置的编码信息，而这两步计算过程可以通过一个函数 $g$ 来进行实现。</p>
+<p>所以，只要证明了 $f_q$ 和 $f_k$ 是的确存在的，那么便可以通过像绝对位置编码计算过程一样来实现相对位置信息的编码，即：两个向量分别先被 $f_q$ 和 $f_k$ 作用，然后再进行内积运算。</p>
+<p>这里我们需要再次明确作者提出 RoPE 的核心思想：<strong>内积后的结果能够带有相对位置编码信息</strong>。</p>
+<h3 id="32-证明过程">3.2 证明过程<a class="anchor" href="#32-%e8%af%81%e6%98%8e%e8%bf%87%e7%a8%8b">#</a></h3>
+<p>在有了上述的背景设定以后，我们使用反证法来进行求解，即先假定等式(12)是成立的，并求解对应的 $f_q$ 和 $f_k$ 。如g果 $f_q$ 和 $f_k$ 有解，也就是说明假设成立，如果无解自然也就不成立。</p>
+<p>提示：以下过程会涉及到复数和欧拉公式的相关内容，预备知识可以参见文章 XXXXXXXX</p>
+<p>在式(10)中，由于 $q_m$ 和 $k_n$ 均为一个二维向量，根据复数的指数形式表示法可得</p>
+$$
+\begin{aligned}
+f_q(x_q,m)&=R_q(x_q,m)e^{i\Theta_q(x_q,m)}\\[2ex]
+f_k(x_k,n)&=R_k(x_k,n)e^{i\Theta_k(x_k,n)}
+\end{aligned}\tag{13}
+$$<p>其中 $R_q(x_q,m)$ 和 $R_k(x_k,n)$ 分别表示在极坐标系下 $q_m$ 和 $k_n$ 到极点的距离，$\Theta_q(x_q,m)$ 和 $\Theta_k(x_k,n)$ 表示 $q_m$ 和 $k_n$ 分别与极轴之间的夹角。</p>
+<p>进一步，根据两个向量的内积可以写成复数相乘取实部的形式，由式(13)可得</p>
+$$
+\langle f_q(x_q,m),f_k(x_k,n)\rangle=\text{Re}[f_q(x_q,m)f_k^*(x_k,n)]=g(x_q,x_k,m-n)\tag{14}
+$$<p>其中 $f_k^*(x_k,n)$ 表示 $f_k(x_k,n)$ 的共轭，$\text{Re}[\cdot]$ 表示取该复数对应的实部 。</p>
+<p>为方便化简，我们假设存在一个复数 $\boldsymbol{g}(x_q,x_k,m-n)$ ，使得 $f_q(x_q,m)f_k^*(x_k,n)= \boldsymbol{g}(x_q,x_k,m-n)$ 。</p>
+<p>为什么我们需要这样假设？以及能这样假设？</p>
+<p>因为我们需要将式(14)中的 $f_q(x_q,m)f_k^*(x_k,n)$ 和 $g(x_q,x_k,m-n)$ 关联起来，所以需要这样假设，并且构造那样的形式。又 $f_q(x_q,m)f_k^*(x_k,n)$ 的结果的确是一个复数，所以自然能这样假设。</p>
+<p>由此，可以得到</p>
+$$
+\boldsymbol{g}(x_q,x_k,m-n)=R_g(x_q,x_k,m-n)e^{i\Theta_g(x_q,x_k,m-n)}\tag{15}
+$$<p>其中 $R_g(x_q,x_k,m-n)$ 表示该复数到极点的距离， $\Theta_g(x_q,x_k,m-n)$ 表示复数与极轴之间的夹角。</p>
+<p>进一步，根据式(13)有</p>
+$$
+f_q(x_q,m)f_k^*(x_k,n)=R_q(x_q,m)e^{i\Theta_q(x_q,m)}R_k(x_k,n)e^{-i\Theta_k(x_k,n)}\tag{16}
+$$<p>根据式(15)和式(16)，由上面的假设可得</p>
+$$
+R_q(x_q,m)R_k(x_k,n)e^{i\Theta_q(x_q,m)-i\Theta_k(x_k,n)}=R_g(x_q,x_k,m-n)e^{i\Theta_g(x_q,x_k,m-n)}\tag{17}
+$$<p>所以根据式(17)中各项相等有</p>
+$$
+\begin{aligned}
+R_q(x_q,m)R_k(x_k,n)&=R_g(x_q,x_k,m-n)\\[2ex]
+\Theta_q(x_q,m)-\Theta_k(x_k,n)&=\Theta_g(x_q,x_k,m-n)
+\end{aligned}\tag{18}
+$$<p>此时，根据式(11) 中的初始条件有</p>
+$$
+\begin{aligned}
+q_0=\|q_0\|e^{i\theta_{q_0}}=R_{q_0}(x_q,0)e^{i\Theta_{q_0}(x_q,0)}\\[2ex]
+k_0=\|k_0\|e^{i\theta_{k_0}}=R_{k_0}(x_k,0)e^{i\Theta_{k_0}(x_k,0)}
+\end{aligned}\tag{19}
+$$<p>其中 $\|q_0\|,\|k_0\|$ 分别表示 $q_0,k_0$ 到极点的距离，$\theta_{q_0},\theta_{k_0}$ 分别表示  $q_0,k_0$  与极轴的夹角。</p>
+<p>因为 $g(x_m,x_n,m-n)$ 考量的是 $x_q$ 中第 $m$ 个位置与 $x_k$ 中第 $n$ 位置之间的相对位置关系（注意看图6），那自然是 $m,n$ 取任何值函数 $g$ 都能得到包含有相对位置信息的结果，那自然也就包括 $m=n$ 的情况。</p>
+<p>所以，现在我们为了求解，不妨以该情况为切入点，即当 $m=n$ 时根据式(18)和式(19)有</p>
+$$
+\begin{aligned}
+R_q(x_q,m)R_k(x_k,m)&=R_g(x_q,x_k,0)\\[2ex]
+\Theta_q(x_q,m)-\Theta_k(x_k,m)&=\Theta_g(x_q,x_k,0)
+\end{aligned}\tag{20}
+$$<p>因为式(20)是当 $m=n$ 时，恒成立，所以当 $m=n=0$ 时同样能成立，此时有</p>
+$$
+\begin{aligned}
+R_q(x_q,0)R_k(x_k,0)&=R_g(x_q,x_k,0)\\[2ex]
+\Theta_q(x_q,0)-\Theta_k(x_k,0)&=\Theta_g(x_q,x_k,0)
+\end{aligned}\tag{21}
+$$<p>由式(19)中第1个等式 $q_0$ 乘以 $k_0$ 的共轭，等式左右两边可得</p>
+$$
+\|q_0\|\|k_0\|e^{(i\theta_{q_0}-i\theta_{k_0})}=R_{q_0}(x_q,0)R_{k_0}(x_k,0)e^{(i\Theta_{q_0}(x_q,0)-i\Theta_{k_0}(x_k,0))}\tag{22}
+$$<p>进一步根据式(22)可得</p>
+$$
+\begin{aligned}
+\|q_0\|\|k_0\|&=R_{q_0}(x_q,0)R_{k_0}(x_k,0)\\[2ex]
+\theta_{q_0}-\theta_{k_0}&=\Theta_{q_0}(x_q,0)-\Theta_{k_0}(x_k,0)
+\end{aligned}\tag{23}
+$$<p>这里需要注意的一点是，式(23)中的下标 $q_0,k_0$ 其实就是式(21)中的 $q,k$ ，因为都表示在位置 0 处的相关信息，含义相同只是标识不一样。</p>
+<p>所以由式(21)和式(23)可得</p>
+$$
+\begin{aligned}
+R_q(x_q,0)R_k(x_k,0)&=R_g(x_q,x_k,0)=\|q\|\|k\|\\[2ex]
+\Theta_q(x_q,0)-\Theta_k(x_k,0)&=\Theta_g(x_q,x_k,0)=\theta_{q}-\theta_{k}
+\end{aligned}\tag{24}
+$$<p>根据式(24)可得</p>
+$$
+R_q(x_q,0)=\|q\|;\quad R_k(x_k,0)=\|k\|\tag{25}
+$$<p>根据式(20)和式(24)可得</p>
+$$
+\begin{aligned}
+\Theta_q(x_q,m)-\Theta_k(x_k,m)=\theta_q-\theta_k\\[2ex]
+\Theta_q(x_q,m)-\theta_q=\Theta_k(x_k,m)-\theta_k
+\end{aligned}\tag{26}
+$$<p>这里我们再次回顾一下，$\Theta_q(x_q,m)$ 表示向量 $x_q$ 融入位置 $m$ 处的信息变为 $q_m$ 后，$q_m$ 与极轴之间的夹角；$\theta_q$ 在这里的含义是向量 $x_q$ 融入位置 $0$ 处的信息变为 $q_0$ 后，$q_0$（也即 $x_q$ ）与极轴之间的夹角 。所以，$\Theta_q(x_q,m)-\theta_q$ 应该是一个只与 $m$ 相关，与 $x_q$ 无关的函数，故可以记为 $\phi(m)$，即</p>
+$$
+\Theta_q(x_q,m)=\theta_q+\phi(m)\\[2ex]
+\Theta_k(x_k,m)=\theta_k+\phi(m)\tag{27}
+$$<p>进一步，令 $n=m-1$ ，并代入式(18)有</p>
+$$
+\begin{aligned}
+\Theta_q(x_q,m)-\Theta_k(x_k,m-1)=\Theta_g(x_q,x_k,1)
+\end{aligned}
+\tag{28}
+$$<p>将式(27)代入式(28)有</p>
+$$
+\phi(m)-\phi(m-1)=\Theta_g(x_q,x_k,1)+\theta_k-\theta_q
+\tag{29}
+$$<p>可以看出 $\{\phi(m)\}$ 是一个以 $\theta=\Theta_g(x_q,x_k,1)+\theta_k-\theta_q$ 为公差，$\gamma$ 为首项的等差数列，即</p>
+$$
+\phi(m)=m\theta+\gamma\tag{30}
+$$<p>根据式(13)、式(25)、式(27)和式(30)有</p>
+$$
+\begin{aligned}
+f_q(x_q,m)&=\|q\|e^{i\Theta_q(x_q,m)}=\|q\|e^{i(\theta_q+m\theta+\gamma)}\\[2ex]
+f_k(x_k,n)&=\|k\|e^{i\Theta_k(x_k,n)}=\|k\|e^{i(\theta_k+n\theta+\gamma)}\end{aligned}\tag{31}
+$$<p>这里需要注意的是，式(31)中的 $q$ 和 $k$ 依旧指的是式(11)中的 $q_0$ 和 $k_0$ ，并且此时依旧是利用 $m=n=0$ 这样的边界条件在进行求解。下面，我们换成更一般的形式，定义</p>
+$$
+\begin{aligned}
+q&=f_q(x_m,0)=W_qx_m\\[2ex]
+k&=f_k(x_n,0)=W_kx_n
+\end{aligned}\tag{32}
+$$<p>最后，我们简单地令式(30)中 $\gamma=0$ 可得</p>
+$$
+\begin{aligned}
+f_q(x_m,m)=(W_qx_m)e^{im\theta}\\[2ex]
+f_k(x_n,n)=(W_kx_n)e^{in\theta}
+\end{aligned}\tag{33}
+$$<p>根据式(13)便可得到式(8)中的表达式。</p>
+<p>由于内积满足线性叠加（即对应维度相乘再求和）的关系，因此任意偶数维度的 RoPE，都可以表示为二维形式的拼接，即</p>
+$$
+\begin{bmatrix} 
+\cos m\theta_0 & -\sin m\theta_0 & 0 & 0 & \cdots & 0 & 0 \\ 
+\sin m\theta_0 & \cos m\theta_0 & 0 & 0 & \cdots & 0 & 0 \\ 
+0 & 0 & \cos m\theta_1 & -\sin m\theta_1 & \cdots & 0 & 0 \\ 
+0 & 0 & \sin m\theta_1 & \cos m\theta_1 & \cdots & 0 & 0 \\ 
+\vdots & \vdots & \vdots & \vdots & \ddots & \vdots & \vdots \\ 
+0 & 0 & 0 & 0 & \cdots & \cos m\theta_{(d/2)-1} & -\sin m\theta_{(d/2)-1} \\ 
+0 & 0 & 0 & 0 & \cdots & \sin m\theta_{(d/2)-1} & \cos m\theta_{(d/2)-1} \\ 
+\end{bmatrix} 
+\begin{bmatrix}
+W^{(00)}_{\{q,k\}}&W^{(01)}_{\{q,k\}}&\cdots &W^{(0[d-1])}_{\{q,k\}}\\
+W^{(10)}_{\{q,k\}}&W^{(11)}_{\{q,k\}}&\cdots &W^{(1[d-1])}_{\{q,k\}}\\
+W^{(20)}_{\{q,k\}}&W^{(21)}_{\{q,k\}}&\cdots &W^{(2[d-1])}_{\{q,k\}}\\
+\vdots&\vdots&\vdots&\vdots\\
+W^{([d-1]0)}_{\{q,k\}}&W^{([d-1]1)}_{\{q,k\}}&\cdots &W^{([d-1][d-1])}_{\{q,k\}}
+\end{bmatrix}
+\begin{bmatrix}
+x^{(0)}_m\\x^{(1)}_m\\x^{(2)}_m\\x^{(3)}_m\\ \vdots\\ x^{(d-1)}_m
+\end{bmatrix}\tag{34}
+$$<p>当然，在代码实现的时候为了更加高效，我们可以采用如图4所示的方式进行。</p>
+<h3 id="33-线性注意力">3.3 线性注意力<a class="anchor" href="#33-%e7%ba%bf%e6%80%a7%e6%b3%a8%e6%84%8f%e5%8a%9b">#</a></h3>
+<p>在介绍完旋转位置编码的原理以后我们再来看 RoPE 为什么能够满足线性注意力计算。</p>
+<p>根据式(2)和式(4)可知，我们可以将自注意力机制的计算过程通过一共更加泛化的方式进行表示，如下所示</p>
+$$
+\text{Attention}(Q,K,V)_m=\sum_{n=1}^N\frac{\text{sim}(q_m,k_n)}{\sum_{n=1}^N\text{sim}(q_m,k_n)}v_n\tag{35}
+$$<p>其中 $\text{sim}(q_m,k_n)=\exp(q^Tk_n/\sqrt{d})$.</p>
+<p>在这样的情境下，式(35)完成整个自注意力的计算过程，其时间复杂度便是 $O(n^2d)$。</p>
+<p>在论文[6]中，Katharopoulos 等人提出了线性注意力计算框架</p>
+$$
+\text{Attention}(Q,K,V)_m=\sum_{n=1}^N\frac{\phi(q_m)^T\varphi (k_n)}{\sum_{n=1}^N\phi(q_m)^T\ \varphi (k_n)}v_n\tag{36}
+$$<p>其中 $\phi(\cdot), \varphi (\cdot)$ 通常为非负，因为我们要确保注意力权重为非负。</p>
+<p>此时可以看出，在式(36)的计算框架下，我们便可以个实现 $Q(K^TV)$ 的计算顺序，以达到线性复杂度的目的。</p>
+<p>进一步，在[6]中，作者令 $\phi(x)= \varphi (x)=\text{elu}(x)+1$ 来完成了自注意力机制的计算过程，其中 $\text{elu}(x)$ 的定义如下
+</p>
+$$
+\text{ELU}(x) = 
+\begin{cases}
+x, & \text{if } x > 0 \\[2ex]
+\alpha \left( e^{x} - 1 \right), & \text{if } x \le 0
+\end{cases} \tag{37}
+$$<p>其中 $\alpha > 0$ 是一个超参数，通常 $\alpha = 1.0$ 。</p>
+<p>对于 RoPE 来说，因为它只是通过旋转改变了向量的向量的角度（并没有改变模长），因此我们可以将其与式(36)进行结合，如下</p>
+$$
+\text{Attention}(Q,K,V)_m=\sum_{n=1}^N\frac{\left(R^d_{\Theta,m}\phi(q_m)\right)^T\left(R^d_{\Theta,n}\varphi (k_n)\right)}{\sum_{n=1}^N\phi(q_m)^T\ \varphi (k_n)}v_n\tag{38}
+$$<p>此时可以看出，使用 RoPE 的自注意力计算过程同样是可以满足线性时间复杂度的。</p>
+<p>不过此时需要注意的是，因为向量 $\phi(q_m),\varphi (k_n)$ 进行了旋转，所以并不能保证计算得到的权重是非负的。可能也正式因为这样的原因，作者在运用 RoPE 的过程中还是通过 Softmax 进行了归一化。</p>
+<h2 id="4-总结">4. 总结<a class="anchor" href="#4-%e6%80%bb%e7%bb%93">#</a></h2>
+<p>在这篇论文中，作者以相对位置编码和线性注意力框架为动机，通过合理的假设得到了旋转注意力编码 RoPE，并将其运用在了 Transfromer 中，取名 RoFormer。从现在的实际情况来看，各个大模型中仅仅只是将 RoPE 作为了一种新的位置编码方式来进行使用，并且依旧是进行了 Softmax 操作，即时间复杂度仍然为 $O(n^2d)$ 。</p>
+<p>总结，本次内容就到此结束，更多内容可参见作者原文。总的来说，对于 RoPE 我们只需其思想和用法即可，至于怎么来的过程也无需太多关注，比较枯燥。</p>
+<h2 id="引用">引用<a class="anchor" href="#%e5%bc%95%e7%94%a8">#</a></h2>
+<p>[1] Haviv A, Ram O, Press O, et al. Transformer language models without positional encodings still learn positional information[J]. arXiv preprint arXiv:2203.16634, 2022.</p>
+<p>[2] Jianlin Su, Yu Lu, Shengfeng Pan, et al. RoFormer: Enhanced Transformer with Rotary Position Embedding[J]. arXiv preprint arXiv:2104.09864</p>
+<p>[3] 苏剑林，线性Attention的探索：Attention必须有个Softmax吗？ 2020,7. <a href="https://spaces.ac.cn/archives/7546">https://spaces.ac.cn/archives/7546</a></p>
+<p>[4] 苏剑林，Transformer升级之路：2、博采众长的旋转式位置编码.  2021, 3. <a href="https://spaces.ac.cn/archives/8265">https://spaces.ac.cn/archives/8265</a></p>
+<p>[5] <a href="https://github.com/meta-llama/llama/blob/llama_v1/llama/model.py">https://github.com/meta-llama/llama/blob/llama_v1/llama/model.py</a></p>
+<p>[6] Angelos Katharopoulos, Apoorv Vyas, Nikolaos Pappas, and François Fleuret. Transformers are rnns: Fast autoregressive transformers with linear attention. In International Conference on Machine Learning, pages 5156–5165. PMLR, 2020.</p>
+<div class="book-page-pv text-small" id="busuanzi_container_page_pv">
+      <span class="book-page-pv-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" focusable="false">
+          <path d="M1.5 12s3.9-6.5 10.5-6.5S22.5 12 22.5 12s-3.9 6.5-10.5 6.5S1.5 12 1.5 12Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7"/>
+          <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.7"/>
+        </svg>
+      </span>
+      <span class="book-page-pv-label">阅读</span>
+      <span class="book-page-pv-value" id="busuanzi_value_page_pv">--</span>
+    </div><section class="book-article-index book-related-articles" aria-labelledby="related-articles-title">
+    <h2 id="related-articles-title">相关阅读</h2>
+    <div class="book-article-grid"><article class="book-article-card book-related-article-card">
+              <h3 class="book-article-card-title">
+                <a href="/featured/complex-number/">复数及欧拉公式介绍</a>
+              </h3><p class="book-article-card-desc">本文是旋转位置编码 RoPE 系列的数学前置篇，系统讲清复数与欧拉公式这两个 RoPE 推导必备工具。从复数 z=a+bi 的实部虚部、复平面坐标表示、共轭复数 inner product 写法讲起，逐步推导出欧拉公式 …</p></article></div>
+  </section></article>
+ 
+      
+
+
+      <footer class="book-footer">
+        
+  <div class="flex flex-wrap justify-between">
+
+<div>
+
+</div>
+
+<div>
+
+</div>
+
+</div>
+
+<div class="flex flex-wrap justify-between">
+    <span>
+    
+      <a href="/featured/llama1/" class="flex align-center">
+        <img src="/icons/backward.svg" class="book-icon" alt="Backward" />
+        <span>LLaMA1 动机原理与实现之我们不需要大力出奇迹</span>
+      </a>
+    
+    </span>
+    <span>
+    
+      <a href="/featured/complex-number/" class="flex align-center">
+        <span>复数及欧拉公式介绍</span>
+        <img src="/icons/forward.svg" class="book-icon" alt="Forward" />
+      </a>
+    
+    </span>
+  </div>
+
+ 
+        
+  
+  <div class="book-comments"><div class="giscus"></div>
+<script src="https://giscus.app/client.js"
+        data-repo="mlwithme/mlwithme.github.io"
+        data-repo-id="R_kgDOTBt94Q"
+        data-category="Announcements"
+        data-category-id="DIC_kwDOTBt94c4C_21V"
+        data-mapping="pathname"
+        data-strict="1"
+        data-reactions-enabled="1"
+        data-emit-metadata="0"
+        data-input-position="top"
+        data-theme="preferred_color_scheme"
+        data-lang="zh-CN"
+        data-loading="lazy"
+        crossorigin="anonymous"
+        async>
+</script>
+</div>
+  
+ 
+        
+  <link rel="stylesheet" href="https://mlwithme.github.io/katex/katex.min.css" />
+  <script defer src="https://mlwithme.github.io/katex/katex.min.js"></script>
+  <script defer src="https://mlwithme.github.io/katex/auto-render.min.js"></script>
+  
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        if (window.renderMathInElement) {
+          renderMathInElement(
+            document.querySelector(".book-page"),
+            Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
+          );
+        }
+      });
+    </script>
+  
+
+        
+  
+ 
+        
+  
+    <script>(function(){document.querySelectorAll("pre:has(code)").forEach(e=>{e.addEventListener("click",e.focus),e.addEventListener("copy",function(t){if(t.preventDefault(),navigator.clipboard){const t=window.getSelection().toString()||e.textContent;navigator.clipboard.writeText(t)}})})})()</script>
+  
+
+      </footer>
+
+      <label for="menu-control" class="hidden book-menu-overlay"></label>
+    </div>
+
+    
+  
+  <aside class="book-toc">
+    <div class="book-toc-content">
+      
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#1-位置编码方法">1. 位置编码方法</a>
+      <ul>
+        <li><a href="#11-绝对位置编码">1.1 绝对位置编码</a></li>
+        <li><a href="#12-相对位置编码">1.2 相对位置编码</a></li>
+      </ul>
+    </li>
+    <li><a href="#2-旋转位置编码">2. 旋转位置编码</a>
+      <ul>
+        <li><a href="#21-旋转编码动机">2.1 旋转编码动机</a></li>
+        <li><a href="#22-旋转编码思想">2.2 旋转编码思想</a></li>
+        <li><a href="#23-旋转编码原理">2.3 旋转编码原理</a></li>
+        <li><a href="#24-从零实现旋转编码">2.4 从零实现旋转编码</a></li>
+        <li><a href="#25-旋转编码的运用">2.5 旋转编码的运用</a></li>
+      </ul>
+    </li>
+    <li><a href="#3-推导过程">3. 推导过程</a>
+      <ul>
+        <li><a href="#31-合理假设">3.1 合理假设</a></li>
+        <li><a href="#32-证明过程">3.2 证明过程</a></li>
+        <li><a href="#33-线性注意力">3.3 线性注意力</a></li>
+      </ul>
+    </li>
+    <li><a href="#4-总结">4. 总结</a></li>
+    <li><a href="#引用">引用</a></li>
+  </ul>
+</nav>
+
+
+
+
+    </div>
+  </aside>
+  
+ 
+  </main>
+
+  <button
+  type="button"
+  class="book-back-to-top"
+  aria-label="回到顶部"
+  title="回到顶部"
+>
+  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <path
+      d="M12 5.5l-5.25 5.25 1.5 1.5 2.7-2.7V18.5h2.1V9.55l2.7 2.7 1.5-1.5L12 5.5z"
+      fill="currentColor"
+    ></path>
+  </svg>
+</button>
+
+<script>
+  (function () {
+    var button = document.querySelector(".book-back-to-top");
+    if (!button) {
+      return;
+    }
+
+    var toggleButton = function () {
+      if (window.scrollY > 360) {
+        button.classList.add("is-visible");
+      } else {
+        button.classList.remove("is-visible");
+      }
+    };
+
+    button.addEventListener("click", function () {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+
+    toggleButton();
+    window.addEventListener("scroll", toggleButton, { passive: true });
+  })();
+</script>
+
+<div class="book-floating-toolbox" data-book-floating-toolbox>
+  <ul
+    class="book-floating-toolbox__items"
+    id="book-floating-toolbox-items"
+    role="menu"
+    aria-label="工具箱"
+    hidden
+  >
+    <li class="book-floating-toolbox__item" role="none" style="--book-toolbox-index: 0; --book-toolbox-count: 4;">
+      <a
+        class="book-floating-toolbox__action"
+        role="menuitem"
+        href="/glossary/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="术语百科"
+      >
+        <span class="book-floating-toolbox__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path
+              d="M5 4.5h11.5a2.5 2.5 0 0 1 2.5 2.5V20l-4-2.5L11 20l-4-2.5L3 20V7a2.5 2.5 0 0 1 2-2.5z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linejoin="round"
+            ></path>
+            <path
+              d="M7.5 9.5h7M7.5 12.5h5"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+            ></path>
+          </svg>
+        </span>
+      </a>
+      <span class="book-floating-toolbox__tip" aria-hidden="true">术语百科</span>
+    </li>
+    <li class="book-floating-toolbox__item" role="none" style="--book-toolbox-index: 2; --book-toolbox-count: 4;">
+      <a
+        class="book-floating-toolbox__action"
+        role="menuitem"
+        href="/code-templates/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="代码实现"
+      >
+        <span class="book-floating-toolbox__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path
+              d="M8.5 7.5 4 12l4.5 4.5M15.5 7.5 20 12l-4.5 4.5M13.5 5l-3 14"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            ></path>
+          </svg>
+        </span>
+      </a>
+      <span class="book-floating-toolbox__tip" aria-hidden="true">代码实现</span>
+    </li>
+    <li class="book-floating-toolbox__item" role="none" style="--book-toolbox-index: 1; --book-toolbox-count: 4;">
+      <a
+        class="book-floating-toolbox__action"
+        role="menuitem"
+        href="/syllabus/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="名校公开课"
+      >
+        <span class="book-floating-toolbox__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path
+              d="M12 3 1.5 9 12 14.5 22.5 9 12 3z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linejoin="round"
+            ></path>
+            <path
+              d="M6 11v4.2c0 1.5 2.7 2.8 6 2.8s6-1.3 6-2.8V11"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            ></path>
+            <path
+              d="M21 9.5V14"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+            ></path>
+          </svg>
+        </span>
+      </a>
+      <span class="book-floating-toolbox__tip" aria-hidden="true">名校公开课</span>
+    </li>
+    <li class="book-floating-toolbox__item" role="none" style="--book-toolbox-index: 3; --book-toolbox-count: 4;">
+      <a
+        class="book-floating-toolbox__action"
+        role="menuitem"
+        href="https://www.machinelearningwithme.com"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="开发中……"
+      >
+        <span class="book-floating-toolbox__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path
+              d="M9 3.5h6a1.5 1.5 0 0 1 1.5 1.5V7h2.25A1.75 1.75 0 0 1 20.5 8.75v9A1.75 1.75 0 0 1 18.75 19.5H5.25A1.75 1.75 0 0 1 3.5 17.75v-9A1.75 1.75 0 0 1 5.25 7H7.5V5A1.5 1.5 0 0 1 9 3.5z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linejoin="round"
+            ></path>
+            <path
+              d="M9 7h6"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+            ></path>
+            <circle cx="12" cy="13" r="3" fill="none" stroke="currentColor" stroke-width="1.6"></circle>
+          </svg>
+        </span>
+      </a>
+      <span class="book-floating-toolbox__tip" aria-hidden="true">开发中……</span>
+    </li>
+  </ul>
+  <button
+    type="button"
+    class="book-floating-toolbox__toggle"
+    aria-label="工具箱"
+    aria-haspopup="menu"
+    aria-expanded="false"
+    aria-controls="book-floating-toolbox-items"
+    title="工具箱"
+    data-book-toolbox-toggle
+  >
+    <svg class="book-floating-toolbox__toggle-icon-open" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        d="M14.7 6.3a4 4 0 0 0-5.4 5.4l-6.3 6.3a1 1 0 0 0 0 1.4l2 2a1 1 0 0 0 1.4 0l6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-2.4z"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linejoin="round"
+        stroke-linecap="round"
+      ></path>
+      <circle
+        class="book-floating-toolbox__badge-pulse"
+        cx="19.5"
+        cy="4.5"
+        r="2.2"
+        fill="#d84747"
+        stroke="#fff"
+        stroke-width="0.6"
+      ></circle>
+    </svg>
+    <svg class="book-floating-toolbox__toggle-icon-close" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        d="M6.5 6.5l11 11M17.5 6.5l-11 11"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.8"
+        stroke-linecap="round"
+      ></path>
+    </svg>
+  </button>
+</div>
+
+<script>
+  (function () {
+    var root = document.querySelector("[data-book-floating-toolbox]");
+    if (!root) {
+      return;
+    }
+    var toggle = root.querySelector("[data-book-toolbox-toggle]");
+    var items = root.querySelector(".book-floating-toolbox__items");
+    if (!toggle || !items) {
+      return;
+    }
+
+    var isOpen = function () {
+      return root.classList.contains("is-open");
+    };
+
+    var open = function () {
+      root.classList.add("is-open");
+      items.hidden = false;
+      toggle.setAttribute("aria-expanded", "true");
+    };
+
+    var close = function () {
+      root.classList.remove("is-open");
+      items.hidden = true;
+      toggle.setAttribute("aria-expanded", "false");
+    };
+
+    toggle.addEventListener("click", function (event) {
+      event.stopPropagation();
+      if (isOpen()) {
+        close();
+      } else {
+        open();
+      }
+    });
+
+    document.addEventListener("click", function (event) {
+      if (!isOpen()) {
+        return;
+      }
+      if (root.contains(event.target)) {
+        return;
+      }
+      close();
+    });
+
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape" && isOpen()) {
+        close();
+        toggle.focus();
+      }
+    });
+
+    items.addEventListener("click", function (event) {
+      if (event.target.closest("a")) {
+        close();
+      }
+    });
+
+    window.addEventListener("pageshow", close);
+  })();
+</script>
+
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

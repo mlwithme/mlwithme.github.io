@@ -1,0 +1,4960 @@
+<!DOCTYPE html>
+<html lang="zh_CN" dir="ltr">
+<head>
+  <!--
+Made with Book Theme
+https://github.com/alex-shpak/hugo-book
+--><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="本文是 BERT 精读系列第2讲，配套开源仓库 moon-hotel/BertWithPretrained 系统讲解如何用 PyTorch 从零实现 BERT 模型。覆盖工程目录结构（预训练模型、cache、数据集、model、Tasks、test、utils 七个模块 …">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="index,follow,max-image-preview:large">
+
+
+
+
+
+<meta property="og:url" content="https://mlwithme.github.io/tutorials/bert/bert-implementation/">
+<meta property="og:site_name" content="《从零学AI指南手册》">
+<meta property="og:title" content="第2讲 BERT 模型 PyTorch 从零实现教程：工程结构、BertConfig 与 BertModel 源码详解">
+<meta property="og:description" content="本文是 BERT 精读系列第2讲，配套开源仓库 moon-hotel/BertWithPretrained 系统讲解如何用 PyTorch 从零实现 BERT 模型。覆盖工程目录结构（预训练模型、cache、数据集、model、Tasks、test、utils 七个模块 …">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:type" content="article">
+<meta property="og:image" content="https://mlwithme.github.io/share-cover.png">
+<meta property="og:image:url" content="https://mlwithme.github.io/share-cover.png">
+<meta property="og:image:secure_url" content="https://mlwithme.github.io/share-cover.png">
+<meta property="og:image:width" content="759">
+<meta property="og:image:height" content="759">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:alt" content="《从零学AI指南手册》 - 第2讲 BERT 模型 PyTorch 从零实现教程：工程结构、BertConfig 与 BertModel 源码详解">
+
+  <meta property="article:section" content="tutorials">
+  
+    <meta property="article:published_time" content="2026-07-15T18:35:22&#43;08:00">
+  
+  
+    <meta property="article:modified_time" content="2026-07-25T21:57:31&#43;08:00">
+  
+  
+
+
+<script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"WebSite","description":"面向机器学习、深度学习与 AI Agent 的中文系统化学习手册，包含原理讲解、代码示例与实战案例。","inLanguage":"zh_CN","name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
+  </script>
+  <script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.github.io/share-cover.png"},"name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
+  </script><script type="application/ld+json">
+      {"@context":"https://schema.org","@type":"Article","articleSection":"tutorials","author":{"@type":"Person","name":"WangCheng","url":"https://mlwithme.github.io/author/"},"dateModified":"2026-07-25T21:57:31+08:00","datePublished":"2026-07-15T18:35:22+08:00","description":"本文是 BERT 精读系列第2讲，配套开源仓库 moon-hotel/BertWithPretrained 系统讲解如何用 PyTorch 从零实现 BERT 模型。覆盖工程目录结构（预训练模型、cache、数据集、model、Tasks、test、utils 七个模块 …","headline":"第2讲 BERT 模型 PyTorch 从零实现教程：工程结构、BertConfig 与 BertModel 源码详解","image":["https://mlwithme.github.io/share-cover.png"],"inLanguage":"zh_CN","mainEntityOfPage":"https://mlwithme.github.io/tutorials/bert/bert-implementation/","publisher":{"@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.github.io/share-cover.png"},"name":"《从零学AI指南手册》"},"url":"https://mlwithme.github.io/tutorials/bert/bert-implementation/"}
+    </script><script type="application/ld+json">
+        {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","item":"https://mlwithme.github.io/","name":"首页","position":1},{"@type":"ListItem","item":"https://mlwithme.github.io/tutorials/","name":"专题文章","position":2},{"@type":"ListItem","item":"https://mlwithme.github.io/tutorials/bert/","name":"从零玩转 Bert 详解6大下游任务","position":3},{"@type":"ListItem","item":"https://mlwithme.github.io/tutorials/bert/bert-implementation/","name":"第2讲 BERT 模型 PyTorch 从零实现教程：工程结构、BertConfig 与 BertModel 源码详解","position":4}]}
+      </script>
+
+<title>第2讲 BERT 模型 PyTorch 从零实现教程：工程结构、BertConfig 与 BertModel 源码详解 • 《从零学AI指南手册》</title>
+<link rel="icon" href="https://mlwithme.github.io/favicon.png" type="image/png">
+<link rel="shortcut icon" href="https://mlwithme.github.io/favicon.png" type="image/png">
+<link rel="apple-touch-icon" href="https://mlwithme.github.io/favicon.png">
+
+<link rel="manifest" href="/manifest.json">
+<link rel="canonical" href="https://mlwithme.github.io/tutorials/bert/bert-implementation/">
+<link rel="stylesheet" href="/book.min.04800c306c9a4025943ba95ba687acbf99c9a8d44d89ae79df98ad8111606047.css" integrity="sha256-BIAMMGyaQCWUO6lbpoesv5nJqNRNia5535itgRFgYEc=" crossorigin="anonymous">
+  <script defer type="module" src="/zh-cn.search.min.f1dcaf5ffb003a5d8d501b4c6c5a7e051bc6f1cb007aa9fe982329837af7afb3.js" integrity="sha256-8dyvX/sAOl2NUBtMbFp&#43;BRvG8csAeqn&#43;mCMpg3r3r7M=" crossorigin="anonymous"></script>
+
+  
+
+
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="第2讲 BERT 模型 PyTorch 从零实现教程：工程结构、BertConfig 与 BertModel 源码详解">
+<meta name="twitter:description" content="本文是 BERT 精读系列第2讲，配套开源仓库 moon-hotel/BertWithPretrained 系统讲解如何用 PyTorch 从零实现 BERT 模型。覆盖工程目录结构（预训练模型、cache、数据集、model、Tasks、test、utils 七个模块 …">
+<meta name="twitter:url" content="https://mlwithme.github.io/tutorials/bert/bert-implementation/">
+<meta name="twitter:image" content="https://mlwithme.github.io/share-cover.png">
+<meta name="twitter:image:alt" content="《从零学AI指南手册》 - 第2讲 BERT 模型 PyTorch 从零实现教程：工程结构、BertConfig 与 BertModel 源码详解">
+<script>
+  var _hmt = _hmt || [];
+  (function() {
+    var hm = document.createElement("script");
+    hm.src = "https://hm.baidu.com/hm.js?19b2d342631cd14e3578ad00b4823e80";
+    var s = document.getElementsByTagName("script")[0];
+    s.parentNode.insertBefore(hm, s);
+  })();
+</script>
+<script>
+  var _hmt = _hmt || [];
+  (function() {
+    var hm = document.createElement("script");
+    hm.src = "https://hm.baidu.com/hm.js?74a336dd47fbbab3ceb99d4ad8afcb76";
+    var s = document.getElementsByTagName("script")[0];
+    s.parentNode.insertBefore(hm, s);
+  })();
+</script>
+<script async src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
+
+</head>
+<body dir="ltr" class="book-kind-page book-type-tutorials">
+  <input type="checkbox" class="hidden toggle" id="menu-control" />
+  <input type="checkbox" class="hidden toggle" id="toc-control" />
+  <main class="container flex">
+    
+<aside class="book-menu">
+  <div class="book-menu-content">
+    
+  <nav>
+<h2 class="book-brand">
+  <a class="flex align-center" href="/"><svg xmlns="http://www.w3.org/2000/svg" height="20" width="20" viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true" class="book-brand-icon" style="margin-right:.35em;flex:none">
+      <path d="M240-200h120v-240h240v240h120v-360L480-740 240-560v360Zm-80 80q-33 0-56.5-23.5T80-200v-360q0-27 11-49t31-39l280-220q21-17 47-25t51-8q25 0 51 8t47 25l280 220q20 17 31 39t11 49v360q0 33-23.5 56.5T840-120H600q-17 0-28.5-11.5T560-160v-200H400v200q0 17-11.5 28.5T360-120H160Zm320-280Z"/>
+    </svg>
+
+    <span>返回主页</span>
+
+  </a>
+</h2>
+
+
+<div class="book-search hidden">
+  <input id="book-search-input" type="text" 
+    placeholder="Search"
+    aria-label="Search"
+    maxlength="64" />
+  <div class="book-search-spinner hidden"></div>
+  <ul id="book-search-results"></ul>
+</div>
+<script>document.querySelector(".book-search").classList.remove("hidden")</script>
+
+
+
+
+
+
+
+
+
+
+
+  
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/featured/" class="">
+      <span class="book-menu-link-title">精选文章</span>
+</a>
+  
+
+          
+  <ul>
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bb7497cb5e222579131ad9ad959011cb" class="toggle" checked />
+    <label for="section-bb7497cb5e222579131ad9ad959011cb" class="flex">
+      <a href="/tutorials/" class="">
+        <span class="book-menu-link-title">专题文章</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/tutorials/transformer/" class="">
+      <span class="book-menu-link-title">图解 Transformer 入门指南教程</span>
+</a>
+  
+
+          
+  <ul>
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/tutorials/bert/" class="">
+      <span class="book-menu-link-title">从零玩转 Bert 详解6大下游任务</span>
+</a>
+  
+
+          
+  <ul>
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/tutorials/mini-chatgpt/" class="">
+      <span class="book-menu-link-title">手把手带你从零构建 ChatGPT</span>
+</a>
+  
+
+          
+  <ul>
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/" class="">
+      <span class="book-menu-link-title">大模型Agent开发（更新中……）</span>
+</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-279cf10e5100caa4f65ba3f7dd8888a4" class="toggle"  />
+    <label for="section-279cf10e5100caa4f65ba3f7dd8888a4" class="flex">
+      <a href="/agent/chapter01/" class="">
+        <span class="book-menu-link-title">第 1 章 RAG 基础概念</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/what-is-rag/" class="">
+      <span class="book-menu-link-title">1.1 RAG 提出背景</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/rag-pipeline-overview/" class="">
+      <span class="book-menu-link-title">1.2 RAG 流程概览</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-83c662c2764f1c19f8005eab77fee110" class="toggle"  />
+    <label for="section-83c662c2764f1c19f8005eab77fee110" class="flex">
+      <a href="/agent/chapter02/" class="">
+        <span class="book-menu-link-title">第 2 章 大模型接入与使用</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/intro-to-llm-sdk/" class="">
+      <span class="book-menu-link-title">2.1 SDK 介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/modern-llm-sdk/" class="">
+      <span class="book-menu-link-title">2.2 现代大模型中的 SDK</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/dashscope-api-overview/" class="">
+      <span class="book-menu-link-title">2.3 DashScope 接口体系</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/qwen-onboarding/" class="">
+      <span class="book-menu-link-title">2.4 千问大模型接入与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-1e583d7a26333453241d87c5c16592bd" class="toggle"  />
+    <label for="section-1e583d7a26333453241d87c5c16592bd" class="flex">
+      <a href="/agent/chapter03/" class="">
+        <span class="book-menu-link-title">第 3 章 文档标准化与语义检索</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/document-loading-and-preprocessing/" class="">
+      <span class="book-menu-link-title">3.1 文档加载与标准化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/text-splitting-strategies/" class="">
+      <span class="book-menu-link-title">3.2 常见文本切分策略</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/vector-database-selection/" class="">
+      <span class="book-menu-link-title">3.3 向量数据库选择</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/qwen-embedding-model/" class="">
+      <span class="book-menu-link-title">3.4 Qwen3 Embedding 模型介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/semantic-retrieval-pipeline/" class="">
+      <span class="book-menu-link-title">3.5 语义搜索引擎构建</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/milvus-tutorial/" class="">
+      <span class="book-menu-link-title">3.6  Milvus 模块解析</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="toggle"  />
+    <label for="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="flex">
+      <a href="/agent/chapter04/" class="">
+        <span class="book-menu-link-title">第 4 章 RAG 与 Agent</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/two-step-rag/" class="">
+      <span class="book-menu-link-title">4.1 两步式 RAG 搭建</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/function-calling-basics/" class="">
+      <span class="book-menu-link-title">4.2 Function Calling 概念介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/langchain-tool-decorator/" class="">
+      <span class="book-menu-link-title">4.3 LangChain 中的 Tool 修饰器</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/rag-agent-essentials/" class="">
+      <span class="book-menu-link-title">4.4 RAG Agent 原理与搭建</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/react-framework/" class="">
+      <span class="book-menu-link-title">4.5 复杂问题拆解与ReAct框架</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/two-stage-indexing/" class="">
+      <span class="book-menu-link-title">4.6 RAG 中的两阶段索引</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/qwen3-reranking/" class="">
+      <span class="book-menu-link-title">4.7 Qwen3 Reranking 原理与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/two-stage-rag-agent/" class="">
+      <span class="book-menu-link-title">4.8 基于两阶段索引的 RAG Agent</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/langgraph-basics/" class="">
+      <span class="book-menu-link-title">4.9 LangGraph 基本概念介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/langgraph-custom-rag-agent/" class="">
+      <span class="book-menu-link-title">4.10  基于 LangGraph 构建自定义 RAG Agent</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bf5130286ff0eee8f362b632167a5e6b" class="toggle"  />
+    <label for="section-bf5130286ff0eee8f362b632167a5e6b" class="flex">
+      <a href="/agent/chapter05/" class="">
+        <span class="book-menu-link-title">第 5 章 Agent 记忆机制与管理</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/agent-memory-overview/" class="">
+      <span class="book-menu-link-title">5.1 Agent 记忆机制概览</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/langchain-short-term-memory/" class="">
+      <span class="book-menu-link-title">5.2 短期记忆持久化与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/short-term-memory-management/" class="">
+      <span class="book-menu-link-title">5.3 短期记忆管理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/short-term-memory-rag-agent/" class="">
+      <span class="book-menu-link-title">5.4 拥有短期记忆的 RAG Agent</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/long-term-memory-strategies/" class="">
+      <span class="book-menu-link-title">5.5 长期记忆管理与持久化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/mini-chatgpt-from-scratch/" class="">
+      <span class="book-menu-link-title">5.6 从零实现 Mini ChatGPT 助手</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/pgvector-setup/" class="">
+      <span class="book-menu-link-title">5.7 pgvector 配置安装</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/long-term-memory-retrieval-and-forgetting/" class="">
+      <span class="book-menu-link-title">5.8 长期记忆检索与遗忘</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/langgraph-mini-chatgpt/" class="">
+      <span class="book-menu-link-title">5.9 基于 LangGraph 的Mini ChatGPT 助手</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/create-agent-mini-chatgpt/" class="">
+      <span class="book-menu-link-title">5.10 使用 create_agent 搭建 Mini ChatGPT</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/" class="">
+      <span class="book-menu-link-title">深度学习</span>
+</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/mindmap/" class="">
+      <span class="book-menu-link-title">目录思维导图</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-cf7621e8efb1f3153eaca44a113dcdb9" class="toggle"  />
+    <label for="section-cf7621e8efb1f3153eaca44a113dcdb9" class="flex">
+      <a href="/dl/chapter01/" class="">
+        <span class="book-menu-link-title">第 1 章 深度学习简介</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/dl-development-stages/" class="">
+      <span class="book-menu-link-title">1.1 深度学习的发展阶段</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/dl-key-figures/" class="">
+      <span class="book-menu-link-title">1.2 深度学习中的关键人物</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/mainstream-dl-frameworks/" class="">
+      <span class="book-menu-link-title">1.3 深度学习框架介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f9bf1a68c19405769f9c4a1495708a55" class="toggle"  />
+    <label for="section-f9bf1a68c19405769f9c4a1495708a55" class="flex">
+      <a href="/dl/chapter02/" class="">
+        <span class="book-menu-link-title">第 2 章 环境配置</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/dl-dev-environment-architecture/" class="">
+      <span class="book-menu-link-title">2.1 体系结构介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/dl-cuda-pytorch-install/" class="">
+      <span class="book-menu-link-title">2.2 深度学习环境安装</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/dl-cuda-training-env-setup/" class="">
+      <span class="book-menu-link-title">2.3 开发环境安装配置</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="toggle"  />
+    <label for="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="flex">
+      <a href="/dl/chapter03/" class="">
+        <span class="book-menu-link-title">第 3 章 深度学习基础</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/linear-regression-basics/" class="">
+      <span class="book-menu-link-title">3.1 线性回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/linear-regression-implementation/" class="">
+      <span class="book-menu-link-title">3.2 线性回归简洁实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/backpropagation-and-gradient-descent/" class="">
+      <span class="book-menu-link-title">3.3 梯度下降与反向传播</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/regression-from-scratch/" class="">
+      <span class="book-menu-link-title">3.4 从零实现回归模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/softmax-regression-basics/" class="">
+      <span class="book-menu-link-title">3.5 从逻辑回归到Softmax回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/softmax-regression-implementation/" class="">
+      <span class="book-menu-link-title">3.6 Softmax回归简洁实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/softmax-regression-from-scratch/" class="">
+      <span class="book-menu-link-title">3.7 从零实现分类模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/regression-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">3.8 回归模型评估指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/classification-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">3.9 分类模型评估指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/overfitting-and-regularization/" class="">
+      <span class="book-menu-link-title">3.10 过拟合与正则化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/hyperparameters-and-cross-validation/" class="">
+      <span class="book-menu-link-title">3.11 超参数与交叉验证</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/activation-functions/" class="">
+      <span class="book-menu-link-title">3.12 激活函数</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/multi-label-classification/" class="">
+      <span class="book-menu-link-title">3.13 多标签分类</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-7a12cee83820a928df00362d70804a97" class="toggle"  />
+    <label for="section-7a12cee83820a928df00362d70804a97" class="flex">
+      <a href="/dl/chapter04/" class="">
+        <span class="book-menu-link-title">第 4 章 卷积神经网络</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/cnn-basics/" class="">
+      <span class="book-menu-link-title">4.1 卷积的概念</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/convolution-operation/" class="">
+      <span class="book-menu-link-title">4.2 卷积的计算过程</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/convolution-and-pooling/" class="">
+      <span class="book-menu-link-title">4.3 填充和池化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/lenet5/" class="">
+      <span class="book-menu-link-title">4.4 LeNet5网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/alexnet/" class="">
+      <span class="book-menu-link-title">4.5 AlexNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/vgg/" class="">
+      <span class="book-menu-link-title">4.6 VGG网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/nin/" class="">
+      <span class="book-menu-link-title">4.7 NIN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/googlenet/" class="">
+      <span class="book-menu-link-title">4.8 GoogLeNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/resnet/" class="">
+      <span class="book-menu-link-title">4.9 ResNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/densenet/" class="">
+      <span class="book-menu-link-title">4.10 DenseNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-be9addfd3a15c372d609d09cabb94159" class="toggle"  />
+    <label for="section-be9addfd3a15c372d609d09cabb94159" class="flex">
+      <a href="/dl/chapter05/" class="">
+        <span class="book-menu-link-title">第 5 章 模型训练与复用</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/training-logs-management/" class="">
+      <span class="book-menu-link-title">5.1 参数及日志管理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/tensorboard-tutorial/" class="">
+      <span class="book-menu-link-title">5.2 Tensorboard可视化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/pytorch-model-save-load/" class="">
+      <span class="book-menu-link-title">5.3 模型的保存与复用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/transfer-learning-tutorial/" class="">
+      <span class="book-menu-link-title">5.4 模型的迁移学习</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/pretrained-model-reuse/" class="">
+      <span class="book-menu-link-title">5.5 开源模型复用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/multi-gpu-training/" class="">
+      <span class="book-menu-link-title">5.6 多GPU训练</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/training-data-preprocessing-cache/" class="">
+      <span class="book-menu-link-title">5.7 数据预处理与缓存</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="toggle"  />
+    <label for="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="flex">
+      <a href="/dl/chapter06/" class="">
+        <span class="book-menu-link-title">第 6 章 模型优化方法</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/learning-rate-scheduler/" class="">
+      <span class="book-menu-link-title">6.1 学习率调度器</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/gradient-clipping/" class="">
+      <span class="book-menu-link-title">6.2 梯度裁剪</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/batch-norm/" class="">
+      <span class="book-menu-link-title">6.3 批归一化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/layer-norm/" class="">
+      <span class="book-menu-link-title">6.4 层归一化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/group-norm/" class="">
+      <span class="book-menu-link-title">6.5 组归一化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/momentum/" class="">
+      <span class="book-menu-link-title">6.6 动量法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/ada-grad/" class="">
+      <span class="book-menu-link-title">6.7 AdaGrad算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/ada-delta/" class="">
+      <span class="book-menu-link-title">6.8 AdaDelta算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/adam/" class="">
+      <span class="book-menu-link-title">6.9 Adam算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/weight-initialization/" class="">
+      <span class="book-menu-link-title">6.10 初始化方法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-517b751d7c44a7ac77d25d295ed44271" class="toggle"  />
+    <label for="section-517b751d7c44a7ac77d25d295ed44271" class="flex">
+      <a href="/dl/chapter07/" class="">
+        <span class="book-menu-link-title">第 7 章 循环神经网络</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/rnn-basics/" class="">
+      <span class="book-menu-link-title">7.1 RNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/time-series-modeling/" class="">
+      <span class="book-menu-link-title">7.2 时序数据</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/lstm/" class="">
+      <span class="book-menu-link-title">7.3 LSTM网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/gru/" class="">
+      <span class="book-menu-link-title">7.4 GRU网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/bi-rnn/" class="">
+      <span class="book-menu-link-title">7.5 BiRNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/char-rnn/" class="">
+      <span class="book-menu-link-title">7.6 CharRNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-b9b861f64ba32bc68dfb977497de37d9" class="toggle"  />
+    <label for="section-b9b861f64ba32bc68dfb977497de37d9" class="flex">
+      <a href="/dl/chapter08/" class="">
+        <span class="book-menu-link-title">第 8 章 时序与模型融合</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/textcnn/" class="">
+      <span class="book-menu-link-title">8.1 TextCNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/textrnn/" class="">
+      <span class="book-menu-link-title">8.2 TextRNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/cnn-rnn/" class="">
+      <span class="book-menu-link-title">8.3 CNN-RNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/convlstm/" class="">
+      <span class="book-menu-link-title">8.4 ConvLSTM网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/3dcnn/" class="">
+      <span class="book-menu-link-title">8.5 3DCNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/stresnet/" class="">
+      <span class="book-menu-link-title">8.6 STResNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-e54a1e28b1438b8266637bcb8dac1a44" class="toggle"  />
+    <label for="section-e54a1e28b1438b8266637bcb8dac1a44" class="flex">
+      <a href="/dl/chapter09/" class="">
+        <span class="book-menu-link-title">第 9 章 自然语言处理</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/nlp-basics/" class="">
+      <span class="book-menu-link-title">9.1 自然语言处理介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/word2vec-principle/" class="">
+      <span class="book-menu-link-title">9.2 Word2Vec词向量</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/word2vec-training-and-usage/" class="">
+      <span class="book-menu-link-title">9.3 Word2Vec训练与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/glove/" class="">
+      <span class="book-menu-link-title">9.4 GloVe词向量</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/word-vector-finetuning/" class="">
+      <span class="book-menu-link-title">9.5 词向量的微调使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/fasttext/" class="">
+      <span class="book-menu-link-title">9.6 fastText网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/seq2seq-tutorial/" class="">
+      <span class="book-menu-link-title">9.7 Seq2Seq网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/seq-model-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">9.8 序列模型评价指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/nmt-seq2seq/" class="">
+      <span class="book-menu-link-title">9.9 NMT网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/attention-mechanism/" class="">
+      <span class="book-menu-link-title">9.10 注意力机制</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/nmt-with-attention/" class="">
+      <span class="book-menu-link-title">9.11 含注意力的NMT网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/rnn-with-attention/" class="">
+      <span class="book-menu-link-title">9.12 含注意力的RNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f6636b2f9dc1df93b9fa64dd201716d9" class="toggle"  />
+    <label for="section-f6636b2f9dc1df93b9fa64dd201716d9" class="flex">
+      <a href="/dl/chapter10/" class="">
+        <span class="book-menu-link-title">第 10 章 现代神经网络</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/elmo/" class="">
+      <span class="book-menu-link-title">10.1 ELMo网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-principle/" class="">
+      <span class="book-menu-link-title">10.2 Transformer网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-architecture/" class="">
+      <span class="book-menu-link-title">10.3 Transformer结构</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-implementation/" class="">
+      <span class="book-menu-link-title">10.4 Transformer实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-couplet-model/" class="">
+      <span class="book-menu-link-title">10.5 Transformer对联模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-principle/" class="">
+      <span class="book-menu-link-title">10.6 BERT网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-from-scratch/" class="">
+      <span class="book-menu-link-title">10.7 从零实现BERT</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-text-classification/" class="">
+      <span class="book-menu-link-title">10.8 BERT文本分类模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-sentence-pair-matching/" class="">
+      <span class="book-menu-link-title">10.9 BERT问题选择模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-question-answering/" class="">
+      <span class="book-menu-link-title">10.10 BERT问题回答模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-ner/" class="">
+      <span class="book-menu-link-title">10.11 BERT命名体识别模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-pretraining/" class="">
+      <span class="book-menu-link-title">10.12 BERT从零训练</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-1/" class="">
+      <span class="book-menu-link-title">10.13 GPT-1模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-2-and-gpt-3/" class="">
+      <span class="book-menu-link-title">10.14 GPT-2与GPT-3模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-2-chinese-pretraining/" class="">
+      <span class="book-menu-link-title">10.15 基于GPT-2的中文预训练模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/instructgpt-and-chatgpt/" class="">
+      <span class="book-menu-link-title">10.16 InstructGPT与ChatGPT</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/chatgpt-prompt-engineering/" class="">
+      <span class="book-menu-link-title">10.17 ChatGPT与提示词工程</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/baichuan-usage/" class="">
+      <span class="book-menu-link-title">10.18 百川大模型使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/baichuan-implementation/" class="">
+      <span class="book-menu-link-title">10.19 百川大模型实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-4-and-gpts/" class="">
+      <span class="book-menu-link-title">10.20 GPT-4与GPTs使用</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/" class="">
+      <span class="book-menu-link-title">机器学习</span>
+</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/mindmap/" class="">
+      <span class="book-menu-link-title">目录思维导图</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-48f56957e94e3cf66f3022103a7dd0ff" class="toggle"  />
+    <label for="section-48f56957e94e3cf66f3022103a7dd0ff" class="flex">
+      <a href="/ml/chapter01/" class="">
+        <span class="book-menu-link-title">第 1 章 环境配置</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/conda-install-tutorial/" class="">
+      <span class="book-menu-link-title">1.1 安装使用Conda</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/ml-conda-env-setup/" class="">
+      <span class="book-menu-link-title">1.2 开发环境安装配置</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-56a896338a1c41249d22a3efa0e0063c" class="toggle"  />
+    <label for="section-56a896338a1c41249d22a3efa0e0063c" class="flex">
+      <a href="/ml/chapter02/" class="">
+        <span class="book-menu-link-title">第 2 章 线性回归</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/linear-regression-basics/" class="">
+      <span class="book-menu-link-title">2.1 模型的建立与求解</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/multivariate-linear-regression/" class="">
+      <span class="book-menu-link-title">2.2 多变量线性回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/polynomial-regression/" class="">
+      <span class="book-menu-link-title">2.3 多项式回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/regression-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">2.4 回归模型评估</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/gradient-descent-derivation/" class="">
+      <span class="book-menu-link-title">2.5 梯度下降</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/normal-distribution/" class="">
+      <span class="book-menu-link-title">2.6 正态分布</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/linear-regression-loss-derivation/" class="">
+      <span class="book-menu-link-title">2.7 目标函数推导</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ccd0dc9386ea80613d4cedf91b30058d" class="toggle"  />
+    <label for="section-ccd0dc9386ea80613d4cedf91b30058d" class="flex">
+      <a href="/ml/chapter03/" class="">
+        <span class="book-menu-link-title">第 3 章 逻辑回归</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/logistic-regression-basics/" class="">
+      <span class="book-menu-link-title">3.1 模型的建立与求解</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/logistic-regression-multiclass/" class="">
+      <span class="book-menu-link-title">3.2 多分类任务</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/classification-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">3.3 常见的分类评估指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/logistic-regression-loss-derivation/" class="">
+      <span class="book-menu-link-title">3.4 目标函数推导</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="toggle"  />
+    <label for="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="flex">
+      <a href="/ml/chapter04/" class="">
+        <span class="book-menu-link-title">第 4 章 模型的改善与泛化</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/generalization-basics/" class="">
+      <span class="book-menu-link-title">4.1 基本概念</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/feature-scaling/" class="">
+      <span class="book-menu-link-title">4.2 特征标准化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/overfitting-solutions/" class="">
+      <span class="book-menu-link-title">4.3 过拟合</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/l1-l2-regularization/" class="">
+      <span class="book-menu-link-title">4.4 正则化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/bias-and-variance/" class="">
+      <span class="book-menu-link-title">4.5 偏差、方差与交叉验证</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/handwritten-digit-recognition-case/" class="">
+      <span class="book-menu-link-title">4.6 实例分析手写体识别</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-40f463d9d502d24b86ea6120b7030123" class="toggle"  />
+    <label for="section-40f463d9d502d24b86ea6120b7030123" class="flex">
+      <a href="/ml/chapter05/" class="">
+        <span class="book-menu-link-title">第 5 章 K近邻</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/knn-principle/" class="">
+      <span class="book-menu-link-title">5.1 K近邻思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/knn-algorithm-details/" class="">
+      <span class="book-menu-link-title">5.2 K近邻原理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/sklearn-knn-example/" class="">
+      <span class="book-menu-link-title">5.3 sklearn接口与示例代码</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/kd-tree-knn/" class="">
+      <span class="book-menu-link-title">5.4 kd树构建与搜索</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/knn-from-scratch/" class="">
+      <span class="book-menu-link-title">5.5 从零实现K近邻</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-5a460dc18f1e79253296cf2cd0498446" class="toggle"  />
+    <label for="section-5a460dc18f1e79253296cf2cd0498446" class="flex">
+      <a href="/ml/chapter06/" class="">
+        <span class="book-menu-link-title">第 6 章 文本特征与模型复用</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/bag-of-words/" class="">
+      <span class="book-menu-link-title">6.1 词袋模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/knn-spam-classification/" class="">
+      <span class="book-menu-link-title">6 .2 基于K近邻算法的垃圾邮件分类</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/tf-idf/" class="">
+      <span class="book-menu-link-title">6.3 考虑权重的词袋模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/wordcloud-generation/" class="">
+      <span class="book-menu-link-title">6.4 词云图</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-96f45a8b8c8b75adc70c78026d93dbf6" class="toggle"  />
+    <label for="section-96f45a8b8c8b75adc70c78026d93dbf6" class="flex">
+      <a href="/ml/chapter07/" class="">
+        <span class="book-menu-link-title">第 7 章 朴素贝叶斯</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/naive-bayes-basics/" class="">
+      <span class="book-menu-link-title">7.1 朴素贝叶斯算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/bayes-estimation/" class="">
+      <span class="book-menu-link-title">7.2 贝叶斯估计</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/naive-bayes-implementation/" class="">
+      <span class="book-menu-link-title">7.3 朴素贝叶斯实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/multinomial-naive-bayes/" class="">
+      <span class="book-menu-link-title">7.4 多项式朴素贝叶斯原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/gaussian-naive-bayes/" class="">
+      <span class="book-menu-link-title">7.5 高斯朴素贝叶斯原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-22476e49d5058c3e5e7e7366b7ab676f" class="toggle"  />
+    <label for="section-22476e49d5058c3e5e7e7366b7ab676f" class="flex">
+      <a href="/ml/chapter08/" class="">
+        <span class="book-menu-link-title">第 8 章 决策树</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-principle/" class="">
+      <span class="book-menu-link-title">8.1 决策树的基本思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-sklearn/" class="">
+      <span class="book-menu-link-title">8.2 决策树建模与可视化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/id3-vs-c45/" class="">
+      <span class="book-menu-link-title">8.3 决策树生成之ID3与C4.5</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-pruning/" class="">
+      <span class="book-menu-link-title">8.4 决策树剪枝过程</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-from-scratch/" class="">
+      <span class="book-menu-link-title">8.5 从零实现ID3与C4.5算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-continuous-features/" class="">
+      <span class="book-menu-link-title">8.6 连续型特征变量下决策树实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/cart-algorithm/" class="">
+      <span class="book-menu-link-title">8.7 CART生成与剪枝算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/cart-from-scratch/" class="">
+      <span class="book-menu-link-title">8.8 从零实现CART算法及剪枝示例</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-2feb6a51cabb61dba860f45c1881386b" class="toggle"  />
+    <label for="section-2feb6a51cabb61dba860f45c1881386b" class="flex">
+      <a href="/ml/chapter09/" class="">
+        <span class="book-menu-link-title">第 9 章 集成学习与提升算法</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/ensemble-learning-basics/" class="">
+      <span class="book-menu-link-title">9.1 集成学习算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/random-forest-principle/" class="">
+      <span class="book-menu-link-title">9.2 随机森林</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/random-forest-titanic/" class="">
+      <span class="book-menu-link-title">9.3 泰坦尼克号生还预测</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/adaboost/" class="">
+      <span class="book-menu-link-title">9.4 AdaBoost原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/multi-adaboost/" class="">
+      <span class="book-menu-link-title">9.5 MultiAdaBoost原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/gradient-boost/" class="">
+      <span class="book-menu-link-title">9.6 Gradient Boost 原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-938ae119c3849b03ccb6f91cef4243dd" class="toggle"  />
+    <label for="section-938ae119c3849b03ccb6f91cef4243dd" class="flex">
+      <a href="/ml/chapter10/" class="">
+        <span class="book-menu-link-title">第 10 章 支持向量机</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-principle/" class="">
+      <span class="book-menu-link-title">10.1 SVM思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-nonlinear-kernel/" class="">
+      <span class="book-menu-link-title">10.2 SVM线性不可分</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-max-margin/" class="">
+      <span class="book-menu-link-title">10.3 SVM原理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-soft-margin/" class="">
+      <span class="book-menu-link-title">10.4 SVM中的软间隔</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/lagrange-multipliers/" class="">
+      <span class="book-menu-link-title">10.5 拉格朗日乘数法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/kkt-conditions/" class="">
+      <span class="book-menu-link-title">10.6 对偶性与KKT条件</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-optimization/" class="">
+      <span class="book-menu-link-title">10.7 SVM优化问题</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-kernel-functions/" class="">
+      <span class="book-menu-link-title">10.8 SVM核函数原理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/smo-algorithm/" class="">
+      <span class="book-menu-link-title">10.9 SMO算法求解SVM</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-from-scratch/" class="">
+      <span class="book-menu-link-title">10.10 从零实现SVM分类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-9f4d9786d4ab755fde42c64d09b0d026" class="toggle"  />
+    <label for="section-9f4d9786d4ab755fde42c64d09b0d026" class="flex">
+      <a href="/ml/chapter11/" class="">
+        <span class="book-menu-link-title">第 11 章 聚类分析</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/clustering-basics/" class="">
+      <span class="book-menu-link-title">11.1 聚类算法的思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-principle/" class="">
+      <span class="book-menu-link-title">11.2 Kmeans聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-iteration/" class="">
+      <span class="book-menu-link-title">11.3 Kmeans算法求解</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-from-scratch/" class="">
+      <span class="book-menu-link-title">11.4 从零实现Kmeans聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-plus-plus/" class="">
+      <span class="book-menu-link-title">11.5 Kmeans&#43;&#43;聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/clustering-external-metrics/" class="">
+      <span class="book-menu-link-title">11.6 聚类外部评价指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/weighted-kmeans/" class="">
+      <span class="book-menu-link-title">11.7 加权Kmeans聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/clustering-internal-metrics/" class="">
+      <span class="book-menu-link-title">11.8 聚类内部评价指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-k-selection/" class="">
+      <span class="book-menu-link-title">11.9 聚类K值选取与分析</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/dbscan/" class="">
+      <span class="book-menu-link-title">11.10 基于密度的聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/hierarchical-clustering/" class="">
+      <span class="book-menu-link-title">11.11 基于层次的聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-d5e78c45312818bb3abd5c19c858f7e5" class="toggle"  />
+    <label for="section-d5e78c45312818bb3abd5c19c858f7e5" class="flex">
+      <a href="/ml/chapter12/" class="">
+        <span class="book-menu-link-title">第 12 章 降维算法</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/pca-principle/" class="">
+      <span class="book-menu-link-title">12.1 主成分分析</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/kpca/" class="">
+      <span class="book-menu-link-title">12.2 基于核函数的主成分分析</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-a82b41bb7eb95af72bc11e8a3d668acd" class="toggle"  />
+    <label for="section-a82b41bb7eb95af72bc11e8a3d668acd" class="flex">
+      <a href="/ml/chapter13/" class="">
+        <span class="book-menu-link-title">第 13 章 自训练与标签传播</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/self-training/" class="">
+      <span class="book-menu-link-title">13.1 Self-Training 自训练算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/label-propagation/" class="">
+      <span class="book-menu-link-title">13.2 Label Propagation算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/label-spreading/" class="">
+      <span class="book-menu-link-title">13.3 Label Spreading 算法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</nav>
+
+
+
+
+  <script>(function(){var e=document.querySelector("aside .book-menu-content");addEventListener("beforeunload",function(){localStorage.setItem("menu.scrollTop",e.scrollTop)}),e.scrollTop=localStorage.getItem("menu.scrollTop")})()</script>
+
+
+
+  </div>
+</aside>
+ 
+
+    <div class="book-page">
+      <header class="book-header hidden">
+        
+  <div class="flex align-center justify-between">
+  <label for="menu-control">
+    <img src="/icons/menu.svg" class="book-icon" alt="Menu" />
+  </label>
+
+  <h3>第2讲 BERT 模型 PyTorch 从零实现教程：工程结构、BertConfig 与 BertModel 源码详解</h3>
+
+  <label for="toc-control">
+    
+    <img src="/icons/toc.svg" class="book-icon" alt="Table of Contents" />
+    
+  </label>
+</div>
+
+
+  
+  <aside class="hidden">
+    
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#21-工程结构">2.1 工程结构</a></li>
+    <li><a href="#22-参数管理">2.2 参数管理</a>
+      <ul>
+        <li><a href="#221-初始化类成员">2.2.1 初始化类成员</a></li>
+        <li><a href="#222-导入本地参数">2.2.2 导入本地参数</a></li>
+        <li><a href="#223-使用示例">2.2.3 使用示例</a></li>
+      </ul>
+    </li>
+    <li><a href="#23-input-embedding-实现">2.3 Input Embedding 实现</a>
+      <ul>
+        <li><a href="#231-token-embedding">2.3.1 Token Embedding</a></li>
+        <li><a href="#232-positional-embedding">2.3.2 Positional Embedding</a></li>
+        <li><a href="#233-segment-embedding">2.3.3 Segment Embedding</a></li>
+        <li><a href="#234-bert-embeddings">2.3.4 Bert Embeddings</a></li>
+        <li><a href="#235-使用示例">2.3.5 使用示例</a></li>
+      </ul>
+    </li>
+    <li><a href="#24-bertmodel-实现">2.4 BertModel 实现</a>
+      <ul>
+        <li><a href="#241-bertattention-实现">2.4.1 BertAttention 实现</a></li>
+        <li><a href="#242-bertlayer-实现">2.4.2 BertLayer 实现</a></li>
+        <li><a href="#243-bertencoder-实现">2.4.3 BertEncoder 实现</a></li>
+        <li><a href="#244-bertmodel-实现">2.4.4 BertModel 实现</a></li>
+        <li><a href="#245-使用示例">2.4.5 使用示例</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+
+
+
+
+  </aside>
+  
+ 
+      </header>
+
+      
+      
+  <article class="markdown book-article"><nav class="book-breadcrumbs text-small book-breadcrumbs--page" aria-label="面包屑导航">
+    <ol class="book-breadcrumbs__list"><li class="book-breadcrumbs__item"><a class="book-breadcrumbs__link" href="https://mlwithme.github.io/">首页</a></li><li class="book-breadcrumbs__item"><a class="book-breadcrumbs__link" href="https://mlwithme.github.io/tutorials/">专题文章</a></li><li class="book-breadcrumbs__item"><a class="book-breadcrumbs__link" href="https://mlwithme.github.io/tutorials/bert/">从零玩转 Bert 详解6大下游任务</a></li><li class="book-breadcrumbs__item"><span class="book-breadcrumbs__current" aria-current="page">第2节 BERT 从零实现过程</span></li></ol>
+  </nav><div class="book-article-lastmod text-small">
+        <span class="book-article-lastmod-label">更新于</span>
+        <span class="book-article-lastmod-value">2026年7月25日</span>
+      </div><p>经过上一篇文章<a href="/tutorials/bert/bert-pretrain">「第1讲 BERT 原理与预训练教程：Masked LM 与 Next Sentence Prediction 图解」</a> 第1.3.1节内容的介绍，相信大家对于BERT模型的整体结构已经有了一定的了解。根据图1-8可知，本质上来说BERT就是由多个不同的Transformer结构堆叠而来，同时在Embedding部分多加入了一个Segment Embedding。在接下来的代码实现过程中，将会以图1-5中黑色加粗字体所示的部分为一个类来分别进行实现。不过在正式介绍BERT模型的代码实现前，先来介绍一下整个代码的工程结构，以及学习一下BERT模型中的参数管理。</p>
+<h2 id="21-工程结构">2.1 工程结构<a class="anchor" href="#21-%e5%b7%a5%e7%a8%8b%e7%bb%93%e6%9e%84">#</a></h2>
+<p>由于整个项目涉及到的代码模块较多，所以有必要在这里先进行说明，这样也便于大家在阅读后续文章时能够快速地定位到相应的代码部分。同时，也强烈建议大家在阅读的同时能够结合着代码一起阅读，并动手实践。</p>
+<p>工程代码仓库：https://github.com/moon-hotel/BertWithPretrained 获取！</p>
+<p>如若发现代码可能存在问题，请上github拉取最新版本代码或提交issue！</p>
+<div align=center><img width="350" src="/images/tutorials/21099810030.png" alt="图 2-1. Bert 代码工程结构图"/> </div><center>图 2-1. 代码工程结构图</center>
+<p>如图2-1所示是整个工程的目录结构，包含了两个预训练模型、缓存目录、数据集目录、模型目录、下游任务目录、测试案例目录和工具模块目录。</p>
+<p>1) 预训练模型目录</p>
+<p>在图2-1中，最上面的两个文件夹分别是一个常用的中文以及英文的开源预训练模型。每个文件夹里面都包含有3个文件，分别是模型参数、模型超参数配置和对应的词表文件，以bert_base_chinese为例，如图2-2所示。</p>
+<div align=center><img width="300" src="/images/tutorials/21099810031.png" alt="图 2-2.  Bert 预训练模型目录结构"/> </div><center>图 2-2. 预训练模型目录结构</center>
+<p>在图2-2中，config.json是BERT模型的默认配置内容；pytorch_model.bin是huggingface[8]开源的BERT中文预训练模型；vocab.txt是词表。一般来说大多数情况下我们都不需要去修改这些配置，唯一可能改动的就是config.json中的部分参数。</p>
+<p>2) 缓存目录</p>
+<p>在图2-1中，cache目录是用来存放训练过程中所保存下来的模型。</p>
+<p>3)	数据集目录</p>
+<p>在图2-1中，data目录是用来存放各个下游任务的相关数据集，目前来说一共有6个数据集，如图2-3所示。</p>
+<div align=center><img width="350" src="/images/tutorials/21099810032.png" alt="图 2-3. 数据集目录结构"/> </div><center>图 2-3. 数据集目录结构</center>
+<p>如图2-3所示，MultpleChoice、PairSentenceClassification、SingleSentenceClassification和SQuAD这4个目录分别对应的是4个下游任务的数据集；SongCi和WikiText是后面用于NSP和MLM两个任务的数据集，后面实际使用时会仔细进行介绍。</p>
+<p>4)	模型目录</p>
+<p>在图2-1中，model目录中存放的是整个BERT模型的实现代码，以及下游任务的相关实现，如图2-4所示。</p>
+<div align=center><img width="320" src="/images/tutorials/21099810033.png" alt="图 2-4. 模型目录结构"/> </div><center>图 2-4. 模型目录结构</center>
+<p>如图2-4所示，BasicBert目录中是BERT模型各个部分的实现，其中 <code>MyTransformer.py</code> 是整个Transformer结构的实现，这里我们需要引用到其中的 <code>MultiheadAttention</code> 模块；<code>BertEmbedding.py</code> 是BERT模型中InputEmbedding模块的实现；<code>BertConfig.py</code> 是BERT模型的配置导入实现；<code>Bert.py</code> 是整个BERT模型的实现。</p>
+<p>在图2-4中，DownstreamTasks目录中是BERT模型各个下游任务的实现，包括针对单文本和多文本分类的 <code>BertForSentenceClassification.py</code> 模块；针对多问题选择的 <code>BertForMultipleChoice.py</code> 模块；针对SQuAD问题回答的 <code>BretForQuestionAnswering.py</code> 模块；以及针对NSP和MLM预训练过程的 <code>BertForNSPAndMLM.py</code> 模块。</p>
+<p>5)	下游任务目录</p>
+<p>在图2-1中，Tasks目录中存放的是model中各个任务的模型训练代码，如图2-5所示。</p>
+<div align=center><img width="380" src="/images/tutorials/21099810034.png" alt="图 2-5. 下游任务目录结构"/> </div><center>图 2-5. 下游任务目录结构</center>
+<p>在图2-5中， Tasks目录是BERT模型各个任务训练部分的实现，包括针对单文本分类的 <code>TaskForSingleSentenceClassification.py</code> 模块；针对多文本分类的 <code>TaskForPairSentenceClassification.py</code> 模块；针对多问题选择的 <code>TaskForMultipleChoice.py</code> 模块；针对SQuAD问题回答的 <code>TaskForSQuADQuestionAnswering.py</code> 模块；以及针对NSP和MLM预训练过程的 <code>TaskForPretraining.py</code> 训练模块。</p>
+<p>6)	测试案例目录</p>
+<p>在图2-1中，test目录中存放的是各个模块测试案例，用于在现实过程中的验证，后续内容中的相关使用示例都能在其中找到。</p>
+<p>7)	工具模块目录</p>
+<p>在图2-1中，utils目录中存放的是一些辅助工具模块，如图2-6所示。</p>
+<div align=center><img width="380" src="/images/tutorials/21099810035.png" alt="图 2-6. 工具模块目录结构"/> </div><center>图 2-6. 工具模块目录结构</center>
+<p>如图2-6所示，<code>log_helper.py</code> 是日志输出内容的相关定义；<code>data_helpers.py</code> 是所有下游任务的数据集构造实现；<code>create_pretraining_data.py</code> 是NSP和MLM任务的数据集构造实现。</p>
+<h2 id="22-参数管理">2.2 参数管理<a class="anchor" href="#22-%e5%8f%82%e6%95%b0%e7%ae%a1%e7%90%86">#</a></h2>
+<p>在模型的实现过程中，我们通常都会定义一个Config类并用类的成员变量来保存模型的各个参数值。当然，如果你需要从本地文件中读取参数（例如bert的config.json文件），那么只需要将读取后的结果赋值到Config类的各个成员变量即可。通过类对象来管理参数最大的一个好处就是容易扩展新的参数。因为使用类对象来管理参数时传递给模型的都是一个实例化对象，这样在新增加参数时就不需要在相关接口处再定义新的形参。此时只需要在Config类中增加一个成员变量，然后在模型的相关地方以访问类成员的方式来使用参数。</p>
+<h3 id="221-初始化类成员">2.2.1 初始化类成员<a class="anchor" href="#221-%e5%88%9d%e5%a7%8b%e5%8c%96%e7%b1%bb%e6%88%90%e5%91%98">#</a></h3>
+<p>如下是定义的一个BertConfig类，里面的成员变量就是模型中的各个超参数：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">BertConfig</span>(<span style="color:#007020">object</span>):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">__init__</span>(<span style="color:#007020">self</span>, vocab_size<span style="color:#666">=</span><span style="color:#40a070">21128</span>,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>                  hidden_size<span style="color:#666">=</span><span style="color:#40a070">768</span>,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>                  num_hidden_layers<span style="color:#666">=</span><span style="color:#40a070">12</span>,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>                  num_attention_heads<span style="color:#666">=</span><span style="color:#40a070">12</span>,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>                  intermediate_size<span style="color:#666">=</span><span style="color:#40a070">3072</span>,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>                  pad_token_id<span style="color:#666">=</span><span style="color:#40a070">0</span>,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>                  hidden_act<span style="color:#666">=</span><span style="color:#4070a0">&#34;gelu&#34;</span>,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>                  hidden_dropout_prob<span style="color:#666">=</span><span style="color:#40a070">0.1</span>,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>                  attention_probs_dropout_prob<span style="color:#666">=</span><span style="color:#40a070">0.1</span>,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>                  max_position_embeddings<span style="color:#666">=</span><span style="color:#40a070">512</span>,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>                  type_vocab_size<span style="color:#666">=</span><span style="color:#40a070">2</span>,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>                  initializer_range<span style="color:#666">=</span><span style="color:#40a070">0.02</span>):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>                  
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>vocab_size <span style="color:#666">=</span> vocab_size
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>hidden_size <span style="color:#666">=</span> hidden_size
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>num_hidden_layers <span style="color:#666">=</span> num_hidden_layers
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>num_attention_heads <span style="color:#666">=</span> num_attention_heads
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>hidden_act <span style="color:#666">=</span> hidden_act
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>intermediate_size <span style="color:#666">=</span> intermediate_size
+</span></span><span style="display:flex;"><span><span style="color:#40a070">21</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>pad_token_id <span style="color:#666">=</span> pad_token_id
+</span></span><span style="display:flex;"><span><span style="color:#40a070">22</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>hidden_dropout_prob <span style="color:#666">=</span> hidden_dropout_prob
+</span></span><span style="display:flex;"><span><span style="color:#40a070">23</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>attention_probs_dropout_prob <span style="color:#666">=</span> attention_probs_dropout_prob
+</span></span><span style="display:flex;"><span><span style="color:#40a070">24</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>type_vocab_size <span style="color:#666">=</span> type_vocab_size
+</span></span><span style="display:flex;"><span><span style="color:#40a070">25</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>max_position_embeddings <span style="color:#666">=</span> max_position_embeddings
+</span></span><span style="display:flex;"><span><span style="color:#40a070">27</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>initializer_range <span style="color:#666">=</span> initializer_range</span></span></code></pre></div><p>在上述代码中，第16~27行便是BERT模型默认的所有超参数变量，同时在类的初始化方法中也给了相应的默认值。</p>
+<h3 id="222-导入本地参数">2.2.2 导入本地参数<a class="anchor" href="#222-%e5%af%bc%e5%85%a5%e6%9c%ac%e5%9c%b0%e5%8f%82%e6%95%b0">#</a></h3>
+<p>进一步，我们还需要实现一个方法来从本地文件中导入config.json这个默认配置文件，并重新赋值给BertConfig类的各个成员变量中，实现代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span>     <span style="color:#555;font-weight:bold">@classmethod</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">from_dict</span>(<span style="color:#007020">cls</span>, json_object):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>         <span style="color:#4070a0">&#34;&#34;&#34;Constructs a BertConfig from a Python dictionary of parameters.&#34;&#34;
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0"> 4         config = BertConfig(vocab_size=None)
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0"> 5         for (key, value) in six.iteritems(json_object):
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0"> 6             config.__dict__[key] = value
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0"> 7         return config
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0"> 8 
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0"> 9     @classmethod
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">10     def from_json_file(cls, json_file):
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">11         &#34;&#34;&#34;</span>Constructs a BertConfigfrom a json file of parameters<span style="color:#666">.</span><span style="color:#4070a0">&#34;&#34;&#34;
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">12         &#34;&#34;&#34;</span>从json配置文件读取配置信息<span style="color:#4070a0">&#34;&#34;&#34;
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">13         with open(json_file, &#39;r&#39;) as reader:
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">14             text = reader.read()
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">15         logging.info(f&#34;成功导入BERT配置文件 </span><span style="color:#70a0d0">{json_file}</span><span style="color:#4070a0">&#34;)
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">16         return cls.from_dict(json.loads(text))</span></span></span></code></pre></div><p>在上述代码中，第10~15行是载入本地配置文件得到一个json对象；第16行是通过from_dict方法来将json对象的每个参数值赋值到BertConfig类对象中。这里值得一提的是，在Python中@classmethod修饰器的作用是在不实例化类对象之前也能够使用对应的类方法，即方法中的第1个形参cls便是为实例化的类对象。</p>
+<h3 id="223-使用示例">2.2.3 使用示例<a class="anchor" href="#223-%e4%bd%bf%e7%94%a8%e7%a4%ba%e4%be%8b">#</a></h3>
+<p>在实现完上述代码后，便可以通过如下方式来进行使用：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">if</span> <span style="color:#bb60d5">__name__</span> <span style="color:#666">==</span> <span style="color:#4070a0">&#39;__main__&#39;</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>     json_file <span style="color:#666">=</span> <span style="color:#4070a0">&#39;../bert_base_chinese/config.json&#39;</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>     config <span style="color:#666">=</span> BertConfig<span style="color:#666">.</span>from_json_file(json_file)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span>     <span style="color:#007020">print</span>(config<span style="color:#666">.</span>hidden_size) 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">5</span>     <span style="color:#007020">print</span>(config<span style="color:#666">.</span>vocab_size)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">6</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">7</span> <span style="color:#60a0b0;font-style:italic"># 768</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">8</span> <span style="color:#60a0b0;font-style:italic"># 21128</span></span></span></code></pre></div><p>在上述代码中，第2行是配置文件所在的路径；第3行是根据config.json中的参数来实例化BertConfig类对象并返回该对象；第4~5行是以访问类成员的方式来使用模型的相关参数。</p>
+<h2 id="23-input-embedding-实现">2.3 Input Embedding 实现<a class="anchor" href="#23-input-embedding-%e5%ae%9e%e7%8e%b0">#</a></h2>
+<p>首先，我们先来看Input Embedding的实现过程。为了复用之前在介绍Transformer实现时所用到的这部分代码，我们直接在这基础上再加一个Segment Embedding即可。</p>
+<h3 id="231-token-embedding">2.3.1 Token Embedding<a class="anchor" href="#231-token-embedding">#</a></h3>
+<p>Token Embedding，也叫做词嵌入，算是NLP中将文本表示为稠密向量的一个基本操作，其原理就不再赘述，具体实现如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">TokenEmbedding</span>(nn<span style="color:#666">.</span>Module):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">__init__</span>(<span style="color:#007020">self</span>, vocab_size, hidden_size, pad_token_id<span style="color:#666">=</span><span style="color:#40a070">0</span>, initializer_range<span style="color:#666">=</span><span style="color:#40a070">0.02</span>):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>         <span style="color:#007020">super</span>(TokenEmbedding, <span style="color:#007020">self</span>)<span style="color:#666">.</span><span style="color:#06287e">__init__</span>()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>embedding <span style="color:#666">=</span> nn<span style="color:#666">.</span>Embedding(vocab_size, hidden_size, padding_idx<span style="color:#666">=</span>pad_token_id)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>_reset_parameters(initializer_range)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">forward</span>(<span style="color:#007020">self</span>, input_ids):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>         <span style="color:#4070a0">&#34;&#34;&#34;
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0"> 9         :param input_ids: shape : [input_ids_len, batch_size]
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">10         :return: shape: [input_ids_len, batch_size, hidden_size]
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">11         &#34;&#34;&#34;</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>         <span style="color:#007020;font-weight:bold">return</span> <span style="color:#007020">self</span><span style="color:#666">.</span>embedding(input_ids)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">_reset_parameters</span>(<span style="color:#007020">self</span>, initializer_range):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>         <span style="color:#007020;font-weight:bold">for</span> p <span style="color:#007020;font-weight:bold">in</span> <span style="color:#007020">self</span><span style="color:#666">.</span>parameters():
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>             <span style="color:#007020;font-weight:bold">if</span> p<span style="color:#666">.</span>dim() <span style="color:#666">&gt;</span> <span style="color:#40a070">1</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>                 normal_(p, mean<span style="color:#666">=</span><span style="color:#40a070">0.0</span>, std<span style="color:#666">=</span>initializer_range)</span></span></code></pre></div><p>在上述代码中，第4行中的padding_idx是用来指定序列中用于padding处理的索引编号，一般来说默认都是0。在指定padding_idx后，如果输入序列中有0，那么对应位置的向量就会全是0。当然，这一步不做也可以，因为在计算自主力权重的时候会通过padding_mask向量来去掉这部分内容，具体可参见文章[6]第3节中的内容。第5行是用给定的方式来初始化参数，当然这几乎不会用到。因为不管是在下游任务中微调，还是继续通过NSL和MLM这两个任务来训练模型参数，我们大多数情况下都会再开源的BERT模型参数上进行，而不是从头再来。第7~12行是Token Embedding的前向传播过程；第14~17行是上面提到的参数初始化方法。</p>
+<h3 id="232-positional-embedding">2.3.2 Positional Embedding<a class="anchor" href="#232-positional-embedding">#</a></h3>
+<p>对于Positional Embedding来说，其作用便是用来解决自注意力机制不能捕捉到文本序列内部各个位置之间顺序的问题。关于这部分内容原理的介绍，可以参见文章[6]第2节中的内容。不同于Transformer中Positional Embedding的实现方式，在BERT中Positional Embedding并没有采用固定的变换公式来计算每个位置上的值，而是采用了类似普通Embedding的方式来为每个位置生成一个向量，然后随着模型一起训练。因此，这一操作就限制了在使用预训练的中文BERT模型时，最大的序列长度只能是512，因为在训练时只初始化了512个位置向量。具体地，其实现代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">PositionalEmbedding</span>(nn<span style="color:#666">.</span>Module):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     <span style="color:#4070a0">&#34;&#34;&#34;
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0"> 3     # Since the position embedding table is a learned variable, we create it
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0"> 4     # using a (long) sequence length max_position_embeddings. The actual
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0"> 5     # sequence length might be shorter than this, for faster training of
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0"> 6     # tasks that do not have long sequences.
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0"> 7                                                 
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0"> 8     https://github.com/google-research/bert/blob/master/modeling.py
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0"> 9     &#34;&#34;&#34;</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">__init__</span>(<span style="color:#007020">self</span>, hidden_size, max_position_embeddings<span style="color:#666">=</span><span style="color:#40a070">512</span>, initializer_range<span style="color:#666">=</span><span style="color:#40a070">0.02</span>):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>         <span style="color:#007020">super</span>(PositionalEmbedding, <span style="color:#007020">self</span>)<span style="color:#666">.</span><span style="color:#06287e">__init__</span>()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>         <span style="color:#60a0b0;font-style:italic"># 因为BERT预训练模型的长度为512</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>embedding <span style="color:#666">=</span> nn<span style="color:#666">.</span>Embedding(max_position_embeddings, hidden_size)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>_reset_parameters(initializer_range)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">forward</span>(<span style="color:#007020">self</span>, position_ids):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>         <span style="color:#4070a0">&#34;&#34;&#34;
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">19         :param position_ids: [1,position_ids_len]
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">20         :return: [position_ids_len, 1, hidden_size]
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">21         &#34;&#34;&#34;</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">22</span>         <span style="color:#007020;font-weight:bold">return</span> <span style="color:#007020">self</span><span style="color:#666">.</span>embedding(position_ids)<span style="color:#666">.</span>transpose(<span style="color:#40a070">0</span>, <span style="color:#40a070">1</span>)</span></span></code></pre></div><p>从上述代码可以看出，Positional Embedding本质上也就是一个普通的Embedding层，只是在这一场景下作者赋予了它特俗的含义，即序列中的每一个位置有自己独属的向量表示。同时， 在默认配置中，第14行中的max_position_embeddings值为512，也就是只支持最大512个token的输入。</p>
+<h3 id="233-segment-embedding">2.3.3 Segment Embedding<a class="anchor" href="#233-segment-embedding">#</a></h3>
+<p>Segment Embedding的原理及目的在文章[6]中已经详细介绍过，总结起来就是为了满足下游任务中存在需要两句话同时输入到模型中的场景，即可以看成是对输入的两个序列分别赋予一个位置向量用以区分各自所在的位置。这一点可以和上面的Positional Embedding进行类比。具体地，其实现代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">SegmentEmbedding</span>(nn<span style="color:#666">.</span>Module):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">__init__</span>(<span style="color:#007020">self</span>, type_vocab_size, hidden_size, initializer_range<span style="color:#666">=</span><span style="color:#40a070">0.02</span>):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>         <span style="color:#007020">super</span>(SegmentEmbedding, <span style="color:#007020">self</span>)<span style="color:#666">.</span><span style="color:#06287e">__init__</span>()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>embedding <span style="color:#666">=</span> nn<span style="color:#666">.</span>Embedding(type_vocab_size, hidden_size)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>_reset_parameters(initializer_range)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">forward</span>(<span style="color:#007020">self</span>, token_type_ids):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>         <span style="color:#4070a0">&#34;&#34;&#34;
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0"> 9         :param token_type_ids:  shape: [token_type_ids_len, batch_size]
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">10         :return: shape: [token_type_ids_len, batch_size, hidden_size]
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">11         &#34;&#34;&#34;</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>         <span style="color:#007020;font-weight:bold">return</span> <span style="color:#007020">self</span><span style="color:#666">.</span>embedding(token_type_ids)</span></span></code></pre></div><p>在上述代码中，type_vocab_size的默认值为2，即只用于区分两个序列的不同位置。</p>
+<h3 id="234-bert-embeddings">2.3.4 Bert Embeddings<a class="anchor" href="#234-bert-embeddings">#</a></h3>
+<p>在完成Token、Positional、Segment Embedding这3个部分的代码之后，只需要将每个部分的结果相加即可得到最终的Input Embedding作为模型的输入，如图2-7所示。</p>
+<div align=center><img width="580" src="/images/tutorials/202607121841.jpg" alt="图 2-7. BERT输入图"/> </div><center>图 2-7. BERT输入图</center> 
+<p>具体地，其代码实现为：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">BertEmbeddings</span>(nn<span style="color:#666">.</span>Module):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">__init__</span>(<span style="color:#007020">self</span>, config):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>         <span style="color:#007020">super</span>()<span style="color:#666">.</span><span style="color:#06287e">__init__</span>()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>word_embeddings <span style="color:#666">=</span> TokenEmbedding(config<span style="color:#666">.</span>vocab_size,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>                                               config<span style="color:#666">.</span>hidden_size,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>                                               config<span style="color:#666">.</span>pad_token_id,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>                                               config<span style="color:#666">.</span>initializer_range)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>         <span style="color:#60a0b0;font-style:italic"># return shape [src_len,batch_size,hidden_size]</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>position_embeddings <span style="color:#666">=</span> PositionalEmbedding(config<span style="color:#666">.</span>max_position_embeddings,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>                                              config<span style="color:#666">.</span>hidden_size,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>                                              config<span style="color:#666">.</span>initializer_range)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>         <span style="color:#60a0b0;font-style:italic"># return shape [src_len,1,hidden_size]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>token_type_embeddings<span style="color:#666">=</span>SegmentEmbedding(config<span style="color:#666">.</span>type_vocab_size,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>                                                     config<span style="color:#666">.</span>hidden_size,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>                                                    config<span style="color:#666">.</span>initializer_range)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>         <span style="color:#60a0b0;font-style:italic"># return shape  [src_len,batch_size,hidden_size]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>LayerNorm <span style="color:#666">=</span> nn<span style="color:#666">.</span>LayerNorm(config<span style="color:#666">.</span>hidden_size)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>dropout <span style="color:#666">=</span> nn<span style="color:#666">.</span>Dropout(config<span style="color:#666">.</span>hidden_dropout_prob)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>register_buffer(<span style="color:#4070a0">&#34;position_ids&#34;</span>, torch<span style="color:#666">.</span>arange(config<span style="color:#666">.</span>max_position_embeddings)<span style="color:#666">.</span>expand((<span style="color:#40a070">1</span>, <span style="color:#666">-</span><span style="color:#40a070">1</span>)))
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span>         <span style="color:#60a0b0;font-style:italic"># shape: [1, max_position_embeddings]</span></span></span></code></pre></div><p>在上述代码中，config是传入的一个配置类，里面各个类成员就是BERT中对应的模型参数。第4、9、13行便是用来分别定义图2-1中的3部分Embedding。第19行代码是用来生成一个默认的位置id，即[0,1,&hellip;.,512]，在后续可以通过self.position_ids来进行调用。</p>
+<p>进一步，其前向传播过程代码为：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">forward</span>(<span style="color:#007020">self</span>,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>                 input_ids<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>                 position_ids<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>                 token_type_ids<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>         src_len <span style="color:#666">=</span> input_ids<span style="color:#666">.</span>size(<span style="color:#40a070">0</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>         token_embedding <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>word_embeddings(input_ids)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>         <span style="color:#60a0b0;font-style:italic"># shape:[src_len,batch_size,hidden_size]</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>         <span style="color:#007020;font-weight:bold">if</span> position_ids <span style="color:#007020;font-weight:bold">is</span> <span style="color:#007020;font-weight:bold">None</span>: 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>             position_ids <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>position_ids[:, :src_len]  <span style="color:#60a0b0;font-style:italic"># [1,src_len]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>         positional_embedding <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>position_embeddings(position_ids)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>         <span style="color:#60a0b0;font-style:italic"># [src_len, 1, hidden_size]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>         <span style="color:#007020;font-weight:bold">if</span> token_type_ids <span style="color:#007020;font-weight:bold">is</span> <span style="color:#007020;font-weight:bold">None</span>: 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>             token_type_ids <span style="color:#666">=</span> torch<span style="color:#666">.</span>zeros_like(input_ids,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>                    device<span style="color:#666">=</span><span style="color:#007020">self</span><span style="color:#666">.</span>position_ids<span style="color:#666">.</span>device)  <span style="color:#60a0b0;font-style:italic"># [src_len, batch_size]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>         segment_embedding <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>token_type_embeddings(token_type_ids)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span>         <span style="color:#60a0b0;font-style:italic"># [src_len,batch_size,hidden_size]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">21</span>         embeddings <span style="color:#666">=</span> token_embedding<span style="color:#666">+</span>positional_embedding<span style="color:#666">+</span>segment_embedding
+</span></span><span style="display:flex;"><span><span style="color:#40a070">22</span>         embeddings <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>LayerNorm(embeddings)  
+</span></span><span style="display:flex;"><span><span style="color:#40a070">23</span>         embeddings <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>dropout(embeddings)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">24</span>         <span style="color:#007020;font-weight:bold">return</span> embeddings <span style="color:#60a0b0;font-style:italic"># [src_len,batch_size,hidden_size]</span></span></span></code></pre></div><p>在上述代码中，第7行input_ids表示输入序列的原始token id，即根据词表映射后的索引，其形状为[src_len, batch_size]；第10行position_ids是位置序列，本质就是 [0,1,2,3,&hellip;,src_len-1]，其形状为[1,src_len]，在实际建模时这个参数其实可以不用传值，因为当其为空时会自动从self.position_ids截取一段；第15行token_type_ids用于不同序列之间的分割，例如[0,0,0,0,1,1,1,1]用于区分前后不同的两个句子，形状为[src_len,batch_size]，如果输入模型的只有一个序列，那么这个参数也不用传值。第21~23行代码则是用来将3部分Embeeding的结果相加。</p>
+<h3 id="235-使用示例">2.3.5 使用示例<a class="anchor" href="#235-%e4%bd%bf%e7%94%a8%e7%a4%ba%e4%be%8b">#</a></h3>
+<p>在完成上述Embedding部分的代码实现后，便可以通过如下方式来进行使用：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">from</span> <span style="color:#0e84b5;font-weight:bold">model.BasicBert.BertEmbedding</span> <span style="color:#007020;font-weight:bold">import</span> BertEmbeddings
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span> <span style="color:#007020;font-weight:bold">from</span> <span style="color:#0e84b5;font-weight:bold">model.BasicBert.BertConfig</span> <span style="color:#007020;font-weight:bold">import</span> BertConfig
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span> <span style="color:#007020;font-weight:bold">import</span> <span style="color:#0e84b5;font-weight:bold">torch</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span> <span style="color:#007020;font-weight:bold">if</span> <span style="color:#bb60d5">__name__</span> <span style="color:#666">==</span> <span style="color:#4070a0">&#39;__main__&#39;</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>     json_file <span style="color:#666">=</span> <span style="color:#4070a0">&#39;../bert_base_chinese/config.json&#39;</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>     config <span style="color:#666">=</span> BertConfig<span style="color:#666">.</span>from_json_file(json_file)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>     src <span style="color:#666">=</span> torch<span style="color:#666">.</span>tensor([[<span style="color:#40a070">1</span>,<span style="color:#40a070">3</span>,<span style="color:#40a070">5</span>, <span style="color:#40a070">7</span>, <span style="color:#40a070">9</span>], [<span style="color:#40a070">2</span>, <span style="color:#40a070">4</span>, <span style="color:#40a070">6</span>, <span style="color:#40a070">8</span>, <span style="color:#40a070">10</span>]], dtype<span style="color:#666">=</span>torch<span style="color:#666">.</span>long)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>     src <span style="color:#666">=</span> src<span style="color:#666">.</span>transpose(<span style="color:#40a070">0</span>, <span style="color:#40a070">1</span>)  <span style="color:#60a0b0;font-style:italic"># [src_len, batch_size]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>     token_type_ids <span style="color:#666">=</span> torch<span style="color:#666">.</span>LongTensor([[<span style="color:#40a070">0</span>, <span style="color:#40a070">0</span>, <span style="color:#40a070">0</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">1</span>], [<span style="color:#40a070">0</span>, <span style="color:#40a070">0</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">1</span>]])<span style="color:#666">.</span>transpose(<span style="color:#40a070">0</span>, <span style="color:#40a070">1</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>     bert_embedding <span style="color:#666">=</span> BertEmbeddings(config)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>     bert_embedding_result<span style="color:#666">=</span>bert_embedding(src,token_type_ids<span style="color:#666">=</span>token_type_ids)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>     <span style="color:#007020">print</span>(<span style="color:#4070a0">&#34; --------- 测试BertEmbedding ------------&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>     <span style="color:#007020">print</span>(<span style="color:#4070a0">&#34;bert embedding shape [src_len, batch_size, hidden_size]: &#34;</span>, bert_embedding_result<span style="color:#666">.</span>shape)</span></span></code></pre></div><p>上述代码运行结束后将会输出如下结果：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span>  <span style="color:#666">---------</span> 测试BertEmbedding <span style="color:#666">------------</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span> bert embedding shape [src_len,batch_size,hidden_size]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">5</span>,<span style="color:#40a070">2</span>,<span style="color:#40a070">768</span>])</span></span></code></pre></div><h2 id="24-bertmodel-实现">2.4 BertModel 实现<a class="anchor" href="#24-bertmodel-%e5%ae%9e%e7%8e%b0">#</a></h2>
+<p>在实现完Input Embedding部分的代码后，下面就可以着手来实现构成BERT模型的第2个重要组成部分BertEncoder了。如图2-8所示，整个BertEncoder由多个BertLayer堆叠形成；而BertLayer又是由BertOutput、BertIntermediate和BertAttention这3个部分组成；同时BertAttention是由BertSelfAttention和BertSelfOutput所构成。</p>
+<div align=center><img width="280" src="/images/tutorials/202607121844.png" alt="图 2-8. BertEncoder结构图"/> </div><center>图 2-8. BertEncoder结构图</center>
+<p>接下来，我们就以图2-8中从下到上的顺序来依次对每个部分进行实现。</p>
+<h3 id="241-bertattention-实现">2.4.1 BertAttention 实现<a class="anchor" href="#241-bertattention-%e5%ae%9e%e7%8e%b0">#</a></h3>
+<p>对于BertAttention来说，需要明白的是其核心就是在Transformer中所提出来的self-attention机制，也就是图2-8中的BertSelfAttention模块；其次再是一个残差连接和标准化操作。对于BertSelfAttention的实现，其代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">BertSelfAttention</span>(nn<span style="color:#666">.</span>Module):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">__init__</span>(<span style="color:#007020">self</span>, config):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>         <span style="color:#007020">super</span>(BertSelfAttention, <span style="color:#007020">self</span>)<span style="color:#666">.</span><span style="color:#06287e">__init__</span>()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>         <span style="color:#007020;font-weight:bold">if</span> <span style="color:#4070a0">&#39;use_torch_multi_head&#39;</span> <span style="color:#007020;font-weight:bold">in</span> config<span style="color:#666">.</span><span style="color:#bb60d5">__dict__</span> <span style="color:#007020;font-weight:bold">and</span> config<span style="color:#666">.</span>use_torch_multi_head:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>             MultiHeadAttention <span style="color:#666">=</span> nn<span style="color:#666">.</span>MultiheadAttention
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>         <span style="color:#007020;font-weight:bold">else</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>             MultiHeadAttention <span style="color:#666">=</span> MyMultiheadAttention
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>multi_head_attention <span style="color:#666">=</span> MultiHeadAttention(config<span style="color:#666">.</span>hidden_size,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>                                                config<span style="color:#666">.</span>num_attention_heads,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>                                       config<span style="color:#666">.</span>attention_probs_dropout_prob)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">forward</span>(<span style="color:#007020">self</span>,query,key,value, attn_mask<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>,key_padding_mask<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>         <span style="color:#007020;font-weight:bold">return</span> <span style="color:#007020">self</span><span style="color:#666">.</span>multi_head_attention(query, key, value, 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>                                         attn_mask<span style="color:#666">=</span>attn_mask, 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>                                         key_padding_mask<span style="color:#666">=</span>key_padding_mask)</span></span></code></pre></div><p>在上述代码中，第4~10行是实例化一个多头注意力机制对象，并且这里提供了两种多头实现：一种是之前Transformer中我们自己的实现，另一种则是PyTorch中的实现；可以通过设置参数use_torch_multi_head = True来使用PyTorch中的实现。第12~15行则是多头注意力的前向传播过程，其返回包含两个部分：多头注意力的线性组合以及多头注意力权重的均值。</p>
+<p>如上便是BertSelfAttention的实现代码，其对应的就是GoogleResearch[7]代码中的attention_layer方法。正如前面所说，BertSelfAttention本质上就是Transformer模型中的self-attention模块，具体原理可参见文章[6]，这里就不再赘述。</p>
+<p>对于BertSelfOutput的实现，其主要就是层Dropout、标准化和残差连接3个操作，代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">BertSelfOutput</span>(nn<span style="color:#666">.</span>Module):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">__init__</span>(<span style="color:#007020">self</span>, config):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>         <span style="color:#007020">super</span>()<span style="color:#666">.</span><span style="color:#06287e">__init__</span>()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>LayerNorm <span style="color:#666">=</span> nn<span style="color:#666">.</span>LayerNorm(config<span style="color:#666">.</span>hidden_size, eps<span style="color:#666">=</span><span style="color:#40a070">1e-12</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>dropout <span style="color:#666">=</span> nn<span style="color:#666">.</span>Dropout(config<span style="color:#666">.</span>hidden_dropout_prob)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">forward</span>(<span style="color:#007020">self</span>, hidden_states, input_tensor):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>         <span style="color:#4070a0">&#34;&#34;&#34;
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0"> 9         :param hidden_states: [src_len, batch_size, hidden_size]
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">10         :param input_tensor: [src_len, batch_size, hidden_size]
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">11         :return: [src_len, batch_size, hidden_size]
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">12         &#34;&#34;&#34;</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>         hidden_states <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>dropout(hidden_states)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>         hidden_states <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>LayerNorm(hidden_states <span style="color:#666">+</span> input_tensor)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>         <span style="color:#007020;font-weight:bold">return</span> hidden_states</span></span></code></pre></div><p>上述代码便是BertSelfOutput的实现，其过程也十分简单，这里就不再赘述。</p>
+<p>接下来就是对BertAttention部分的实现，其由BertSelfAttention和BertSelfOutput这两个类构成，代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">BertAttention</span>(nn<span style="color:#666">.</span>Module):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">__init__</span>(<span style="color:#007020">self</span>, config):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>         <span style="color:#007020">super</span>()<span style="color:#666">.</span><span style="color:#06287e">__init__</span>()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>self <span style="color:#666">=</span> BertSelfAttention(config)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>output <span style="color:#666">=</span> BertSelfOutput(config)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">forward</span>(<span style="color:#007020">self</span>,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>                 hidden_states,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>                 attention_mask<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>         <span style="color:#4070a0">&#34;&#34;&#34;
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">11         :param hidden_states: [src_len, batch_size, hidden_size]
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">12         :param attention_mask: [batch_size, src_len]
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">13         :return: [src_len, batch_size, hidden_size]
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">14         &#34;&#34;&#34;</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>         self_outputs <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>self(hidden_states,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>                                  hidden_states,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>                                  hidden_states,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>                                  attn_mask<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span>                                  key_padding_mask<span style="color:#666">=</span>attention_mask)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span>         <span style="color:#60a0b0;font-style:italic"># self_outputs[0] shape: [src_len, batch_size, hidden_size]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">21</span>         attention_output <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>output(self_outputs[<span style="color:#40a070">0</span>], hidden_states)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">22</span>         <span style="color:#007020;font-weight:bold">return</span> attention_output</span></span></code></pre></div><p>在上述代码中，第8行hidden_states是Input Embedding处理后的结果；第9行的attention_mask就是同一个batch中不同长度序列的padding信息，具体可以参见文章[6]第3节的内容；第15行是自注意力机制的输出结果；第21行便是执行BertSelfOutput中的3个操作。</p>
+<h3 id="242-bertlayer-实现">2.4.2 BertLayer 实现<a class="anchor" href="#242-bertlayer-%e5%ae%9e%e7%8e%b0">#</a></h3>
+<p>根据图2-8可知，BertLayer里面还有BertOutput和BertIntermediate这两个模块，因此下面先来实现这两个部分。</p>
+<p>对于BertIntermediate来说也就是一个普通的全连接层，因此实现起来也非常简单，代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">BertIntermediate</span>(nn<span style="color:#666">.</span>Module):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">__init__</span>(<span style="color:#007020">self</span>, config):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>         <span style="color:#007020">super</span>()<span style="color:#666">.</span><span style="color:#06287e">__init__</span>()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>dense <span style="color:#666">=</span> nn<span style="color:#666">.</span>Linear(config<span style="color:#666">.</span>hidden_size, config<span style="color:#666">.</span>intermediate_size)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>         <span style="color:#007020;font-weight:bold">if</span> <span style="color:#007020">isinstance</span>(config<span style="color:#666">.</span>hidden_act, <span style="color:#007020">str</span>):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>             <span style="color:#007020">self</span><span style="color:#666">.</span>intermediate_act_fn <span style="color:#666">=</span> get_activation(config<span style="color:#666">.</span>hidden_act)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>         <span style="color:#007020;font-weight:bold">else</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>             <span style="color:#007020">self</span><span style="color:#666">.</span>intermediate_act_fn <span style="color:#666">=</span> config<span style="color:#666">.</span>hidden_act
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">forward</span>(<span style="color:#007020">self</span>, hidden_states):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>         <span style="color:#4070a0">&#34;&#34;&#34;
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">12         :param hidden_states: [src_len, batch_size, hidden_size]
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">13         :return: [src_len, batch_size, intermediate_size]
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">14         &#34;&#34;&#34;</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>         hidden_states <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>dense(hidden_states)  
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>	<span style="color:#60a0b0;font-style:italic"># [src_len, batch_size, intermediate_size]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>         <span style="color:#007020;font-weight:bold">if</span> <span style="color:#007020">self</span><span style="color:#666">.</span>intermediate_act_fn <span style="color:#007020;font-weight:bold">is</span> <span style="color:#007020;font-weight:bold">None</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>             hidden_states <span style="color:#666">=</span> hidden_states
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span>         <span style="color:#007020;font-weight:bold">else</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span>             hidden_states <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>intermediate_act_fn(hidden_states)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">21</span>         <span style="color:#007020;font-weight:bold">return</span> hidden_states</span></span></code></pre></div><p>在上述代码中，第6行用来根据指定参数获取激活函数，其代码实现如下所示：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">get_activation</span>(activation_string):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     act <span style="color:#666">=</span> activation_string<span style="color:#666">.</span>lower()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>     <span style="color:#007020;font-weight:bold">if</span> act <span style="color:#666">==</span> <span style="color:#4070a0">&#34;linear&#34;</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>         <span style="color:#007020;font-weight:bold">return</span> <span style="color:#007020;font-weight:bold">None</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>     <span style="color:#007020;font-weight:bold">elif</span> act <span style="color:#666">==</span> <span style="color:#4070a0">&#34;relu&#34;</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>         <span style="color:#007020;font-weight:bold">return</span> nn<span style="color:#666">.</span>ReLU()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>     <span style="color:#007020;font-weight:bold">elif</span> act <span style="color:#666">==</span> <span style="color:#4070a0">&#34;gelu&#34;</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>         <span style="color:#007020;font-weight:bold">return</span> nn<span style="color:#666">.</span>GELU()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>     <span style="color:#007020;font-weight:bold">elif</span> act <span style="color:#666">==</span> <span style="color:#4070a0">&#34;tanh&#34;</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>         <span style="color:#007020;font-weight:bold">return</span> nn<span style="color:#666">.</span>Tanh()
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>     <span style="color:#007020;font-weight:bold">else</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>         <span style="color:#007020;font-weight:bold">raise</span> <span style="color:#007020">ValueError</span>(<span style="color:#4070a0">&#34;Unsupported activation: </span><span style="color:#70a0d0">%s</span><span style="color:#4070a0">&#34;</span> <span style="color:#666">%</span> act)</span></span></code></pre></div><p>进一步，对于BertOutput来说，其包含有其包含有一个全连接层和残差连接，实现代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">BertOutput</span>(nn<span style="color:#666">.</span>Module):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">__init__</span>(<span style="color:#007020">self</span>, config):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>         <span style="color:#007020">super</span>()<span style="color:#666">.</span><span style="color:#06287e">__init__</span>()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>dense <span style="color:#666">=</span> nn<span style="color:#666">.</span>Linear(config<span style="color:#666">.</span>intermediate_size, config<span style="color:#666">.</span>hidden_size)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>LayerNorm <span style="color:#666">=</span> nn<span style="color:#666">.</span>LayerNorm(config<span style="color:#666">.</span>hidden_size, eps<span style="color:#666">=</span><span style="color:#40a070">1e-12</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>dropout <span style="color:#666">=</span> nn<span style="color:#666">.</span>Dropout(config<span style="color:#666">.</span>hidden_dropout_prob)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">forward</span>(<span style="color:#007020">self</span>, hidden_states, input_tensor):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>         <span style="color:#4070a0">&#34;&#34;&#34;
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">10         :param hidden_states: [src_len, batch_size, intermediate_size]
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">11         :param input_tensor: [src_len, batch_size, hidden_size]
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">12         :return: [src_len, batch_size, hidden_size]
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">13         &#34;&#34;&#34;</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>         hidden_states <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>dense(hidden_states)  
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>	<span style="color:#60a0b0;font-style:italic"># [src_len, batch_size, hidden_size]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>         hidden_states <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>dropout(hidden_states)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>         hidden_states <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>LayerNorm(hidden_states <span style="color:#666">+</span> input_tensor)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>         <span style="color:#007020;font-weight:bold">return</span> hidden_states</span></span></code></pre></div><p>在上述代码中，第8行里hidden_states指的就是BertIntermediate模块的输出，而input_tensor则是BertAttention部分的输出。</p>
+<p>在实现完这两个部分的代码后，便可以通过BertAttention、BertIntermediate和BertOutput这3个部分来实现组合的BertLayer部分，代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">BertLayer</span>(nn<span style="color:#666">.</span>Module):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">__init__</span>(<span style="color:#007020">self</span>, config):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>         <span style="color:#007020">super</span>()<span style="color:#666">.</span><span style="color:#06287e">__init__</span>()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>bert_attention <span style="color:#666">=</span> BertAttention(config)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>bert_intermediate <span style="color:#666">=</span> BertIntermediate(config)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>bert_output <span style="color:#666">=</span> BertOutput(config)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">forward</span>(<span style="color:#007020">self</span>,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>                 hidden_states,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>                 attention_mask<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>         <span style="color:#4070a0">&#34;&#34;&#34;
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">12         :param hidden_states: [src_len, batch_size, hidden_size]
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">13         :param attention_mask: [batch_size, src_len] mask掉padding部分的内容
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">14         :return: [src_len, batch_size, hidden_size]
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">15         &#34;&#34;&#34;</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>         attention_output<span style="color:#666">=</span><span style="color:#007020">self</span><span style="color:#666">.</span>bert_attention(hidden_states, attention_mask)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>         <span style="color:#60a0b0;font-style:italic"># [src_len, batch_size, hidden_size]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>         intermediate_output <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>bert_intermediate(attention_output)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span>         <span style="color:#60a0b0;font-style:italic"># [src_len, batch_size, intermediate_size]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span>         layer_output<span style="color:#666">=</span><span style="color:#007020">self</span><span style="color:#666">.</span>bert_output(intermediate_output, attention_output)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">21</span>         <span style="color:#60a0b0;font-style:italic"># [src_len, batch_size, hidden_size]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">22</span>         <span style="color:#007020;font-weight:bold">return</span> layer_output</span></span></code></pre></div><p>从上述代码中可以发现，对于BertLayer的实现来说其整体逻辑也并不太复杂，就是根据BertAttention、BertOutput和BertIntermediate这三部分构造而来；同时每个部分输出后的维度也都进行了标注以便大家进行理解。</p>
+<p>到此，对于BertLayer部分的实现就介绍完了，下面继续来看如何对BertEncoder进行实现。</p>
+<h3 id="243-bertencoder-实现">2.4.3 BertEncoder 实现<a class="anchor" href="#243-bertencoder-%e5%ae%9e%e7%8e%b0">#</a></h3>
+<p>根据图2-8所示可知，BERT主要由Input Embedding和BertEncoder这两部分构成；而BertEncoder是有多个BertLayer堆叠所形成，因此需要先实现BertEncoder，代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">BertEncoder</span>(nn<span style="color:#666">.</span>Module):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">__init__</span>(<span style="color:#007020">self</span>, config):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>         <span style="color:#007020">super</span>()<span style="color:#666">.</span><span style="color:#06287e">__init__</span>()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>config <span style="color:#666">=</span> config
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>bert_layers <span style="color:#666">=</span> nn<span style="color:#666">.</span>ModuleList([BertLayer(config) <span style="color:#007020;font-weight:bold">for</span> _ <span style="color:#007020;font-weight:bold">in</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>                                  <span style="color:#007020">range</span>(config<span style="color:#666">.</span>num_hidden_layers)])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">forward</span>(
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>             <span style="color:#007020">self</span>,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>             hidden_states,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>             attention_mask<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>         <span style="color:#4070a0">&#34;&#34;&#34;
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">13         :param hidden_states: [src_len, batch_size, hidden_size]
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">14         :param attention_mask: [batch_size, src_len]
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">15         :return:
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">16         &#34;&#34;&#34;</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>         all_encoder_layers <span style="color:#666">=</span> []
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>         layer_output <span style="color:#666">=</span> hidden_states
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span>         <span style="color:#007020;font-weight:bold">for</span> i, layer_module <span style="color:#007020;font-weight:bold">in</span> <span style="color:#007020">enumerate</span>(<span style="color:#007020">self</span><span style="color:#666">.</span>bert_layers):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span>             layer_output <span style="color:#666">=</span> layer_module(layer_output, attention_mask)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">21</span>             <span style="color:#60a0b0;font-style:italic">#  [src_len, batch_size, hidden_size]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">22</span>             all_encoder_layers<span style="color:#666">.</span>append(layer_output)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">23</span>         <span style="color:#007020;font-weight:bold">return</span> all_encoder_layers</span></span></code></pre></div><p>在上述代码中，第5~6行便是用来定义多个BertLayer；第18~22行用来循环计算多层BertLayer堆叠后的输出结果。最后，只需要按需将BertEncoder部分的输出结果输入到下游任务即可。</p>
+<p>进一步，在将BertEncoder部分的输出结果输入到下游任务前，需要将其进行略微的处理，代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">BertPooler</span>(nn<span style="color:#666">.</span>Module):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">__init__</span>(<span style="color:#007020">self</span>, config):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>         <span style="color:#007020">super</span>()<span style="color:#666">.</span><span style="color:#06287e">__init__</span>()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>dense <span style="color:#666">=</span> nn<span style="color:#666">.</span>Linear(config<span style="color:#666">.</span>hidden_size, config<span style="color:#666">.</span>hidden_size)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>activation <span style="color:#666">=</span> nn<span style="color:#666">.</span>Tanh()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>config <span style="color:#666">=</span> config
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span> 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">forward</span>(<span style="color:#007020">self</span>, hidden_states):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>         <span style="color:#4070a0">&#34;&#34;&#34;
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">10         :param hidden_states:  [src_len, batch_size, hidden_size]
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">11         :return: [batch_size, hidden_size]
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">12         &#34;&#34;&#34;</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>         <span style="color:#007020;font-weight:bold">if</span> <span style="color:#007020">self</span><span style="color:#666">.</span>config<span style="color:#666">.</span>pooler_type <span style="color:#666">==</span> <span style="color:#4070a0">&#34;first_token_transform&#34;</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>             token_tensor <span style="color:#666">=</span> hidden_states[<span style="color:#40a070">0</span>, :]<span style="color:#666">.</span>reshape(<span style="color:#666">-</span><span style="color:#40a070">1</span>, <span style="color:#007020">self</span><span style="color:#666">.</span>config<span style="color:#666">.</span>hidden_size)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>         <span style="color:#007020;font-weight:bold">elif</span> <span style="color:#007020">self</span><span style="color:#666">.</span>config<span style="color:#666">.</span>pooler_type <span style="color:#666">==</span> <span style="color:#4070a0">&#34;all_token_average&#34;</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>             token_tensor <span style="color:#666">=</span> torch<span style="color:#666">.</span>mean(hidden_states, dim<span style="color:#666">=</span><span style="color:#40a070">0</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>         pooled_output <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>dense(token_tensor) <span style="color:#60a0b0;font-style:italic">#[batch_size, hidden_size]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>         pooled_output <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>activation(pooled_output)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span>         <span style="color:#007020;font-weight:bold">return</span> pooled_output  <span style="color:#60a0b0;font-style:italic"># [batch_size, hidden_size]</span></span></span></code></pre></div><p>在上述代码中，第13~14行代码用来取BertEncoder输出的第一个位置（[cls]位置），例如在进行文本分类时可以取该位置上的结果进行下一步的分类处理；第15~16行是自己加入的一个选项，表示取所有位置的平均值，当然我们也可以根据自己的需要在添加下面添加其它的方式；最后，17-19行就是一个普通的全连接层。</p>
+<h3 id="244-bertmodel-实现">2.4.4 BertModel 实现<a class="anchor" href="#244-bertmodel-%e5%ae%9e%e7%8e%b0">#</a></h3>
+<p>到此，对于BERT模型中的各个基础模块就已经实现完毕了。如图2-9所示，只需要再将各个部分的代码组合到一起便完成了对于BERT模型的实现。</p>
+<div align=center><img width="320" src="/images/tutorials/202607121838.png" alt="图 2-9. BERT网络模型细节图"/> </div><center>图 2-9. BERT网络模型细节图</center>
+<p>基于上述所有实现便可以搭建完成整个BERT的主体结构，代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">BertModel</span>(nn<span style="color:#666">.</span>Module):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">__init__</span>(<span style="color:#007020">self</span>, config):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>         <span style="color:#007020">super</span>()<span style="color:#666">.</span><span style="color:#06287e">__init__</span>()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>bert_embeddings <span style="color:#666">=</span> BertEmbeddings(config)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>bert_encoder <span style="color:#666">=</span> BertEncoder(config)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>bert_pooler <span style="color:#666">=</span> BertPooler(config)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>config <span style="color:#666">=</span> config
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>_reset_parameters()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">forward</span>(<span style="color:#007020">self</span>,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>                 input_ids<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>                 attention_mask<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>                 token_type_ids<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>                 position_ids<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>         <span style="color:#4070a0">&#34;&#34;&#34;
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">16         :param input_ids:  [src_len, batch_size]
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">17         :param attention_mask: [batch_size, src_len] mask掉padding部分的内容
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">18         :param token_type_ids: [src_len, batch_size] 如果输入模型的只有一个序列，那么这个参数也不用传值
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">19         :param position_ids: [1,src_len] 在实际建模时这个参数其实可以不用传值
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">20         :return:
+</span></span></span><span style="display:flex;"><span><span style="color:#4070a0">21         &#34;&#34;&#34;</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">22</span>         embedding_output <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>bert_embeddings(input_ids<span style="color:#666">=</span>input_ids,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">23</span>                                                 position_ids<span style="color:#666">=</span>position_ids,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">24</span>                                               token_type_ids<span style="color:#666">=</span>token_type_ids)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">25</span>         all_encoder_outputs <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>bert_encoder(embedding_output,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">26</span>                                               attention_mask<span style="color:#666">=</span>attention_mask)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">27</span>         sequence_output <span style="color:#666">=</span> all_encoder_outputs[<span style="color:#666">-</span><span style="color:#40a070">1</span>] 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">28</span>         pooled_output <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>bert_pooler(sequence_output)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">29</span>         <span style="color:#007020;font-weight:bold">return</span> pooled_output, all_encoder_outputs</span></span></code></pre></div><p>如上代码所示便是整个BERT部分的实现，可以发现在厘清了整个思路后这部分代码理解起来就相对容易了。第22~24行便是Input Embedding后的输出结果，其形状为[src_len, batch_size, hidden_size]；第25~26行是整个BERT编码部分的输出，其中all_encoder_outputs 为一个包含有num_hidden_layers个层的输出；第27行是处理得到整个BERT网络的输出，这里取了最后一层的输出，形状为[src_len, batch_size, hidden_size]；第28行默认是最后一层的第1个token 即[cls]位置经dense + tanh 后的结果，其形状为[batch_size, hidden_size]。</p>
+<p>到此，对于整个BERT主体部分的代码实现就介绍完了。需要提醒大家的是，在阅读本文的过程中最好是结合着每个部分的输出结果（包括形状和意义）来进行理解，以便能更加清晰的认识BERT模型。</p>
+<h3 id="245-使用示例">2.4.5 使用示例<a class="anchor" href="#245-%e4%bd%bf%e7%94%a8%e7%a4%ba%e4%be%8b">#</a></h3>
+<p>在完成上述整个BERT模型的代码实现后，便可以通过如下方式来进行使用：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span>     json_file <span style="color:#666">=</span> <span style="color:#4070a0">&#39;../bert_base_chinese/config.json&#39;</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     config <span style="color:#666">=</span> BertConfig<span style="color:#666">.</span>from_json_file(json_file)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>     config<span style="color:#666">.</span><span style="color:#bb60d5">__dict__</span>[<span style="color:#4070a0">&#39;use_torch_multi_head&#39;</span>] <span style="color:#666">=</span> <span style="color:#007020;font-weight:bold">True</span>  
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>     src <span style="color:#666">=</span> torch<span style="color:#666">.</span>tensor([[<span style="color:#40a070">1</span>, <span style="color:#40a070">3</span>, <span style="color:#40a070">5</span>, <span style="color:#40a070">7</span>, <span style="color:#40a070">9</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">3</span>], [<span style="color:#40a070">2</span>, <span style="color:#40a070">4</span>, <span style="color:#40a070">6</span>, <span style="color:#40a070">8</span>, <span style="color:#40a070">10</span>, <span style="color:#40a070">0</span>, <span style="color:#40a070">0</span>]], dtype<span style="color:#666">=</span>torch<span style="color:#666">.</span>long)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>     src <span style="color:#666">=</span> src<span style="color:#666">.</span>transpose(<span style="color:#40a070">0</span>, <span style="color:#40a070">1</span>)  <span style="color:#60a0b0;font-style:italic"># [src_len, batch_size]</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>     <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;input shape [src_len,batch_size]: &#34;</span>, src<span style="color:#666">.</span>shape)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>     token_type_ids <span style="color:#666">=</span> torch<span style="color:#666">.</span>LongTensor([[<span style="color:#40a070">0</span>, <span style="color:#40a070">0</span>, <span style="color:#40a070">0</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">1</span>], [<span style="color:#40a070">0</span>, <span style="color:#40a070">0</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">0</span>, <span style="color:#40a070">0</span>]])<span style="color:#666">.</span>transpose(<span style="color:#40a070">0</span>, <span style="color:#40a070">1</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>     attention_mask <span style="color:#666">=</span> torch<span style="color:#666">.</span>tensor([[<span style="color:#007020;font-weight:bold">True</span>,<span style="color:#007020;font-weight:bold">True</span>,<span style="color:#007020;font-weight:bold">True</span>,<span style="color:#007020;font-weight:bold">True</span>,<span style="color:#007020;font-weight:bold">True</span>,<span style="color:#007020;font-weight:bold">True</span>,<span style="color:#007020;font-weight:bold">True</span>],
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>                                    [<span style="color:#007020;font-weight:bold">True</span>,<span style="color:#007020;font-weight:bold">True</span>,<span style="color:#007020;font-weight:bold">True</span>,<span style="color:#007020;font-weight:bold">True</span>,<span style="color:#007020;font-weight:bold">True</span>,<span style="color:#007020;font-weight:bold">False</span>,<span style="color:#007020;font-weight:bold">False</span>]])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>     position_ids <span style="color:#666">=</span> torch<span style="color:#666">.</span>arange(src<span style="color:#666">.</span>size()[<span style="color:#40a070">0</span>])<span style="color:#666">.</span>expand((<span style="color:#40a070">1</span>, <span style="color:#666">-</span><span style="color:#40a070">1</span>)) <span style="color:#60a0b0;font-style:italic"># [1,src_len]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>     bert_model <span style="color:#666">=</span> BertModel(config)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>     bert_model_output <span style="color:#666">=</span> bert_model(input_ids<span style="color:#666">=</span>src,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>                                    attention_mask<span style="color:#666">=</span>attention_mask,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>                                    token_type_ids<span style="color:#666">=</span>token_type_ids,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>                                    position_ids<span style="color:#666">=</span>position_ids)[<span style="color:#40a070">0</span>]
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>     <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;BertModel&#39;s pooler output shape [batch_size, hidden_size]: &#34;</span>,</span></span></code></pre></div><p>上述代码运行结束后便会得到类似如下所示的结果：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#666">-</span> INFO: 成功导入BERT配置文件 <span style="color:#666">../</span>bert_base_chinese<span style="color:#666">/</span>config<span style="color:#666">.</span>json
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span> <span style="color:#007020">input</span> shape [src_len,batch_size]:  torch<span style="color:#666">.</span>Size([<span style="color:#40a070">7</span>, <span style="color:#40a070">2</span>])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span> BertModel<span style="">’</span>s pooler output shape [batch_size,hidden_size]: [<span style="color:#40a070">2</span>, <span style="color:#40a070">768</span>])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>   <span style="color:#666">=======</span>  BertMolde 参数: <span style="color:#666">========</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span> bert_embeddings<span style="color:#666">.</span>position_ids   torch<span style="color:#666">.</span>Size([<span style="color:#40a070">1</span>, <span style="color:#40a070">518</span>])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span> bert_embeddings<span style="color:#666">.</span>word_embeddings<span style="color:#666">.</span>embedding<span style="color:#666">.</span>weight torch<span style="color:#666">.</span>Size([<span style="color:#40a070">21128</span>, <span style="color:#40a070">768</span>])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span> bert_embeddings<span style="color:#666">.</span>position_embeddings<span style="color:#666">.</span>embedding<span style="color:#666">.</span>weight torch<span style="color:#666">.</span>Size([<span style="color:#40a070">518</span>, <span style="color:#40a070">768</span>])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span> bert_embeddings<span style="color:#666">.</span>token_type_embeddings<span style="color:#666">.</span>embedding<span style="color:#666">.</span>weight torch<span style="color:#666">.</span>Size([<span style="color:#40a070">2</span>, <span style="color:#40a070">768</span>])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span> bert_embeddings<span style="color:#666">.</span>LayerNorm<span style="color:#666">.</span>weight     torch<span style="color:#666">.</span>Size([<span style="color:#40a070">768</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span> bert_embeddings<span style="color:#666">.</span>LayerNorm<span style="color:#666">.</span>bias   torch<span style="color:#666">.</span>Size([<span style="color:#40a070">768</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span> <span style="">……</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span> bert_encoder<span style="color:#666">.</span>bert_layers<span style="color:#40a070">.0</span><span style="color:#666">.</span>bert_intermediate<span style="color:#666">.</span>dense<span style="color:#666">.</span>weight    
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span> torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3072</span>, <span style="color:#40a070">768</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span> bert_encoder<span style="color:#666">.</span>bert_layers<span style="color:#40a070">.0</span><span style="color:#666">.</span>bert_intermediate<span style="color:#666">.</span>dense<span style="color:#666">.</span>bias  torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3072</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span> bert_encoder<span style="color:#666">.</span>bert_layers<span style="color:#40a070">.0</span><span style="color:#666">.</span>bert_output<span style="color:#666">.</span>dense<span style="color:#666">.</span>weight  torch<span style="color:#666">.</span>Size([<span style="color:#40a070">768</span>, <span style="color:#40a070">3072</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span> bert_encoder<span style="color:#666">.</span>bert_layers<span style="color:#40a070">.0</span><span style="color:#666">.</span>bert_output<span style="color:#666">.</span>dense<span style="color:#666">.</span>bias    torch<span style="color:#666">.</span>Size([<span style="color:#40a070">768</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span> bert_encoder<span style="color:#666">.</span>bert_layers<span style="color:#40a070">.0</span><span style="color:#666">.</span>bert_output<span style="color:#666">.</span>LayerNorm<span style="color:#666">.</span>weight   torch<span style="color:#666">.</span>Size([<span style="color:#40a070">768</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span> bert_encoder<span style="color:#666">.</span>bert_layers<span style="color:#40a070">.0</span><span style="color:#666">.</span>bert_output<span style="color:#666">.</span>LayerNorm<span style="color:#666">.</span>bias    torch<span style="color:#666">.</span>Size([<span style="color:#40a070">768</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span> <span style="">……</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span> bert_encoder<span style="color:#666">.</span>bert_layers<span style="color:#40a070">.1</span><span style="color:#666">.</span>bert_intermediate<span style="color:#666">.</span>dense<span style="color:#666">.</span>bias   torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3072</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">21</span> bert_encoder<span style="color:#666">.</span>bert_layers<span style="color:#40a070">.1</span><span style="color:#666">.</span>bert_output<span style="color:#666">.</span>dense<span style="color:#666">.</span>weight  torch<span style="color:#666">.</span>Size([<span style="color:#40a070">768</span>, <span style="color:#40a070">3072</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">22</span> bert_encoder<span style="color:#666">.</span>bert_layers<span style="color:#40a070">.1</span><span style="color:#666">.</span>bert_output<span style="color:#666">.</span>dense<span style="color:#666">.</span>bias    torch<span style="color:#666">.</span>Size([<span style="color:#40a070">768</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">23</span> bert_encoder<span style="color:#666">.</span>bert_layers<span style="color:#40a070">.1</span><span style="color:#666">.</span>bert_output<span style="color:#666">.</span>LayerNorm<span style="color:#666">.</span>weight    torch<span style="color:#666">.</span>Size([<span style="color:#40a070">768</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">24</span> bert_encoder<span style="color:#666">.</span>bert_layers<span style="color:#40a070">.1</span><span style="color:#666">.</span>bert_output<span style="color:#666">.</span>LayerNorm<span style="color:#666">.</span>bias    torch<span style="color:#666">.</span>Size([<span style="color:#40a070">768</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">25</span> <span style="">……</span></span></span></code></pre></div><section class="book-promo-banner" aria-labelledby="book-promo-identity">
+      <div class="book-promo-banner__body">
+        <p class="book-promo-banner__identity" id="book-promo-identity">您当前阅读的系列内容有完整版高清 PDF ，点击右侧了解</p>
+        <p class="book-promo-banner__selling-point">近200页高清 PDF &#43; 80页配套PPT、高清无水印网络结构图，打印学习更方便！</p>
+      </div>
+      <a class="book-promo-banner__cta" href="/goods/bert" target="_blank" rel="noopener noreferrer">
+        查看详情
+      </a>
+    </section><div class="book-page-pv text-small" id="busuanzi_container_page_pv">
+      <span class="book-page-pv-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" focusable="false">
+          <path d="M1.5 12s3.9-6.5 10.5-6.5S22.5 12 22.5 12s-3.9 6.5-10.5 6.5S1.5 12 1.5 12Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7"/>
+          <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.7"/>
+        </svg>
+      </span>
+      <span class="book-page-pv-label">阅读</span>
+      <span class="book-page-pv-value" id="busuanzi_value_page_pv">--</span>
+    </div><section class="book-article-index book-related-articles" aria-labelledby="related-articles-title">
+    <h2 id="related-articles-title">相关阅读</h2>
+    <div class="book-article-grid"><article class="book-article-card book-related-article-card">
+              <h3 class="book-article-card-title">
+                <a href="/tutorials/transformer/multi-head-attention/">第1节 多头注意力机制原理</a>
+              </h3><p class="book-article-card-desc">本文是《Attention Is All You Need》精读系列第1讲，从 RNN 串行瓶颈出发讲清 Transformer 为什么必须引入自注意力，再用图解与公式拆解 Scaled Dot-Product …</p></article><article class="book-article-card book-related-article-card">
+              <h3 class="book-article-card-title">
+                <a href="/tutorials/bert/bert-pretrain/">第1节 BERT原理与预训练任务</a>
+              </h3><p class="book-article-card-desc">本文是 BERT 精读系列第1讲，从 BERT 与 Transformer Encoder 的关系出发，系统讲清 BERT 论文中那张易混淆的结构图背后的真实网络组成 …</p></article></div>
+  </section></article>
+ 
+      
+
+
+      <footer class="book-footer">
+        
+  <div class="flex flex-wrap justify-between">
+
+<div>
+
+</div>
+
+<div>
+
+</div>
+
+</div>
+
+<div class="flex flex-wrap justify-between">
+    <span>
+    
+      <a href="/tutorials/bert/bert-pretrain/" class="flex align-center">
+        <img src="/icons/backward.svg" class="book-icon" alt="Backward" />
+        <span>第1节 BERT原理与预训练任务</span>
+      </a>
+    
+    </span>
+    <span>
+    
+      <a href="/tutorials/bert/bert-transfer/" class="flex align-center">
+        <span>第3节 模型的保存与迁移</span>
+        <img src="/icons/forward.svg" class="book-icon" alt="Forward" />
+      </a>
+    
+    </span>
+  </div>
+
+ 
+        
+  
+  <div class="book-comments"><div class="giscus"></div>
+<script src="https://giscus.app/client.js"
+        data-repo="mlwithme/mlwithme.github.io"
+        data-repo-id="R_kgDOTBt94Q"
+        data-category="Announcements"
+        data-category-id="DIC_kwDOTBt94c4C_21V"
+        data-mapping="pathname"
+        data-strict="1"
+        data-reactions-enabled="1"
+        data-emit-metadata="0"
+        data-input-position="top"
+        data-theme="preferred_color_scheme"
+        data-lang="zh-CN"
+        data-loading="lazy"
+        crossorigin="anonymous"
+        async>
+</script>
+</div>
+  
+ 
+        
+  <link rel="stylesheet" href="https://mlwithme.github.io/katex/katex.min.css" />
+  <script defer src="https://mlwithme.github.io/katex/katex.min.js"></script>
+  <script defer src="https://mlwithme.github.io/katex/auto-render.min.js"></script>
+  
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        if (window.renderMathInElement) {
+          renderMathInElement(
+            document.querySelector(".book-page"),
+            Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
+          );
+        }
+      });
+    </script>
+  
+
+        
+  
+ 
+        
+  
+    <script>(function(){document.querySelectorAll("pre:has(code)").forEach(e=>{e.addEventListener("click",e.focus),e.addEventListener("copy",function(t){if(t.preventDefault(),navigator.clipboard){const t=window.getSelection().toString()||e.textContent;navigator.clipboard.writeText(t)}})})})()</script>
+  
+
+      </footer>
+
+      <label for="menu-control" class="hidden book-menu-overlay"></label>
+    </div>
+
+    
+  
+  <aside class="book-toc">
+    <div class="book-toc-content">
+      
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#21-工程结构">2.1 工程结构</a></li>
+    <li><a href="#22-参数管理">2.2 参数管理</a>
+      <ul>
+        <li><a href="#221-初始化类成员">2.2.1 初始化类成员</a></li>
+        <li><a href="#222-导入本地参数">2.2.2 导入本地参数</a></li>
+        <li><a href="#223-使用示例">2.2.3 使用示例</a></li>
+      </ul>
+    </li>
+    <li><a href="#23-input-embedding-实现">2.3 Input Embedding 实现</a>
+      <ul>
+        <li><a href="#231-token-embedding">2.3.1 Token Embedding</a></li>
+        <li><a href="#232-positional-embedding">2.3.2 Positional Embedding</a></li>
+        <li><a href="#233-segment-embedding">2.3.3 Segment Embedding</a></li>
+        <li><a href="#234-bert-embeddings">2.3.4 Bert Embeddings</a></li>
+        <li><a href="#235-使用示例">2.3.5 使用示例</a></li>
+      </ul>
+    </li>
+    <li><a href="#24-bertmodel-实现">2.4 BertModel 实现</a>
+      <ul>
+        <li><a href="#241-bertattention-实现">2.4.1 BertAttention 实现</a></li>
+        <li><a href="#242-bertlayer-实现">2.4.2 BertLayer 实现</a></li>
+        <li><a href="#243-bertencoder-实现">2.4.3 BertEncoder 实现</a></li>
+        <li><a href="#244-bertmodel-实现">2.4.4 BertModel 实现</a></li>
+        <li><a href="#245-使用示例">2.4.5 使用示例</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+
+
+
+
+    </div>
+  </aside>
+  
+ 
+  </main>
+
+  <button
+  type="button"
+  class="book-back-to-top"
+  aria-label="回到顶部"
+  title="回到顶部"
+>
+  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <path
+      d="M12 5.5l-5.25 5.25 1.5 1.5 2.7-2.7V18.5h2.1V9.55l2.7 2.7 1.5-1.5L12 5.5z"
+      fill="currentColor"
+    ></path>
+  </svg>
+</button>
+
+<script>
+  (function () {
+    var button = document.querySelector(".book-back-to-top");
+    if (!button) {
+      return;
+    }
+
+    var toggleButton = function () {
+      if (window.scrollY > 360) {
+        button.classList.add("is-visible");
+      } else {
+        button.classList.remove("is-visible");
+      }
+    };
+
+    button.addEventListener("click", function () {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+
+    toggleButton();
+    window.addEventListener("scroll", toggleButton, { passive: true });
+  })();
+</script>
+
+<div class="book-floating-toolbox" data-book-floating-toolbox>
+  <ul
+    class="book-floating-toolbox__items"
+    id="book-floating-toolbox-items"
+    role="menu"
+    aria-label="工具箱"
+    hidden
+  >
+    <li class="book-floating-toolbox__item" role="none" style="--book-toolbox-index: 0; --book-toolbox-count: 4;">
+      <a
+        class="book-floating-toolbox__action"
+        role="menuitem"
+        href="/glossary/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="术语百科"
+      >
+        <span class="book-floating-toolbox__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path
+              d="M5 4.5h11.5a2.5 2.5 0 0 1 2.5 2.5V20l-4-2.5L11 20l-4-2.5L3 20V7a2.5 2.5 0 0 1 2-2.5z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linejoin="round"
+            ></path>
+            <path
+              d="M7.5 9.5h7M7.5 12.5h5"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+            ></path>
+          </svg>
+        </span>
+      </a>
+      <span class="book-floating-toolbox__tip" aria-hidden="true">术语百科</span>
+    </li>
+    <li class="book-floating-toolbox__item" role="none" style="--book-toolbox-index: 2; --book-toolbox-count: 4;">
+      <a
+        class="book-floating-toolbox__action"
+        role="menuitem"
+        href="/code-templates/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="代码实现"
+      >
+        <span class="book-floating-toolbox__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path
+              d="M8.5 7.5 4 12l4.5 4.5M15.5 7.5 20 12l-4.5 4.5M13.5 5l-3 14"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            ></path>
+          </svg>
+        </span>
+      </a>
+      <span class="book-floating-toolbox__tip" aria-hidden="true">代码实现</span>
+    </li>
+    <li class="book-floating-toolbox__item" role="none" style="--book-toolbox-index: 1; --book-toolbox-count: 4;">
+      <a
+        class="book-floating-toolbox__action"
+        role="menuitem"
+        href="/syllabus/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="名校公开课"
+      >
+        <span class="book-floating-toolbox__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path
+              d="M12 3 1.5 9 12 14.5 22.5 9 12 3z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linejoin="round"
+            ></path>
+            <path
+              d="M6 11v4.2c0 1.5 2.7 2.8 6 2.8s6-1.3 6-2.8V11"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            ></path>
+            <path
+              d="M21 9.5V14"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+            ></path>
+          </svg>
+        </span>
+      </a>
+      <span class="book-floating-toolbox__tip" aria-hidden="true">名校公开课</span>
+    </li>
+    <li class="book-floating-toolbox__item" role="none" style="--book-toolbox-index: 3; --book-toolbox-count: 4;">
+      <a
+        class="book-floating-toolbox__action"
+        role="menuitem"
+        href="https://www.machinelearningwithme.com"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="开发中……"
+      >
+        <span class="book-floating-toolbox__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path
+              d="M9 3.5h6a1.5 1.5 0 0 1 1.5 1.5V7h2.25A1.75 1.75 0 0 1 20.5 8.75v9A1.75 1.75 0 0 1 18.75 19.5H5.25A1.75 1.75 0 0 1 3.5 17.75v-9A1.75 1.75 0 0 1 5.25 7H7.5V5A1.5 1.5 0 0 1 9 3.5z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linejoin="round"
+            ></path>
+            <path
+              d="M9 7h6"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+            ></path>
+            <circle cx="12" cy="13" r="3" fill="none" stroke="currentColor" stroke-width="1.6"></circle>
+          </svg>
+        </span>
+      </a>
+      <span class="book-floating-toolbox__tip" aria-hidden="true">开发中……</span>
+    </li>
+  </ul>
+  <button
+    type="button"
+    class="book-floating-toolbox__toggle"
+    aria-label="工具箱"
+    aria-haspopup="menu"
+    aria-expanded="false"
+    aria-controls="book-floating-toolbox-items"
+    title="工具箱"
+    data-book-toolbox-toggle
+  >
+    <svg class="book-floating-toolbox__toggle-icon-open" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        d="M14.7 6.3a4 4 0 0 0-5.4 5.4l-6.3 6.3a1 1 0 0 0 0 1.4l2 2a1 1 0 0 0 1.4 0l6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-2.4z"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linejoin="round"
+        stroke-linecap="round"
+      ></path>
+      <circle
+        class="book-floating-toolbox__badge-pulse"
+        cx="19.5"
+        cy="4.5"
+        r="2.2"
+        fill="#d84747"
+        stroke="#fff"
+        stroke-width="0.6"
+      ></circle>
+    </svg>
+    <svg class="book-floating-toolbox__toggle-icon-close" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        d="M6.5 6.5l11 11M17.5 6.5l-11 11"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.8"
+        stroke-linecap="round"
+      ></path>
+    </svg>
+  </button>
+</div>
+
+<script>
+  (function () {
+    var root = document.querySelector("[data-book-floating-toolbox]");
+    if (!root) {
+      return;
+    }
+    var toggle = root.querySelector("[data-book-toolbox-toggle]");
+    var items = root.querySelector(".book-floating-toolbox__items");
+    if (!toggle || !items) {
+      return;
+    }
+
+    var isOpen = function () {
+      return root.classList.contains("is-open");
+    };
+
+    var open = function () {
+      root.classList.add("is-open");
+      items.hidden = false;
+      toggle.setAttribute("aria-expanded", "true");
+    };
+
+    var close = function () {
+      root.classList.remove("is-open");
+      items.hidden = true;
+      toggle.setAttribute("aria-expanded", "false");
+    };
+
+    toggle.addEventListener("click", function (event) {
+      event.stopPropagation();
+      if (isOpen()) {
+        close();
+      } else {
+        open();
+      }
+    });
+
+    document.addEventListener("click", function (event) {
+      if (!isOpen()) {
+        return;
+      }
+      if (root.contains(event.target)) {
+        return;
+      }
+      close();
+    });
+
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape" && isOpen()) {
+        close();
+        toggle.focus();
+      }
+    });
+
+    items.addEventListener("click", function (event) {
+      if (event.target.closest("a")) {
+        close();
+      }
+    });
+
+    window.addEventListener("pageshow", close);
+  })();
+</script>
+
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

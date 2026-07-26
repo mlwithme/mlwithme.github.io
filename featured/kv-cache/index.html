@@ -1,0 +1,4883 @@
+<!DOCTYPE html>
+<html lang="zh_CN" dir="ltr">
+<head>
+  <!--
+Made with Book Theme
+https://github.com/alex-shpak/hugo-book
+--><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="本文是 LLaMA 2 模型原理铺垫篇，从大模型自回归解码的「重复计算」动机讲起，对比不采用 KV Cache 与采用 KV Cache 两套推理流程的算力开销，重点解答两个常见疑问：一是为什么只缓存 K 和 V 而不缓存 Q（Q 与当前位置相关无法复用）；二是在 …">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="index,follow,max-image-preview:large">
+
+
+
+
+
+<meta property="og:url" content="https://mlwithme.github.io/featured/kv-cache/">
+<meta property="og:site_name" content="《从零学AI指南手册》">
+<meta property="og:title" content="KV Cache 进阶教程：为什么只缓存 K 和 V 不缓存 Q？张量并行下 KV Cache 怎么分片">
+<meta property="og:description" content="本文是 LLaMA 2 模型原理铺垫篇，从大模型自回归解码的「重复计算」动机讲起，对比不采用 KV Cache 与采用 KV Cache 两套推理流程的算力开销，重点解答两个常见疑问：一是为什么只缓存 K 和 V 而不缓存 Q（Q 与当前位置相关无法复用）；二是在 …">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:type" content="article">
+<meta property="og:image" content="https://mlwithme.github.io/share-cover.png">
+<meta property="og:image:url" content="https://mlwithme.github.io/share-cover.png">
+<meta property="og:image:secure_url" content="https://mlwithme.github.io/share-cover.png">
+<meta property="og:image:width" content="759">
+<meta property="og:image:height" content="759">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:alt" content="《从零学AI指南手册》 - KV Cache 进阶教程：为什么只缓存 K 和 V 不缓存 Q？张量并行下 KV Cache 怎么分片">
+
+  <meta property="article:section" content="featured">
+  
+    <meta property="article:published_time" content="2026-07-20T22:14:22&#43;08:00">
+  
+  
+    <meta property="article:modified_time" content="2026-07-21T21:36:08&#43;08:00">
+  
+  
+
+
+<script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"WebSite","description":"面向机器学习、深度学习与 AI Agent 的中文系统化学习手册，包含原理讲解、代码示例与实战案例。","inLanguage":"zh_CN","name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
+  </script>
+  <script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.github.io/share-cover.png"},"name":"《从零学AI指南手册》","url":"https://mlwithme.github.io/"}
+  </script><script type="application/ld+json">
+      {"@context":"https://schema.org","@type":"Article","articleSection":"featured","author":{"@type":"Person","name":"WangCheng","url":"https://mlwithme.github.io/author/"},"dateModified":"2026-07-21T21:36:08+08:00","datePublished":"2026-07-20T22:14:22+08:00","description":"本文是 LLaMA 2 模型原理铺垫篇，从大模型自回归解码的「重复计算」动机讲起，对比不采用 KV Cache 与采用 KV Cache 两套推理流程的算力开销，重点解答两个常见疑问：一是为什么只缓存 K 和 V 而不缓存 Q（Q 与当前位置相关无法复用）；二是在 …","headline":"KV Cache 进阶教程：为什么只缓存 K 和 V 不缓存 Q？张量并行下 KV Cache 怎么分片","image":["https://mlwithme.github.io/share-cover.png"],"inLanguage":"zh_CN","mainEntityOfPage":"https://mlwithme.github.io/featured/kv-cache/","publisher":{"@type":"Organization","logo":{"@type":"ImageObject","url":"https://mlwithme.github.io/share-cover.png"},"name":"《从零学AI指南手册》"},"url":"https://mlwithme.github.io/featured/kv-cache/"}
+    </script><script type="application/ld+json">
+        {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","item":"https://mlwithme.github.io/","name":"首页","position":1},{"@type":"ListItem","item":"https://mlwithme.github.io/featured/","name":"精选文章","position":2},{"@type":"ListItem","item":"https://mlwithme.github.io/featured/kv-cache/","name":"KV Cache 进阶教程：为什么只缓存 K 和 V 不缓存 Q？张量并行下 KV Cache 怎么分片","position":3}]}
+      </script>
+
+<title>KV Cache 进阶教程：为什么只缓存 K 和 V 不缓存 Q？张量并行下 KV Cache 怎么分片 • 《从零学AI指南手册》</title>
+<link rel="icon" href="https://mlwithme.github.io/favicon.png" type="image/png">
+<link rel="shortcut icon" href="https://mlwithme.github.io/favicon.png" type="image/png">
+<link rel="apple-touch-icon" href="https://mlwithme.github.io/favicon.png">
+
+<link rel="manifest" href="/manifest.json">
+<link rel="canonical" href="https://mlwithme.github.io/featured/kv-cache/">
+<link rel="stylesheet" href="/book.min.04800c306c9a4025943ba95ba687acbf99c9a8d44d89ae79df98ad8111606047.css" integrity="sha256-BIAMMGyaQCWUO6lbpoesv5nJqNRNia5535itgRFgYEc=" crossorigin="anonymous">
+  <script defer type="module" src="/zh-cn.search.min.f1dcaf5ffb003a5d8d501b4c6c5a7e051bc6f1cb007aa9fe982329837af7afb3.js" integrity="sha256-8dyvX/sAOl2NUBtMbFp&#43;BRvG8csAeqn&#43;mCMpg3r3r7M=" crossorigin="anonymous"></script>
+
+  
+
+
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="KV Cache 进阶教程：为什么只缓存 K 和 V 不缓存 Q？张量并行下 KV Cache 怎么分片">
+<meta name="twitter:description" content="本文是 LLaMA 2 模型原理铺垫篇，从大模型自回归解码的「重复计算」动机讲起，对比不采用 KV Cache 与采用 KV Cache 两套推理流程的算力开销，重点解答两个常见疑问：一是为什么只缓存 K 和 V 而不缓存 Q（Q 与当前位置相关无法复用）；二是在 …">
+<meta name="twitter:url" content="https://mlwithme.github.io/featured/kv-cache/">
+<meta name="twitter:image" content="https://mlwithme.github.io/share-cover.png">
+<meta name="twitter:image:alt" content="《从零学AI指南手册》 - KV Cache 进阶教程：为什么只缓存 K 和 V 不缓存 Q？张量并行下 KV Cache 怎么分片">
+<script>
+  var _hmt = _hmt || [];
+  (function() {
+    var hm = document.createElement("script");
+    hm.src = "https://hm.baidu.com/hm.js?19b2d342631cd14e3578ad00b4823e80";
+    var s = document.getElementsByTagName("script")[0];
+    s.parentNode.insertBefore(hm, s);
+  })();
+</script>
+<script>
+  var _hmt = _hmt || [];
+  (function() {
+    var hm = document.createElement("script");
+    hm.src = "https://hm.baidu.com/hm.js?74a336dd47fbbab3ceb99d4ad8afcb76";
+    var s = document.getElementsByTagName("script")[0];
+    s.parentNode.insertBefore(hm, s);
+  })();
+</script>
+<script async src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
+
+</head>
+<body dir="ltr" class="book-kind-page book-type-featured">
+  <input type="checkbox" class="hidden toggle" id="menu-control" />
+  <input type="checkbox" class="hidden toggle" id="toc-control" />
+  <main class="container flex">
+    
+<aside class="book-menu">
+  <div class="book-menu-content">
+    
+  <nav>
+<h2 class="book-brand">
+  <a class="flex align-center" href="/"><svg xmlns="http://www.w3.org/2000/svg" height="20" width="20" viewBox="0 -960 960 960" fill="currentColor" aria-hidden="true" class="book-brand-icon" style="margin-right:.35em;flex:none">
+      <path d="M240-200h120v-240h240v240h120v-360L480-740 240-560v360Zm-80 80q-33 0-56.5-23.5T80-200v-360q0-27 11-49t31-39l280-220q21-17 47-25t51-8q25 0 51 8t47 25l280 220q20 17 31 39t11 49v360q0 33-23.5 56.5T840-120H600q-17 0-28.5-11.5T560-160v-200H400v200q0 17-11.5 28.5T360-120H160Zm320-280Z"/>
+    </svg>
+
+    <span>返回主页</span>
+
+  </a>
+</h2>
+
+
+<div class="book-search hidden">
+  <input id="book-search-input" type="text" 
+    placeholder="Search"
+    aria-label="Search"
+    maxlength="64" />
+  <div class="book-search-spinner hidden"></div>
+  <ul id="book-search-results"></ul>
+</div>
+<script>document.querySelector(".book-search").classList.remove("hidden")</script>
+
+
+
+
+
+
+
+
+
+
+
+  
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/featured/" class="">
+      <span class="book-menu-link-title">精选文章</span>
+</a>
+  
+
+          
+  <ul>
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bb7497cb5e222579131ad9ad959011cb" class="toggle"  />
+    <label for="section-bb7497cb5e222579131ad9ad959011cb" class="flex">
+      <a href="/tutorials/" class="">
+        <span class="book-menu-link-title">专题文章</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/tutorials/transformer/" class="">
+      <span class="book-menu-link-title">图解 Transformer 入门指南教程</span>
+</a>
+  
+
+          
+  <ul>
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/tutorials/bert/" class="">
+      <span class="book-menu-link-title">从零玩转 Bert 详解6大下游任务</span>
+</a>
+  
+
+          
+  <ul>
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/tutorials/mini-chatgpt/" class="">
+      <span class="book-menu-link-title">手把手带你从零构建 ChatGPT</span>
+</a>
+  
+
+          
+  <ul>
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/" class="">
+      <span class="book-menu-link-title">大模型Agent开发（更新中……）</span>
+</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-279cf10e5100caa4f65ba3f7dd8888a4" class="toggle"  />
+    <label for="section-279cf10e5100caa4f65ba3f7dd8888a4" class="flex">
+      <a href="/agent/chapter01/" class="">
+        <span class="book-menu-link-title">第 1 章 RAG 基础概念</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/what-is-rag/" class="">
+      <span class="book-menu-link-title">1.1 RAG 提出背景</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter01/rag-pipeline-overview/" class="">
+      <span class="book-menu-link-title">1.2 RAG 流程概览</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-83c662c2764f1c19f8005eab77fee110" class="toggle"  />
+    <label for="section-83c662c2764f1c19f8005eab77fee110" class="flex">
+      <a href="/agent/chapter02/" class="">
+        <span class="book-menu-link-title">第 2 章 大模型接入与使用</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/intro-to-llm-sdk/" class="">
+      <span class="book-menu-link-title">2.1 SDK 介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/modern-llm-sdk/" class="">
+      <span class="book-menu-link-title">2.2 现代大模型中的 SDK</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/dashscope-api-overview/" class="">
+      <span class="book-menu-link-title">2.3 DashScope 接口体系</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter02/qwen-onboarding/" class="">
+      <span class="book-menu-link-title">2.4 千问大模型接入与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-1e583d7a26333453241d87c5c16592bd" class="toggle"  />
+    <label for="section-1e583d7a26333453241d87c5c16592bd" class="flex">
+      <a href="/agent/chapter03/" class="">
+        <span class="book-menu-link-title">第 3 章 文档标准化与语义检索</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/document-loading-and-preprocessing/" class="">
+      <span class="book-menu-link-title">3.1 文档加载与标准化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/text-splitting-strategies/" class="">
+      <span class="book-menu-link-title">3.2 常见文本切分策略</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/vector-database-selection/" class="">
+      <span class="book-menu-link-title">3.3 向量数据库选择</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/qwen-embedding-model/" class="">
+      <span class="book-menu-link-title">3.4 Qwen3 Embedding 模型介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/semantic-retrieval-pipeline/" class="">
+      <span class="book-menu-link-title">3.5 语义搜索引擎构建</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter03/milvus-tutorial/" class="">
+      <span class="book-menu-link-title">3.6  Milvus 模块解析</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="toggle"  />
+    <label for="section-85f3ea1f0855cc79e980e0a5b55b4bc0" class="flex">
+      <a href="/agent/chapter04/" class="">
+        <span class="book-menu-link-title">第 4 章 RAG 与 Agent</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/two-step-rag/" class="">
+      <span class="book-menu-link-title">4.1 两步式 RAG 搭建</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/function-calling-basics/" class="">
+      <span class="book-menu-link-title">4.2 Function Calling 概念介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/langchain-tool-decorator/" class="">
+      <span class="book-menu-link-title">4.3 LangChain 中的 Tool 修饰器</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/rag-agent-essentials/" class="">
+      <span class="book-menu-link-title">4.4 RAG Agent 原理与搭建</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/react-framework/" class="">
+      <span class="book-menu-link-title">4.5 复杂问题拆解与ReAct框架</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/two-stage-indexing/" class="">
+      <span class="book-menu-link-title">4.6 RAG 中的两阶段索引</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/qwen3-reranking/" class="">
+      <span class="book-menu-link-title">4.7 Qwen3 Reranking 原理与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/two-stage-rag-agent/" class="">
+      <span class="book-menu-link-title">4.8 基于两阶段索引的 RAG Agent</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/langgraph-basics/" class="">
+      <span class="book-menu-link-title">4.9 LangGraph 基本概念介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter04/langgraph-custom-rag-agent/" class="">
+      <span class="book-menu-link-title">4.10  基于 LangGraph 构建自定义 RAG Agent</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-bf5130286ff0eee8f362b632167a5e6b" class="toggle"  />
+    <label for="section-bf5130286ff0eee8f362b632167a5e6b" class="flex">
+      <a href="/agent/chapter05/" class="">
+        <span class="book-menu-link-title">第 5 章 Agent 记忆机制与管理</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/agent-memory-overview/" class="">
+      <span class="book-menu-link-title">5.1 Agent 记忆机制概览</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/langchain-short-term-memory/" class="">
+      <span class="book-menu-link-title">5.2 短期记忆持久化与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/short-term-memory-management/" class="">
+      <span class="book-menu-link-title">5.3 短期记忆管理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/short-term-memory-rag-agent/" class="">
+      <span class="book-menu-link-title">5.4 拥有短期记忆的 RAG Agent</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/long-term-memory-strategies/" class="">
+      <span class="book-menu-link-title">5.5 长期记忆管理与持久化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/mini-chatgpt-from-scratch/" class="">
+      <span class="book-menu-link-title">5.6 从零实现 Mini ChatGPT 助手</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/pgvector-setup/" class="">
+      <span class="book-menu-link-title">5.7 pgvector 配置安装</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/long-term-memory-retrieval-and-forgetting/" class="">
+      <span class="book-menu-link-title">5.8 长期记忆检索与遗忘</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/langgraph-mini-chatgpt/" class="">
+      <span class="book-menu-link-title">5.9 基于 LangGraph 的Mini ChatGPT 助手</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/agent/chapter05/create-agent-mini-chatgpt/" class="">
+      <span class="book-menu-link-title">5.10 使用 create_agent 搭建 Mini ChatGPT</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/" class="">
+      <span class="book-menu-link-title">深度学习</span>
+</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/mindmap/" class="">
+      <span class="book-menu-link-title">目录思维导图</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-cf7621e8efb1f3153eaca44a113dcdb9" class="toggle"  />
+    <label for="section-cf7621e8efb1f3153eaca44a113dcdb9" class="flex">
+      <a href="/dl/chapter01/" class="">
+        <span class="book-menu-link-title">第 1 章 深度学习简介</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/dl-development-stages/" class="">
+      <span class="book-menu-link-title">1.1 深度学习的发展阶段</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/dl-key-figures/" class="">
+      <span class="book-menu-link-title">1.2 深度学习中的关键人物</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter01/mainstream-dl-frameworks/" class="">
+      <span class="book-menu-link-title">1.3 深度学习框架介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f9bf1a68c19405769f9c4a1495708a55" class="toggle"  />
+    <label for="section-f9bf1a68c19405769f9c4a1495708a55" class="flex">
+      <a href="/dl/chapter02/" class="">
+        <span class="book-menu-link-title">第 2 章 环境配置</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/dl-dev-environment-architecture/" class="">
+      <span class="book-menu-link-title">2.1 体系结构介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/dl-cuda-pytorch-install/" class="">
+      <span class="book-menu-link-title">2.2 深度学习环境安装</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter02/dl-cuda-training-env-setup/" class="">
+      <span class="book-menu-link-title">2.3 开发环境安装配置</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="toggle"  />
+    <label for="section-e8eb17ffd5fc27a99cd10d6e40ef56b2" class="flex">
+      <a href="/dl/chapter03/" class="">
+        <span class="book-menu-link-title">第 3 章 深度学习基础</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/linear-regression-basics/" class="">
+      <span class="book-menu-link-title">3.1 线性回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/linear-regression-implementation/" class="">
+      <span class="book-menu-link-title">3.2 线性回归简洁实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/backpropagation-and-gradient-descent/" class="">
+      <span class="book-menu-link-title">3.3 梯度下降与反向传播</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/regression-from-scratch/" class="">
+      <span class="book-menu-link-title">3.4 从零实现回归模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/softmax-regression-basics/" class="">
+      <span class="book-menu-link-title">3.5 从逻辑回归到Softmax回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/softmax-regression-implementation/" class="">
+      <span class="book-menu-link-title">3.6 Softmax回归简洁实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/softmax-regression-from-scratch/" class="">
+      <span class="book-menu-link-title">3.7 从零实现分类模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/regression-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">3.8 回归模型评估指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/classification-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">3.9 分类模型评估指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/overfitting-and-regularization/" class="">
+      <span class="book-menu-link-title">3.10 过拟合与正则化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/hyperparameters-and-cross-validation/" class="">
+      <span class="book-menu-link-title">3.11 超参数与交叉验证</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/activation-functions/" class="">
+      <span class="book-menu-link-title">3.12 激活函数</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter03/multi-label-classification/" class="">
+      <span class="book-menu-link-title">3.13 多标签分类</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-7a12cee83820a928df00362d70804a97" class="toggle"  />
+    <label for="section-7a12cee83820a928df00362d70804a97" class="flex">
+      <a href="/dl/chapter04/" class="">
+        <span class="book-menu-link-title">第 4 章 卷积神经网络</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/cnn-basics/" class="">
+      <span class="book-menu-link-title">4.1 卷积的概念</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/convolution-operation/" class="">
+      <span class="book-menu-link-title">4.2 卷积的计算过程</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/convolution-and-pooling/" class="">
+      <span class="book-menu-link-title">4.3 填充和池化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/lenet5/" class="">
+      <span class="book-menu-link-title">4.4 LeNet5网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/alexnet/" class="">
+      <span class="book-menu-link-title">4.5 AlexNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/vgg/" class="">
+      <span class="book-menu-link-title">4.6 VGG网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/nin/" class="">
+      <span class="book-menu-link-title">4.7 NIN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/googlenet/" class="">
+      <span class="book-menu-link-title">4.8 GoogLeNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/resnet/" class="">
+      <span class="book-menu-link-title">4.9 ResNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter04/densenet/" class="">
+      <span class="book-menu-link-title">4.10 DenseNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-be9addfd3a15c372d609d09cabb94159" class="toggle"  />
+    <label for="section-be9addfd3a15c372d609d09cabb94159" class="flex">
+      <a href="/dl/chapter05/" class="">
+        <span class="book-menu-link-title">第 5 章 模型训练与复用</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/training-logs-management/" class="">
+      <span class="book-menu-link-title">5.1 参数及日志管理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/tensorboard-tutorial/" class="">
+      <span class="book-menu-link-title">5.2 Tensorboard可视化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/pytorch-model-save-load/" class="">
+      <span class="book-menu-link-title">5.3 模型的保存与复用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/transfer-learning-tutorial/" class="">
+      <span class="book-menu-link-title">5.4 模型的迁移学习</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/pretrained-model-reuse/" class="">
+      <span class="book-menu-link-title">5.5 开源模型复用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/multi-gpu-training/" class="">
+      <span class="book-menu-link-title">5.6 多GPU训练</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter05/training-data-preprocessing-cache/" class="">
+      <span class="book-menu-link-title">5.7 数据预处理与缓存</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="toggle"  />
+    <label for="section-cd0a4dadb5f9dbdf2a71f42e3605c9c5" class="flex">
+      <a href="/dl/chapter06/" class="">
+        <span class="book-menu-link-title">第 6 章 模型优化方法</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/learning-rate-scheduler/" class="">
+      <span class="book-menu-link-title">6.1 学习率调度器</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/gradient-clipping/" class="">
+      <span class="book-menu-link-title">6.2 梯度裁剪</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/batch-norm/" class="">
+      <span class="book-menu-link-title">6.3 批归一化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/layer-norm/" class="">
+      <span class="book-menu-link-title">6.4 层归一化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/group-norm/" class="">
+      <span class="book-menu-link-title">6.5 组归一化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/momentum/" class="">
+      <span class="book-menu-link-title">6.6 动量法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/ada-grad/" class="">
+      <span class="book-menu-link-title">6.7 AdaGrad算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/ada-delta/" class="">
+      <span class="book-menu-link-title">6.8 AdaDelta算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/adam/" class="">
+      <span class="book-menu-link-title">6.9 Adam算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter06/weight-initialization/" class="">
+      <span class="book-menu-link-title">6.10 初始化方法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-517b751d7c44a7ac77d25d295ed44271" class="toggle"  />
+    <label for="section-517b751d7c44a7ac77d25d295ed44271" class="flex">
+      <a href="/dl/chapter07/" class="">
+        <span class="book-menu-link-title">第 7 章 循环神经网络</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/rnn-basics/" class="">
+      <span class="book-menu-link-title">7.1 RNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/time-series-modeling/" class="">
+      <span class="book-menu-link-title">7.2 时序数据</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/lstm/" class="">
+      <span class="book-menu-link-title">7.3 LSTM网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/gru/" class="">
+      <span class="book-menu-link-title">7.4 GRU网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/bi-rnn/" class="">
+      <span class="book-menu-link-title">7.5 BiRNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter07/char-rnn/" class="">
+      <span class="book-menu-link-title">7.6 CharRNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-b9b861f64ba32bc68dfb977497de37d9" class="toggle"  />
+    <label for="section-b9b861f64ba32bc68dfb977497de37d9" class="flex">
+      <a href="/dl/chapter08/" class="">
+        <span class="book-menu-link-title">第 8 章 时序与模型融合</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/textcnn/" class="">
+      <span class="book-menu-link-title">8.1 TextCNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/textrnn/" class="">
+      <span class="book-menu-link-title">8.2 TextRNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/cnn-rnn/" class="">
+      <span class="book-menu-link-title">8.3 CNN-RNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/convlstm/" class="">
+      <span class="book-menu-link-title">8.4 ConvLSTM网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/3dcnn/" class="">
+      <span class="book-menu-link-title">8.5 3DCNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter08/stresnet/" class="">
+      <span class="book-menu-link-title">8.6 STResNet网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-e54a1e28b1438b8266637bcb8dac1a44" class="toggle"  />
+    <label for="section-e54a1e28b1438b8266637bcb8dac1a44" class="flex">
+      <a href="/dl/chapter09/" class="">
+        <span class="book-menu-link-title">第 9 章 自然语言处理</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/nlp-basics/" class="">
+      <span class="book-menu-link-title">9.1 自然语言处理介绍</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/word2vec-principle/" class="">
+      <span class="book-menu-link-title">9.2 Word2Vec词向量</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/word2vec-training-and-usage/" class="">
+      <span class="book-menu-link-title">9.3 Word2Vec训练与使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/glove/" class="">
+      <span class="book-menu-link-title">9.4 GloVe词向量</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/word-vector-finetuning/" class="">
+      <span class="book-menu-link-title">9.5 词向量的微调使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/fasttext/" class="">
+      <span class="book-menu-link-title">9.6 fastText网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/seq2seq-tutorial/" class="">
+      <span class="book-menu-link-title">9.7 Seq2Seq网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/seq-model-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">9.8 序列模型评价指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/nmt-seq2seq/" class="">
+      <span class="book-menu-link-title">9.9 NMT网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/attention-mechanism/" class="">
+      <span class="book-menu-link-title">9.10 注意力机制</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/nmt-with-attention/" class="">
+      <span class="book-menu-link-title">9.11 含注意力的NMT网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter09/rnn-with-attention/" class="">
+      <span class="book-menu-link-title">9.12 含注意力的RNN网络</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-f6636b2f9dc1df93b9fa64dd201716d9" class="toggle"  />
+    <label for="section-f6636b2f9dc1df93b9fa64dd201716d9" class="flex">
+      <a href="/dl/chapter10/" class="">
+        <span class="book-menu-link-title">第 10 章 现代神经网络</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/elmo/" class="">
+      <span class="book-menu-link-title">10.1 ELMo网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-principle/" class="">
+      <span class="book-menu-link-title">10.2 Transformer网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-architecture/" class="">
+      <span class="book-menu-link-title">10.3 Transformer结构</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-implementation/" class="">
+      <span class="book-menu-link-title">10.4 Transformer实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/transformer-couplet-model/" class="">
+      <span class="book-menu-link-title">10.5 Transformer对联模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-principle/" class="">
+      <span class="book-menu-link-title">10.6 BERT网络</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-from-scratch/" class="">
+      <span class="book-menu-link-title">10.7 从零实现BERT</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-text-classification/" class="">
+      <span class="book-menu-link-title">10.8 BERT文本分类模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-sentence-pair-matching/" class="">
+      <span class="book-menu-link-title">10.9 BERT问题选择模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-question-answering/" class="">
+      <span class="book-menu-link-title">10.10 BERT问题回答模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-ner/" class="">
+      <span class="book-menu-link-title">10.11 BERT命名体识别模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/bert-pretraining/" class="">
+      <span class="book-menu-link-title">10.12 BERT从零训练</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-1/" class="">
+      <span class="book-menu-link-title">10.13 GPT-1模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-2-and-gpt-3/" class="">
+      <span class="book-menu-link-title">10.14 GPT-2与GPT-3模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-2-chinese-pretraining/" class="">
+      <span class="book-menu-link-title">10.15 基于GPT-2的中文预训练模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/instructgpt-and-chatgpt/" class="">
+      <span class="book-menu-link-title">10.16 InstructGPT与ChatGPT</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/chatgpt-prompt-engineering/" class="">
+      <span class="book-menu-link-title">10.17 ChatGPT与提示词工程</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/baichuan-usage/" class="">
+      <span class="book-menu-link-title">10.18 百川大模型使用</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/baichuan-implementation/" class="">
+      <span class="book-menu-link-title">10.19 百川大模型实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/dl/chapter10/gpt-4-and-gpts/" class="">
+      <span class="book-menu-link-title">10.20 GPT-4与GPTs使用</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/" class="">
+      <span class="book-menu-link-title">机器学习</span>
+</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/mindmap/" class="">
+      <span class="book-menu-link-title">目录思维导图</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-48f56957e94e3cf66f3022103a7dd0ff" class="toggle"  />
+    <label for="section-48f56957e94e3cf66f3022103a7dd0ff" class="flex">
+      <a href="/ml/chapter01/" class="">
+        <span class="book-menu-link-title">第 1 章 环境配置</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/conda-install-tutorial/" class="">
+      <span class="book-menu-link-title">1.1 安装使用Conda</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter01/ml-conda-env-setup/" class="">
+      <span class="book-menu-link-title">1.2 开发环境安装配置</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-56a896338a1c41249d22a3efa0e0063c" class="toggle"  />
+    <label for="section-56a896338a1c41249d22a3efa0e0063c" class="flex">
+      <a href="/ml/chapter02/" class="">
+        <span class="book-menu-link-title">第 2 章 线性回归</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/linear-regression-basics/" class="">
+      <span class="book-menu-link-title">2.1 模型的建立与求解</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/multivariate-linear-regression/" class="">
+      <span class="book-menu-link-title">2.2 多变量线性回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/polynomial-regression/" class="">
+      <span class="book-menu-link-title">2.3 多项式回归</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/regression-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">2.4 回归模型评估</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/gradient-descent-derivation/" class="">
+      <span class="book-menu-link-title">2.5 梯度下降</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/normal-distribution/" class="">
+      <span class="book-menu-link-title">2.6 正态分布</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter02/linear-regression-loss-derivation/" class="">
+      <span class="book-menu-link-title">2.7 目标函数推导</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ccd0dc9386ea80613d4cedf91b30058d" class="toggle"  />
+    <label for="section-ccd0dc9386ea80613d4cedf91b30058d" class="flex">
+      <a href="/ml/chapter03/" class="">
+        <span class="book-menu-link-title">第 3 章 逻辑回归</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/logistic-regression-basics/" class="">
+      <span class="book-menu-link-title">3.1 模型的建立与求解</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/logistic-regression-multiclass/" class="">
+      <span class="book-menu-link-title">3.2 多分类任务</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/classification-evaluation-metrics/" class="">
+      <span class="book-menu-link-title">3.3 常见的分类评估指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter03/logistic-regression-loss-derivation/" class="">
+      <span class="book-menu-link-title">3.4 目标函数推导</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="toggle"  />
+    <label for="section-ff936f5f793b0d5f6cc356c3ed41d4e5" class="flex">
+      <a href="/ml/chapter04/" class="">
+        <span class="book-menu-link-title">第 4 章 模型的改善与泛化</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/generalization-basics/" class="">
+      <span class="book-menu-link-title">4.1 基本概念</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/feature-scaling/" class="">
+      <span class="book-menu-link-title">4.2 特征标准化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/overfitting-solutions/" class="">
+      <span class="book-menu-link-title">4.3 过拟合</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/l1-l2-regularization/" class="">
+      <span class="book-menu-link-title">4.4 正则化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/bias-and-variance/" class="">
+      <span class="book-menu-link-title">4.5 偏差、方差与交叉验证</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter04/handwritten-digit-recognition-case/" class="">
+      <span class="book-menu-link-title">4.6 实例分析手写体识别</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-40f463d9d502d24b86ea6120b7030123" class="toggle"  />
+    <label for="section-40f463d9d502d24b86ea6120b7030123" class="flex">
+      <a href="/ml/chapter05/" class="">
+        <span class="book-menu-link-title">第 5 章 K近邻</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/knn-principle/" class="">
+      <span class="book-menu-link-title">5.1 K近邻思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/knn-algorithm-details/" class="">
+      <span class="book-menu-link-title">5.2 K近邻原理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/sklearn-knn-example/" class="">
+      <span class="book-menu-link-title">5.3 sklearn接口与示例代码</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/kd-tree-knn/" class="">
+      <span class="book-menu-link-title">5.4 kd树构建与搜索</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter05/knn-from-scratch/" class="">
+      <span class="book-menu-link-title">5.5 从零实现K近邻</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-5a460dc18f1e79253296cf2cd0498446" class="toggle"  />
+    <label for="section-5a460dc18f1e79253296cf2cd0498446" class="flex">
+      <a href="/ml/chapter06/" class="">
+        <span class="book-menu-link-title">第 6 章 文本特征与模型复用</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/bag-of-words/" class="">
+      <span class="book-menu-link-title">6.1 词袋模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/knn-spam-classification/" class="">
+      <span class="book-menu-link-title">6 .2 基于K近邻算法的垃圾邮件分类</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/tf-idf/" class="">
+      <span class="book-menu-link-title">6.3 考虑权重的词袋模型</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter06/wordcloud-generation/" class="">
+      <span class="book-menu-link-title">6.4 词云图</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-96f45a8b8c8b75adc70c78026d93dbf6" class="toggle"  />
+    <label for="section-96f45a8b8c8b75adc70c78026d93dbf6" class="flex">
+      <a href="/ml/chapter07/" class="">
+        <span class="book-menu-link-title">第 7 章 朴素贝叶斯</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/naive-bayes-basics/" class="">
+      <span class="book-menu-link-title">7.1 朴素贝叶斯算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/bayes-estimation/" class="">
+      <span class="book-menu-link-title">7.2 贝叶斯估计</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/naive-bayes-implementation/" class="">
+      <span class="book-menu-link-title">7.3 朴素贝叶斯实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/multinomial-naive-bayes/" class="">
+      <span class="book-menu-link-title">7.4 多项式朴素贝叶斯原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter07/gaussian-naive-bayes/" class="">
+      <span class="book-menu-link-title">7.5 高斯朴素贝叶斯原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-22476e49d5058c3e5e7e7366b7ab676f" class="toggle"  />
+    <label for="section-22476e49d5058c3e5e7e7366b7ab676f" class="flex">
+      <a href="/ml/chapter08/" class="">
+        <span class="book-menu-link-title">第 8 章 决策树</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-principle/" class="">
+      <span class="book-menu-link-title">8.1 决策树的基本思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-sklearn/" class="">
+      <span class="book-menu-link-title">8.2 决策树建模与可视化</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/id3-vs-c45/" class="">
+      <span class="book-menu-link-title">8.3 决策树生成之ID3与C4.5</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-pruning/" class="">
+      <span class="book-menu-link-title">8.4 决策树剪枝过程</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-from-scratch/" class="">
+      <span class="book-menu-link-title">8.5 从零实现ID3与C4.5算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/decision-tree-continuous-features/" class="">
+      <span class="book-menu-link-title">8.6 连续型特征变量下决策树实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/cart-algorithm/" class="">
+      <span class="book-menu-link-title">8.7 CART生成与剪枝算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter08/cart-from-scratch/" class="">
+      <span class="book-menu-link-title">8.8 从零实现CART算法及剪枝示例</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-2feb6a51cabb61dba860f45c1881386b" class="toggle"  />
+    <label for="section-2feb6a51cabb61dba860f45c1881386b" class="flex">
+      <a href="/ml/chapter09/" class="">
+        <span class="book-menu-link-title">第 9 章 集成学习与提升算法</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/ensemble-learning-basics/" class="">
+      <span class="book-menu-link-title">9.1 集成学习算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/random-forest-principle/" class="">
+      <span class="book-menu-link-title">9.2 随机森林</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/random-forest-titanic/" class="">
+      <span class="book-menu-link-title">9.3 泰坦尼克号生还预测</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/adaboost/" class="">
+      <span class="book-menu-link-title">9.4 AdaBoost原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/multi-adaboost/" class="">
+      <span class="book-menu-link-title">9.5 MultiAdaBoost原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter09/gradient-boost/" class="">
+      <span class="book-menu-link-title">9.6 Gradient Boost 原理与实现</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-938ae119c3849b03ccb6f91cef4243dd" class="toggle"  />
+    <label for="section-938ae119c3849b03ccb6f91cef4243dd" class="flex">
+      <a href="/ml/chapter10/" class="">
+        <span class="book-menu-link-title">第 10 章 支持向量机</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-principle/" class="">
+      <span class="book-menu-link-title">10.1 SVM思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-nonlinear-kernel/" class="">
+      <span class="book-menu-link-title">10.2 SVM线性不可分</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-max-margin/" class="">
+      <span class="book-menu-link-title">10.3 SVM原理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-soft-margin/" class="">
+      <span class="book-menu-link-title">10.4 SVM中的软间隔</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/lagrange-multipliers/" class="">
+      <span class="book-menu-link-title">10.5 拉格朗日乘数法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/kkt-conditions/" class="">
+      <span class="book-menu-link-title">10.6 对偶性与KKT条件</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-optimization/" class="">
+      <span class="book-menu-link-title">10.7 SVM优化问题</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-kernel-functions/" class="">
+      <span class="book-menu-link-title">10.8 SVM核函数原理</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/smo-algorithm/" class="">
+      <span class="book-menu-link-title">10.9 SMO算法求解SVM</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter10/svm-from-scratch/" class="">
+      <span class="book-menu-link-title">10.10 从零实现SVM分类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-9f4d9786d4ab755fde42c64d09b0d026" class="toggle"  />
+    <label for="section-9f4d9786d4ab755fde42c64d09b0d026" class="flex">
+      <a href="/ml/chapter11/" class="">
+        <span class="book-menu-link-title">第 11 章 聚类分析</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/clustering-basics/" class="">
+      <span class="book-menu-link-title">11.1 聚类算法的思想</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-principle/" class="">
+      <span class="book-menu-link-title">11.2 Kmeans聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-iteration/" class="">
+      <span class="book-menu-link-title">11.3 Kmeans算法求解</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-from-scratch/" class="">
+      <span class="book-menu-link-title">11.4 从零实现Kmeans聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-plus-plus/" class="">
+      <span class="book-menu-link-title">11.5 Kmeans&#43;&#43;聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/clustering-external-metrics/" class="">
+      <span class="book-menu-link-title">11.6 聚类外部评价指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/weighted-kmeans/" class="">
+      <span class="book-menu-link-title">11.7 加权Kmeans聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/clustering-internal-metrics/" class="">
+      <span class="book-menu-link-title">11.8 聚类内部评价指标</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/kmeans-k-selection/" class="">
+      <span class="book-menu-link-title">11.9 聚类K值选取与分析</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/dbscan/" class="">
+      <span class="book-menu-link-title">11.10 基于密度的聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter11/hierarchical-clustering/" class="">
+      <span class="book-menu-link-title">11.11 基于层次的聚类算法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-d5e78c45312818bb3abd5c19c858f7e5" class="toggle"  />
+    <label for="section-d5e78c45312818bb3abd5c19c858f7e5" class="flex">
+      <a href="/ml/chapter12/" class="">
+        <span class="book-menu-link-title">第 12 章 降维算法</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/pca-principle/" class="">
+      <span class="book-menu-link-title">12.1 主成分分析</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter12/kpca/" class="">
+      <span class="book-menu-link-title">12.2 基于核函数的主成分分析</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-a82b41bb7eb95af72bc11e8a3d668acd" class="toggle"  />
+    <label for="section-a82b41bb7eb95af72bc11e8a3d668acd" class="flex">
+      <a href="/ml/chapter13/" class="">
+        <span class="book-menu-link-title">第 13 章 自训练与标签传播</span>
+</a>
+      <img src="/icons/chevron-right.svg" class="book-icon" alt="Expand" />
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/self-training/" class="">
+      <span class="book-menu-link-title">13.1 Self-Training 自训练算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/label-propagation/" class="">
+      <span class="book-menu-link-title">13.2 Label Propagation算法</span>
+</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/ml/chapter13/label-spreading/" class="">
+      <span class="book-menu-link-title">13.3 Label Spreading 算法</span>
+</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</nav>
+
+
+
+
+  <script>(function(){var e=document.querySelector("aside .book-menu-content");addEventListener("beforeunload",function(){localStorage.setItem("menu.scrollTop",e.scrollTop)}),e.scrollTop=localStorage.getItem("menu.scrollTop")})()</script>
+
+
+
+  </div>
+</aside>
+ 
+
+    <div class="book-page">
+      <header class="book-header hidden">
+        
+  <div class="flex align-center justify-between">
+  <label for="menu-control">
+    <img src="/icons/menu.svg" class="book-icon" alt="Menu" />
+  </label>
+
+  <h3>KV Cache 进阶教程：为什么只缓存 K 和 V 不缓存 Q？张量并行下 KV Cache 怎么分片</h3>
+
+  <label for="toc-control">
+    
+    <img src="/icons/toc.svg" class="book-icon" alt="Table of Contents" />
+    
+  </label>
+</div>
+
+
+  
+  <aside class="hidden">
+    
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#1-动机">1. 动机</a></li>
+    <li><a href="#2-不采用-kv-缓存推理过程">2. 不采用 KV 缓存推理过程</a>
+      <ul>
+        <li><a href="#21-计算原理图解">2.1 计算原理图解</a></li>
+        <li><a href="#22-从零开始实现">2.2 从零开始实现</a></li>
+        <li><a href="#23-推理过程模拟">2.3 推理过程模拟</a></li>
+        <li><a href="#24-输出结果分析">2.4 输出结果分析</a></li>
+      </ul>
+    </li>
+    <li><a href="#3-采用-kv-缓存推理过程">3. 采用 KV 缓存推理过程</a>
+      <ul>
+        <li><a href="#31-计算原理图解">3.1 计算原理图解</a></li>
+        <li><a href="#32-从零开始实现">3.2 从零开始实现</a></li>
+        <li><a href="#33-推理过程模拟">3.3 推理过程模拟</a></li>
+        <li><a href="#34-输出结果分析">3.4 输出结果分析</a></li>
+      </ul>
+    </li>
+    <li><a href="#4-张量并行下的-kv-缓存">4. 张量并行下的 KV 缓存</a>
+      <ul>
+        <li><a href="#41-计算原理图解">4.1 计算原理图解</a></li>
+        <li><a href="#42-从零开始实现">4.2 从零开始实现</a></li>
+        <li><a href="#43-推理过程模拟">4.3 推理过程模拟</a></li>
+        <li><a href="#44-输出结果分析">4.4 输出结果分析</a></li>
+      </ul>
+    </li>
+    <li><a href="#引用">引用</a></li>
+  </ul>
+</nav>
+
+
+
+
+  </aside>
+  
+ 
+      </header>
+
+      
+      
+  <article class="markdown book-article"><nav class="book-breadcrumbs text-small book-breadcrumbs--page" aria-label="面包屑导航">
+    <ol class="book-breadcrumbs__list"><li class="book-breadcrumbs__item"><a class="book-breadcrumbs__link" href="https://mlwithme.github.io/">首页</a></li><li class="book-breadcrumbs__item"><a class="book-breadcrumbs__link" href="https://mlwithme.github.io/featured/">精选文章</a></li><li class="book-breadcrumbs__item"><span class="book-breadcrumbs__current" aria-current="page">大模型为什么需要KV缓存？为什么Q不用缓存？</span></li></ol>
+  </nav><div class="book-article-lastmod text-small">
+        <span class="book-article-lastmod-label">更新于</span>
+        <span class="book-article-lastmod-value">2026年7月21日</span>
+      </div><p>我们都知道，现在各个大模型在整体的网络结构上基本上并没有太大差异，都是基于 Transformer 中的 Decoder 改进而来，所以基本也就是对其中的模块或使用顺序进行了替换或优化，因此为了后面能够更好的理解 LLaMA 2 模型的原理，我们依旧会先逐一介绍其中各个小的模块的原理及实现，然后再来整体看 LLaMA 2 模型。</p>
+<div align=center><img width="400" src="/images/featured/202507072154.png" alt="使用 KV 缓存自注意力计算过程"/> </div><center>使用 KV 缓存自注意力计算过程</center>
+<p>因此，在今天这篇文章中将要和大家介绍的便是大模型当中都会使用到的 Key-Value Cache ，简称 KV Cache。</p>
+<p><strong>关键字：大模型、LLaMA、DeepSeek、KV缓存、多头注意力机制、KV Cache</strong></p>
+<h2 id="1-动机">1. 动机<a class="anchor" href="#1-%e5%8a%a8%e6%9c%ba">#</a></h2>
+<p>由于在生成式模型（如 Transformer 解码器）的推理过程中，token 是逐时刻解码生成得到，每个时刻新生成 token 时都需要将先前所有已生成的 tokens 重新输入到模型中，所以这就会带来巨大的计算冗余和重复，使得解码过程越来越慢。</p>
+<p>例如在解码生成第 $t$ 时刻时，会将第 $0$ 到 $t-1$ 时刻的 token 都输入到模型中进行编码；而在生成第 $t+1$ 时刻时，又会将第 $0$ 到 $t$ 时刻的 token 都输入到模型中进行编码，其中第 $0$ 到 $t-1$ 时刻就会涉及到重复计算的问题。</p>
+<div align=center><img width="400" src="/images/featured/202507072056.png" alt="图 1. 推理解码过程图"/> </div><center>图 1. 推理解码过程图</center>
+<p>如图1所示，模型输入 prompt 的长度为 3，在对 $t=3$ 时刻解码时会将整个 prompt 作为输入然后解码得到一个长度为 3 的张量，并取最后一个时刻作为 $t=3$ 时刻的生成结果；在对 $t=4$ 时刻解码时，会将 $t=3$ 时刻的输入与输出拼接起来作为输入生成 $t=4$ 时刻的结果；后续以此类推。</p>
+<p>可以看出整个过程中会涉及到大量<strong>重复</strong>和<strong>冗余</strong>的计算。</p>
+<p>注意这里的两个关键词“重复”冗余“”，重复代表着需要去重，而冗余则是要去掉。</p>
+<p>有人可能会问，那训练阶段为什么不会呢？</p>
+<p>这因为在训练阶段是一次性将整个样本输入到模型中（通过注意力掩码 attention mask 来使得编码当前时刻注意力只能关注到过去的信息而不能看到未来的信息），且所有时刻的输出都将用于损失计算，所以不存在重复或无用计算的问题。</p>
+<p>因此，为了避免这种重复和冗余的计算的工作，Key-Value 缓存应运而生。简单来说，它在每次的自注意力计算过程中，都会将此时计算得到的 Key 和 Value 进行缓存，后续在生成下一个时刻的 token 时，模型只需对当前时刻输入的一个 token 计算隐藏状态，再把缓存与该隐藏状态拼接即可得到完整的隐藏状态 Key 和 Value，这样就能显著加快推理速度，而这在长序列或交互式应用中优势非常明显。</p>
+<h2 id="2-不采用-kv-缓存推理过程">2. 不采用 KV 缓存推理过程<a class="anchor" href="#2-%e4%b8%8d%e9%87%87%e7%94%a8-kv-%e7%bc%93%e5%ad%98%e6%8e%a8%e7%90%86%e8%bf%87%e7%a8%8b">#</a></h2>
+<p>在介绍完 KV 缓存出现的动机以后，我们再来看 KV 缓存的原理到底是什么样的。</p>
+<p>不过为了让大家更好的理解整个过程，我们先来带大家通过图示的方式来回顾一下没有 KV 缓存时的完整计算过程，以便稍后将两者进行对比，以便更容易理解。</p>
+<h3 id="21-计算原理图解">2.1 计算原理图解<a class="anchor" href="#21-%e8%ae%a1%e7%ae%97%e5%8e%9f%e7%90%86%e5%9b%be%e8%a7%a3">#</a></h3>
+<p>下面，我们依旧以图1中的情境为例进行说明。</p>
+<p>首先，我们需要明白的是当模型训练完成以后，<strong>在推理过程中各个权重参数是固定不变的，因此对于同样的输入部分，其输出结果也是不变的</strong>，这一前提我们要知道。</p>
+<p>假定现在有一个训练完成的模型将用于推理任务，为了便于介绍我们只考虑涉及到 KV 缓存的部分，即自注意力机制的计算过程，如图2所示。</p>
+<div align=center><img width="350" src="/images/featured/202507072129.png" alt="图 2. 不采用 KV 缓存自注意力计算过程，'()' 表示 Softmax 操作"/> </div><center>图 2. 不采用 KV 缓存自注意力计算过程，'()' 表示 Softmax 操作</center>
+<p>在图2所示的示例中，原始 prompt 输入为一个长度为 3 的序列，输入到模型已经首先完成 3 个线性变换分别计算得到 $Q$ 、$K$ 和 $V$ ，进一步完成注意力权重的计算已经最终的输出，即最上方的结果。这里需要注意的是，因为这是在推理阶段，所以在对输入序列进行编码时需要进行 attention mask 操作，以保证当前时刻不能看到未来信息。在得到第 $t=3$ 时刻的整个输出以后，模型将会取结果的最后一个时刻作为 $t=3$ 时候的生成结果。</p>
+<p>此时，我们可以得到第一个结论：<strong>在对第 $t$ 个时刻解码时，生成内容中前 $t-1$ 个时刻的结果是无用的。</strong></p>
+<p>进一步，开始依次进行后续时刻的解码生成，如图3所示。</p>
+<div align=center><img width="480" src="/images/featured/202507072130.png" alt="图 3. 不采用 KV 缓存自注意力计算过程，'()' 表示 Softmax 操作"/> </div><center>图 3. 不采用 KV 缓存自注意力计算过程，'()' 表示 Softmax 操作</center>
+<p>在图4中，模型对第 $t=4$ 时刻解码时，会将整个 prompt 以及到当前时刻为止已经生成的内容拼接起来作为输入来生成当前时刻的结果。同理，此时的输入首先将完成 3 个线性变换分别计算得到 $Q$ 、$K$ 和 $V$ ，然后进行后续计算。此时我们可以发现，在第 $t=4$ 时刻时，其输入序列的前 3 个 token （图中灰色部分）在第 $t=3$ 时刻中已经分别进行过了一次同 $W^Q$ 、 $W^K$ 和 $W^V$ 的线性变换，也就是说<strong>此时  $Q$ 、$K$ 和 $V$  这3个矩阵的前三行都是之前已经计算过的（图中红框中的内容），这里是在重复计算。</strong></p>
+<p>进一步，得到  $Q$ 、$K$ 和 $V$  后将完成自注意力计算过程并得到最后的输出。这里需要注意的是，因为此时已经是逐时刻进行解码，模型可以看到当前时刻之前的所有信息，所以不再需要进行 attention mask 操作。同时，我们已经可以知道，对于  $t=4$  的输出结果，依旧只会取最后一个时刻对应的结果作为  $t=4$  时刻生成的内容，其余时刻的结果无用。</p>
+<p>当第 $t=5$ 时，其生成过程完全与上述过程一致，大家可以自行默想。</p>
+<p>此时此刻相信大家已经发现了其中的门道：</p>
+<p>① 如果我们每次在进行解码生成时，都将当前时刻计算得到的 $K$ 和 $V$ 进行缓存，那么在下一时刻进行解码时就不需要再重复计算对应的结果，这就是解决前面提到的“重复计算”的问题；</p>
+<p>② 因为只取每个时刻输出结果的最后一个时刻作为当前时刻的生成结果，所以在①的基础上，当前时刻的输入仅使用上一时刻的输出的最后一个时刻即可，不需要和先前的输入拼接，这就是解决前面提到的“冗余计算”的问题；</p>
+<p>③ 基于对于②的理解，所以我们不需要对 $Q$ 进行缓存，因为后面根本用不到。</p>
+<p>上面这两点就是 KV 缓存的核心思想。下面我们先来通过一个示例来模拟一下不采用 KV 缓存推理时的整个过程。</p>
+<h3 id="22-从零开始实现">2.2 从零开始实现<a class="anchor" href="#22-%e4%bb%8e%e9%9b%b6%e5%bc%80%e5%a7%8b%e5%ae%9e%e7%8e%b0">#</a></h3>
+<p>首先，我们来快速实现多头注意力机制的计算过程，代码如下所示：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">Attention</span>(nn<span style="color:#666">.</span>Module):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">__init__</span>(<span style="color:#007020">self</span>, embed_dim<span style="color:#666">=</span><span style="color:#40a070">64</span>, num_heads<span style="color:#666">=</span><span style="color:#40a070">8</span>):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>         <span style="color:#007020">super</span>()<span style="color:#666">.</span><span style="color:#06287e">__init__</span>()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>num_heads <span style="color:#666">=</span> num_heads
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>embed_dim <span style="color:#666">=</span> embed_dim
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>head_dim <span style="color:#666">=</span> embed_dim <span style="color:#666">//</span> num_heads
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>         <span style="color:#007020;font-weight:bold">assert</span> <span style="color:#007020">self</span><span style="color:#666">.</span>head_dim <span style="color:#666">*</span> num_heads <span style="color:#666">==</span> <span style="color:#007020">self</span><span style="color:#666">.</span>embed_dim
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>wq <span style="color:#666">=</span> nn<span style="color:#666">.</span>Linear(<span style="color:#007020">self</span><span style="color:#666">.</span>embed_dim, <span style="color:#007020">self</span><span style="color:#666">.</span>embed_dim, bias<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">False</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>wk <span style="color:#666">=</span> nn<span style="color:#666">.</span>Linear(<span style="color:#007020">self</span><span style="color:#666">.</span>embed_dim, <span style="color:#007020">self</span><span style="color:#666">.</span>embed_dim, bias<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">False</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>wv <span style="color:#666">=</span> nn<span style="color:#666">.</span>Linear(<span style="color:#007020">self</span><span style="color:#666">.</span>embed_dim, <span style="color:#007020">self</span><span style="color:#666">.</span>embed_dim, bias<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">False</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>wo <span style="color:#666">=</span> nn<span style="color:#666">.</span>Linear(<span style="color:#007020">self</span><span style="color:#666">.</span>embed_dim, <span style="color:#007020">self</span><span style="color:#666">.</span>embed_dim, bias<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">False</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">forward</span>(<span style="color:#007020">self</span>, x: torch<span style="color:#666">.</span>Tensor, mask<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>         bsz, seq_len, _ <span style="color:#666">=</span> x<span style="color:#666">.</span>shape
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>         xq, xk, xv <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>wq(x), <span style="color:#007020">self</span><span style="color:#666">.</span>wk(x), <span style="color:#007020">self</span><span style="color:#666">.</span>wv(x)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>         <span style="color:#60a0b0;font-style:italic"># [ bsz, seq_len, embed_dim] @ [embed_dim, embed_dim] = [ bsz, seq_len, embed_dim]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>         xq <span style="color:#666">=</span> xq<span style="color:#666">.</span>view(bsz, seq_len, <span style="color:#007020">self</span><span style="color:#666">.</span>num_heads, <span style="color:#007020">self</span><span style="color:#666">.</span>head_dim)  <span style="color:#60a0b0;font-style:italic"># [bsz, seq_len, num_heads, head_dim]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>         keys <span style="color:#666">=</span> xk<span style="color:#666">.</span>view(bsz, seq_len, <span style="color:#007020">self</span><span style="color:#666">.</span>num_heads, <span style="color:#007020">self</span><span style="color:#666">.</span>head_dim)  <span style="color:#60a0b0;font-style:italic"># [bsz, seq_len, num_heads, head_dim]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span>         values <span style="color:#666">=</span> xv<span style="color:#666">.</span>view(bsz, seq_len, <span style="color:#007020">self</span><span style="color:#666">.</span>num_heads, <span style="color:#007020">self</span><span style="color:#666">.</span>head_dim)  <span style="color:#60a0b0;font-style:italic"># [bsz, seq_len, num_heads, head_dim]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span>         <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;keys(values) shape [bsz, seq_len, num_heads, head_dim]: </span><span style="color:#70a0d0">{</span>values<span style="color:#666">.</span>shape<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">21</span>         xq <span style="color:#666">=</span> xq<span style="color:#666">.</span>transpose(<span style="color:#40a070">1</span>, <span style="color:#40a070">2</span>)  <span style="color:#60a0b0;font-style:italic"># [bsz, num_heads, seq_len, head_dim]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">22</span>         keys <span style="color:#666">=</span> keys<span style="color:#666">.</span>transpose(<span style="color:#40a070">1</span>, <span style="color:#40a070">2</span>)  <span style="color:#60a0b0;font-style:italic"># [bsz, num_heads, seq_len, head_dim]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">23</span>         values <span style="color:#666">=</span> values<span style="color:#666">.</span>transpose(<span style="color:#40a070">1</span>, <span style="color:#40a070">2</span>)  <span style="color:#60a0b0;font-style:italic"># [bsz, num_heads, seq_len, head_dim]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">24</span>         scores <span style="color:#666">=</span> torch<span style="color:#666">.</span>matmul(xq, keys<span style="color:#666">.</span>transpose(<span style="color:#40a070">2</span>, <span style="color:#40a070">3</span>)) <span style="color:#666">/</span> math<span style="color:#666">.</span>sqrt(<span style="color:#007020">self</span><span style="color:#666">.</span>head_dim)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">25</span>         <span style="color:#007020;font-weight:bold">if</span> mask <span style="color:#007020;font-weight:bold">is</span> <span style="color:#007020;font-weight:bold">not</span> <span style="color:#007020;font-weight:bold">None</span>:  <span style="color:#60a0b0;font-style:italic"># [1, 1, seq_len, seq_len]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">26</span>             scores <span style="color:#666">=</span> scores <span style="color:#666">+</span> mask
+</span></span><span style="display:flex;"><span><span style="color:#40a070">27</span>         scores <span style="color:#666">=</span> F<span style="color:#666">.</span>softmax(scores<span style="color:#666">.</span>float(), dim<span style="color:#666">=-</span><span style="color:#40a070">1</span>)<span style="color:#666">.</span>type_as(xq)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">28</span>         output <span style="color:#666">=</span> torch<span style="color:#666">.</span>matmul(scores, values)  <span style="color:#60a0b0;font-style:italic"># [bsz, num_heads, seq_len, head_dim]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">29</span>         output <span style="color:#666">=</span> output<span style="color:#666">.</span>transpose(<span style="color:#40a070">1</span>, <span style="color:#40a070">2</span>)<span style="color:#666">.</span>contiguous()<span style="color:#666">.</span>view(bsz, seq_len, <span style="color:#666">-</span><span style="color:#40a070">1</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">30</span>         <span style="color:#007020;font-weight:bold">return</span> <span style="color:#007020">self</span><span style="color:#666">.</span>wo(output)</span></span></code></pre></div><p>上述代码就是多头注意力的完整实现过程，相关变量的形状也进行了清晰地标注，相信大家对这部分内容已经非常熟悉，在这里就不再赘述。如果有不熟悉的朋友，可以先阅读<a href="/tutorials/transformer/self-attention">「 第3讲 Multi-Head Attention 代码实现教程：基于 PyTorch 手写多头注意力与掩码」</a>内容。</p>
+<h3 id="23-推理过程模拟">2.3 推理过程模拟<a class="anchor" href="#23-%e6%8e%a8%e7%90%86%e8%bf%87%e7%a8%8b%e6%a8%a1%e6%8b%9f">#</a></h3>
+<p>进一步，我们来完模拟整个解码过程，示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">if</span> <span style="color:#bb60d5">__name__</span> <span style="color:#666">==</span> <span style="color:#4070a0">&#39;__main__&#39;</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     start_pos <span style="color:#666">=</span> seq_len <span style="color:#666">=</span> <span style="color:#40a070">3</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>     bsz <span style="color:#666">=</span> <span style="color:#40a070">3</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>     embed_dim, num_heads <span style="color:#666">=</span> <span style="color:#40a070">4</span>, <span style="color:#40a070">2</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>     total_len <span style="color:#666">=</span> <span style="color:#40a070">10</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>     input_embeddings <span style="color:#666">=</span> torch<span style="color:#666">.</span>randn([bsz, seq_len, embed_dim])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>     attn <span style="color:#666">=</span> Attention(embed_dim<span style="color:#666">=</span>embed_dim, num_heads<span style="color:#666">=</span>num_heads, max_batch_size<span style="color:#666">=</span><span style="color:#40a070">10</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>     <span style="color:#007020;font-weight:bold">for</span> cur_pos <span style="color:#007020;font-weight:bold">in</span> <span style="color:#007020">range</span>(start_pos, total_len):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>         <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34; =========== decoding at pos: </span><span style="color:#70a0d0">{</span>cur_pos<span style="color:#70a0d0">}</span><span style="color:#4070a0"> ============&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>         <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;input_embeddings shape [bsz, seq_len, embed_dim]: </span><span style="color:#70a0d0">{</span>input_embeddings<span style="color:#666">.</span>shape<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>         _, seqlen, _ <span style="color:#666">=</span> input_embeddings<span style="color:#666">.</span>shape
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>         mask <span style="color:#666">=</span> <span style="color:#007020;font-weight:bold">None</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>         <span style="color:#007020;font-weight:bold">if</span> cur_pos <span style="color:#666">==</span> start_pos:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>             mask <span style="color:#666">=</span> torch<span style="color:#666">.</span>full((<span style="color:#40a070">1</span>, <span style="color:#40a070">1</span>, seqlen, seqlen), <span style="color:#007020">float</span>(<span style="color:#4070a0">&#34;-inf&#34;</span>))
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>             mask <span style="color:#666">=</span> torch<span style="color:#666">.</span>triu(mask, diagonal<span style="color:#666">=</span><span style="color:#40a070">1</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>             <span style="color:#007020">print</span>(mask)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>             <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;mask shape [1, 1, seq_len, seq_len]: </span><span style="color:#70a0d0">{</span>mask<span style="color:#666">.</span>shape<span style="color:#70a0d0">}</span><span style="color:#4070a0">]&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>         output <span style="color:#666">=</span> attn(input_embeddings, mask)  <span style="color:#60a0b0;font-style:italic"># [bsz, seq_len, embed_dim]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span>         <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;attention output shape [bsz, seq_len, embed_dim]: </span><span style="color:#70a0d0">{</span>output<span style="color:#666">.</span>shape<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span>         next_token_hidden <span style="color:#666">=</span> output[:, <span style="color:#666">-</span><span style="color:#40a070">1</span>]<span style="color:#666">.</span>unsqueeze(<span style="color:#40a070">1</span>)  <span style="color:#60a0b0;font-style:italic"># [bsz, 1, embed_dim]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">21</span>         <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;next_token_hidden shape [bsz, 1, embed_dim] : </span><span style="color:#70a0d0">{</span>next_token_hidden<span style="color:#666">.</span>shape<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">22</span>         input_embeddings <span style="color:#666">=</span> torch<span style="color:#666">.</span>cat([input_embeddings, next_token_hidden], dim<span style="color:#666">=</span><span style="color:#40a070">1</span>)</span></span></code></pre></div><p>在上述代码中，第2行定义初始序列的长度，也就是 prompt 的长度， 其中 <code>start_pos</code> 表示从 $t=3$ 时刻开始解码生成。第 3~5 行是定义模型的相关参数。第6行是随机生成一个输入序列经过 embedding 后的结果，将作为初始输入。第7行是实例化一个多头注意力模块，这里我们将其简单的看成是解码器。第8行是开始逐时刻进行解码。第11~17行是构建对 prompt 编码时所需要的 attention mask 输入。第18、20行是得到当前时刻的解码输出，然后取最后一个时刻作为结果，并将其扩维到 <code> [bsz, 1, embed_dim]</code>。第22行则是将当前时刻的输入和结果拼接起来，作为下一个时刻的输入，并再次解码生成。</p>
+<p>理解上述代码的时候，建议对照上面的图示过程。以上完整示例代码可参见 <code>Code/C06_SelfAttention/C01_attention_no_kv_cache.py</code> 文件。</p>
+<h3 id="24-输出结果分析">2.4 输出结果分析<a class="anchor" href="#24-%e8%be%93%e5%87%ba%e7%bb%93%e6%9e%9c%e5%88%86%e6%9e%90">#</a></h3>
+<p>在上述代码执行结束以后，将会得到类似如下结果：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span>  <span style="color:#666">===========</span> decoding at pos: <span style="color:#40a070">3</span> <span style="color:#666">============</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span> input_embeddings shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">3</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span> tensor([[[[<span style="color:#40a070">0.</span>, <span style="color:#666">-</span>inf, <span style="color:#666">-</span>inf],
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>           [<span style="color:#40a070">0.</span>, <span style="color:#40a070">0.</span>, <span style="color:#666">-</span>inf],
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>           [<span style="color:#40a070">0.</span>, <span style="color:#40a070">0.</span>, <span style="color:#40a070">0.</span>]]]])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span> mask shape [<span style="color:#40a070">1</span>, <span style="color:#40a070">1</span>, seq_len, seq_len]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">1</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">3</span>, <span style="color:#40a070">3</span>])]
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span> keys(values) shape [bsz, seq_len, num_heads, head_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">3</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">2</span>])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span> attention output shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">3</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span> next_token_hidden shape [bsz, <span style="color:#40a070">1</span>, embed_dim] : torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>  <span style="color:#666">===========</span> decoding at pos: <span style="color:#40a070">4</span> <span style="color:#666">============</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span> input_embeddings shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">4</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span> keys(values) shape [bsz, seq_len, num_heads, head_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">4</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">2</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span> attention output shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">4</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span> next_token_hidden shape [bsz, <span style="color:#40a070">1</span>, embed_dim] : torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>  <span style="color:#666">===========</span> decoding at pos: <span style="color:#40a070">5</span> <span style="color:#666">============</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span> input_embeddings shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">5</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span> keys(values) shape [bsz, seq_len, num_heads, head_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">5</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">2</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span> attention output shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">5</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">21</span> next_token_hidden shape [bsz, <span style="color:#40a070">1</span>, embed_dim] : torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">22</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">23</span>  <span style="color:#666">===========</span> decoding at pos: <span style="color:#40a070">6</span> <span style="color:#666">============</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">24</span> input_embeddings shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">6</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">25</span> keys(values) shape [bsz, seq_len, num_heads, head_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">6</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">2</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">26</span> attention output shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">6</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">27</span> next_token_hidden shape [bsz, <span style="color:#40a070">1</span>, embed_dim] : torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">28</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">29</span>  <span style="color:#666">===========</span> decoding at pos: <span style="color:#40a070">7</span> <span style="color:#666">============</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">30</span> input_embeddings shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">7</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">31</span> keys(values) shape [bsz, seq_len, num_heads, head_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">7</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">2</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">32</span> attention output shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">7</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">33</span> next_token_hidden shape [bsz, <span style="color:#40a070">1</span>, embed_dim] : torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">34</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">35</span>  <span style="color:#666">===========</span> decoding at pos: <span style="color:#40a070">8</span> <span style="color:#666">============</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">36</span> input_embeddings shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">8</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">37</span> keys(values) shape [bsz, seq_len, num_heads, head_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">8</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">2</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">38</span> attention output shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">8</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">39</span> next_token_hidden shape [bsz, <span style="color:#40a070">1</span>, embed_dim] : torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">40</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">41</span>  <span style="color:#666">===========</span> decoding at pos: <span style="color:#40a070">9</span> <span style="color:#666">============</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">42</span> input_embeddings shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">9</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">43</span> keys(values) shape [bsz, seq_len, num_heads, head_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">9</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">2</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">44</span> attention output shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">9</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">45</span> next_token_hidden shape [bsz, <span style="color:#40a070">1</span>, embed_dim] : torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">4</span>])</span></span></code></pre></div><p>对于上述结果，大家可以自行进行分析，关键一点就是观察各个变量的输出形状。</p>
+<p>看到这里，我们想要给大家抛出一个疑问，在真正的推理场景中不同用户同时向模型发起请求，那么同一个时间段内模型接收到的多个样本长度肯定是不一样的，那么此时将其作为一个 batch 输入到模型中进行解码生成应该如何处理呢？</p>
+<p>换句话说，在一个 batch 中，prompt 的初始长度不同，如何根据 prompt 同时生成多个样本的输出内容？</p>
+<p>大家可以先想一想，在介绍 LLaMA 2 完整实现过程时再来交这部分作业。</p>
+<p>下面，我们正式进入到 KV 缓存的讲解。</p>
+<h2 id="3-采用-kv-缓存推理过程">3. 采用 KV 缓存推理过程<a class="anchor" href="#3-%e9%87%87%e7%94%a8-kv-%e7%bc%93%e5%ad%98%e6%8e%a8%e7%90%86%e8%bf%87%e7%a8%8b">#</a></h2>
+<h3 id="31-计算原理图解">3.1 计算原理图解<a class="anchor" href="#31-%e8%ae%a1%e7%ae%97%e5%8e%9f%e7%90%86%e5%9b%be%e8%a7%a3">#</a></h3>
+<p>在经过图2和图3的介绍以后我们已经对于为什么要使用 KV 缓存，以及如何使用 KV 缓存有了清晰的了解，下面我们直接通过图示来阐述整个过程。</p>
+<div align=center><img width="370" src="/images/featured/202507072154.png" alt="图 4. 使用 KV 缓存自注意力计算过程，'()' 表示 Softmax 操作"/> </div><center>图 4. 使用 KV 缓存自注意力计算过程，'()' 表示 Softmax 操作</center>
+<p>如图4所示是采用 KV 缓存时，解码器对原始输入 prompt 的处理情况。可以看出，整个过程同图2所示一致，唯一区别在于此时将会把当前计算得到的 $K$ 和 $V$ 进行缓存，即右上角的 K cache 和 V cache 部分。</p>
+<p>在对 prompt 编码并得到输出后，我们同样只取输出的最后一个时刻作为此时刻的生成结果，接下里开始生成后续时刻的内容</p>
+<p>敲黑板！ 注意，此时变化就来了。</p>
+<div align=center><img width="550" src="/images/featured/202507072156.png" alt="图 5. 使用 KV 缓存自注意力计算过程，'()' 表示 Softmax 操作"/> </div><center>图 5. 使用 KV 缓存自注意力计算过程，'()' 表示 Softmax 操作</center>
+<p>如图5（左）所示，在解码第 $t=4$ 时刻时，当前时刻的输入便只有上一时刻的生成结果，其与 $W^Q$ 、 $W^K$ 和 $W^V$ 作用后便会分别得到一个形状为 $1\times4$ 的向量。此时，对于 $Q$ 来说保持不变，对于 $K$ 和 $V$ 来说将分别与第 $t=3$ 时候缓存得到的 K cache 和 V cache 拼接得到新的 $K$ 和 $V$ ，即图中虚线方框所示。</p>
+<p>进一步，在本次自注意力计算完成以后将会得到第 $t=4$ 时刻的解码输出，即左上角粉色输出；同时，将会得到更新后的 K cache 和 V cache，即右上角部分。</p>
+<p>以此类推，在解码第 $t=5$ 时刻时的过程将如图5（右）所示，大家可以看图自行理解。</p>
+<p>下面，我们再来看如何基于上面第2.2节的代码，来进行改造，使得其支持 KV 缓存。</p>
+<h3 id="32-从零开始实现">3.2 从零开始实现<a class="anchor" href="#32-%e4%bb%8e%e9%9b%b6%e5%bc%80%e5%a7%8b%e5%ae%9e%e7%8e%b0">#</a></h3>
+<p>在基于上面的代码框架下，我们只需要再新定义两个变量 <code>cache_k</code> 和 <code>cache_v</code> 来缓存即可，核心示例代码如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">Attention</span>(nn<span style="color:#666">.</span>Module):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">__init__</span>(<span style="color:#007020">self</span>, embed_dim<span style="color:#666">=</span><span style="color:#40a070">64</span>, num_heads<span style="color:#666">=</span><span style="color:#40a070">8</span>, max_batch_size<span style="color:#666">=</span><span style="color:#40a070">8</span>, max_seq_len<span style="color:#666">=</span><span style="color:#40a070">100</span>):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>         <span style="color:#007020">super</span>()<span style="color:#666">.</span><span style="color:#06287e">__init__</span>()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>         <span style="color:#666">......</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>max_batch_size <span style="color:#666">=</span> max_batch_size
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>max_seq_len <span style="color:#666">=</span> max_seq_len
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>cache_k <span style="color:#666">=</span> torch<span style="color:#666">.</span>zeros((<span style="color:#007020">self</span><span style="color:#666">.</span>max_batch_size, <span style="color:#007020">self</span><span style="color:#666">.</span>max_seq_len, <span style="color:#007020">self</span><span style="color:#666">.</span>num_heads, <span style="color:#007020">self</span><span style="color:#666">.</span>head_dim))
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>cache_v <span style="color:#666">=</span> torch<span style="color:#666">.</span>zeros((<span style="color:#007020">self</span><span style="color:#666">.</span>max_batch_size, <span style="color:#007020">self</span><span style="color:#666">.</span>max_seq_len, <span style="color:#007020">self</span><span style="color:#666">.</span>num_heads, <span style="color:#007020">self</span><span style="color:#666">.</span>head_dim))
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">forward</span>(<span style="color:#007020">self</span>, x: torch<span style="color:#666">.</span>Tensor, start_pos: <span style="color:#007020">int</span>, mask<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>         <span style="color:#666">......</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>         xq <span style="color:#666">=</span> xq<span style="color:#666">.</span>view(bsz, seq_len, <span style="color:#007020">self</span><span style="color:#666">.</span>num_heads, <span style="color:#007020">self</span><span style="color:#666">.</span>head_dim)  <span style="color:#60a0b0;font-style:italic"># [bsz, seq_len, num_heads, head_dim]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>         xk <span style="color:#666">=</span> xk<span style="color:#666">.</span>view(bsz, seq_len, <span style="color:#007020">self</span><span style="color:#666">.</span>num_heads, <span style="color:#007020">self</span><span style="color:#666">.</span>head_dim)  <span style="color:#60a0b0;font-style:italic"># [bsz, seq_len, num_heads, head_dim]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>         xv <span style="color:#666">=</span> xv<span style="color:#666">.</span>view(bsz, seq_len, <span style="color:#007020">self</span><span style="color:#666">.</span>num_heads, <span style="color:#007020">self</span><span style="color:#666">.</span>head_dim)  <span style="color:#60a0b0;font-style:italic"># [bsz, seq_len, num_heads, head_dim]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>cache_k[:bsz, start_pos: start_pos <span style="color:#666">+</span> seq_len] <span style="color:#666">=</span> xk
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>cache_v[:bsz, start_pos: start_pos <span style="color:#666">+</span> seq_len] <span style="color:#666">=</span> xv
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>         keys <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>cache_k[:bsz, : start_pos <span style="color:#666">+</span> seq_len]  
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>         values <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>cache_v[:bsz, : start_pos <span style="color:#666">+</span> seq_len]  
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span>         xq <span style="color:#666">=</span> xq<span style="color:#666">.</span>transpose(<span style="color:#40a070">1</span>, <span style="color:#40a070">2</span>)  <span style="color:#60a0b0;font-style:italic"># [bsz, num_heads, seq_len, head_dim]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span>         keys <span style="color:#666">=</span> keys<span style="color:#666">.</span>transpose(<span style="color:#40a070">1</span>, <span style="color:#40a070">2</span>)  <span style="color:#60a0b0;font-style:italic"># [bsz, num_heads, cache_len + seq_len, head_dim]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">21</span>         values <span style="color:#666">=</span> values<span style="color:#666">.</span>transpose(<span style="color:#40a070">1</span>, <span style="color:#40a070">2</span>)  <span style="color:#60a0b0;font-style:italic"># [bsz, num_heads, cache_len + seq_len, head_dim]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">22</span>         <span style="color:#666">......</span></span></span></code></pre></div><p>在上述代码中，第2行新增了 <code>max_batch_size</code> 和 <code>max_seq_len</code> 这两个参数，分别表示最大的样本数量和最长样本长度，因为后面需要先预定义空的全零张量来缓存 $K$ 和 $V$。当然，不同的实现方式所需要的变量不同，例如在 huggingFace 的 <code>Transformers</code> 框架中，K cache 和 V cache 是通过一个叫做 <code>past_key_values</code>  元组缓存的，大概语句如下：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">if</span> past_key_value <span style="color:#007020;font-weight:bold">is</span> <span style="color:#007020;font-weight:bold">not</span> <span style="color:#007020;font-weight:bold">None</span>:
+</span></span><span style="display:flex;"><span><span style="color:#40a070">2</span>     key_states <span style="color:#666">=</span> torch<span style="color:#666">.</span>cat([past_key_value[<span style="color:#40a070">0</span>], key_states], dim<span style="color:#666">=</span><span style="color:#40a070">2</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">3</span>     value_states <span style="color:#666">=</span> torch<span style="color:#666">.</span>cat([past_key_value[<span style="color:#40a070">1</span>], value_states], dim<span style="color:#666">=</span><span style="color:#40a070">2</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">4</span> past_key_value <span style="color:#666">=</span> (key_states, value_states) <span style="color:#007020;font-weight:bold">if</span> use_cache <span style="color:#007020;font-weight:bold">else</span> <span style="color:#007020;font-weight:bold">None</span>   </span></span></code></pre></div><p>希望大家以后看到的时候不会感到陌生。</p>
+<p>进一步，上面第7~8行代码便是预先定义的两个全为0的张量，后续用于缓存 K cache 和 V cache 这两个结果。第10行中多了一个 <code>start_pos</code>，用于指定后续应该将当前的 $K$ 和 $V$ 应该缓存到 <code>cache_k</code> 和 <code>cache_v</code> 中哪个时刻，即第15~16行对应的代码，其中 <code>seq_len</code> 表示当前输入序列的长度。</p>
+<p>此时我们可以知道，对于 <code>seq_len</code> 来说第1次解码时为 prompt 的长度，后续则固定为 1 ，因为是逐时刻解码。第17~18行则是取对应完整的  $K$ 和 $V$ 用于后续自注意力机制的计算过程。</p>
+<p>以上完整示例代码可参见 <code>Code/C06_SelfAttention/C02_attention_kv_cache.py</code> 文件。</p>
+<h3 id="33-推理过程模拟">3.3 推理过程模拟<a class="anchor" href="#33-%e6%8e%a8%e7%90%86%e8%bf%87%e7%a8%8b%e6%a8%a1%e6%8b%9f">#</a></h3>
+<p>如果我们以图4和图5中的计算过程为例，在上述代码中解码第 $t=3$ 时刻时，此时 <code>bsz = 1, start_pos = 0, seq_len=3</code>，所以 <code>cache_k[:bsz, start_pos: start_pos + seq_len] = xk</code> 执行结束后，<code>cache_k[:1, 0: 0 + 3]</code> 中存放的就是图4中右上角的缓存。</p>
+<p>进一步，在解码第 $t=4$ 时刻时，  <code>bsz = 1, start_pos = 3, seq_len=1</code>，所以 <code>cache_k[:0, 3: 3 + 1] = xk</code> 执行结束后，<code>cache_k[:1, : 3 + 1]</code> 中存放的就是图5（左）中右上角的缓存。在解码第 $t=5$ 时刻时， <code>bsz = 1, start_pos = 4, seq_len=1</code>，所以 <code>cache_k[:0, 4: 4 + 1] = xk</code> 执行结束后，<code>cache_k[:1, : 4 + 1]</code> 中存放的就是图5（右）中右上角的缓存。</p>
+<p>当然，上述整个过程我们可以通过如下代码进行模拟：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">if</span> <span style="color:#bb60d5">__name__</span> <span style="color:#666">==</span> <span style="color:#4070a0">&#39;__main__&#39;</span>:
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     start_pos <span style="color:#666">=</span> seq_len <span style="color:#666">=</span> <span style="color:#40a070">3</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>     bsz <span style="color:#666">=</span> <span style="color:#40a070">3</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>     embed_dim <span style="color:#666">=</span> <span style="color:#40a070">4</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>     total_len <span style="color:#666">=</span> <span style="color:#40a070">10</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>     input_embeddings <span style="color:#666">=</span> torch<span style="color:#666">.</span>randn([bsz, seq_len, embed_dim])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>     prev_pos <span style="color:#666">=</span> <span style="color:#40a070">0</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>     attn <span style="color:#666">=</span> Attention(embed_dim<span style="color:#666">=</span>embed_dim, num_heads<span style="color:#666">=</span><span style="color:#40a070">2</span>, max_batch_size<span style="color:#666">=</span><span style="color:#40a070">10</span>)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>     <span style="color:#007020;font-weight:bold">for</span> cur_pos <span style="color:#007020;font-weight:bold">in</span> <span style="color:#007020">range</span>(start_pos, total_len):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>         <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34; =========== decoding at pos: </span><span style="color:#70a0d0">{</span>cur_pos<span style="color:#70a0d0">}</span><span style="color:#4070a0"> ============&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>         <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;input_embeddings shape [bsz, seq_len, embed_dim]: </span><span style="color:#70a0d0">{</span>input_embeddings<span style="color:#666">.</span>shape<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>         attn_input <span style="color:#666">=</span> input_embeddings[:, prev_pos:cur_pos]
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>         bsz, seqlen, _ <span style="color:#666">=</span> attn_input<span style="color:#666">.</span>shape
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>         mask <span style="color:#666">=</span> <span style="color:#007020;font-weight:bold">None</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>         <span style="color:#007020;font-weight:bold">if</span> seqlen <span style="color:#666">&gt;</span> <span style="color:#40a070">1</span>:  <span style="color:#60a0b0;font-style:italic"># 只有在编码原始输入的时候才会用到 mask attention，用于遮蔽未来时刻的信息</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>             mask <span style="color:#666">=</span> torch<span style="color:#666">.</span>full((<span style="color:#40a070">1</span>, <span style="color:#40a070">1</span>, seqlen, seqlen), <span style="color:#007020">float</span>(<span style="color:#4070a0">&#34;-inf&#34;</span>))
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>             mask <span style="color:#666">=</span> torch<span style="color:#666">.</span>triu(mask, diagonal<span style="color:#666">=</span>prev_pos <span style="color:#666">+</span> <span style="color:#40a070">1</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>             <span style="color:#007020">print</span>(mask)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span>         <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;attention input shape [bsz, seq_len, embed_dim]: </span><span style="color:#70a0d0">{</span>attn_input<span style="color:#666">.</span>shape<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span>         output <span style="color:#666">=</span> attn(attn_input, prev_pos, mask)  <span style="color:#60a0b0;font-style:italic"># [bsz, seq_len, embed_dim]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">21</span>         <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;attention output shape [bsz, seq_len, embed_dim]: </span><span style="color:#70a0d0">{</span>output<span style="color:#666">.</span>shape<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">22</span>         next_token_hidden <span style="color:#666">=</span> output[:, <span style="color:#666">-</span><span style="color:#40a070">1</span>]<span style="color:#666">.</span>unsqueeze(<span style="color:#40a070">1</span>)  <span style="color:#60a0b0;font-style:italic"># [bsz, 1, embed_dim]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">23</span>         <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;next_token_hidden shape [bsz, 1, embed_dim] : </span><span style="color:#70a0d0">{</span>next_token_hidden<span style="color:#666">.</span>shape<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">24</span>         input_embeddings <span style="color:#666">=</span> torch<span style="color:#666">.</span>cat([input_embeddings, next_token_hidden], dim<span style="color:#666">=</span><span style="color:#40a070">1</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">25</span>         prev_pos <span style="color:#666">=</span> cur_pos</span></span></code></pre></div><p>在上述代码中，第2~8行是定义相关超参数及实例化一个编码器，其中 <code>prev_pos</code> 用于指定当前解码的开始时刻，后续将传入编码器中作为内部的 <code>start_pos</code> 变量。第12行是取当前时刻解码器的输入，第1次时则取整个 prompt 作为输入。第14~18行是构造 attention mask，也只有在对 prompt 编码时才会用到。第20行是计算得到解码输出。第22行是取最后一个时刻作为当前时刻的生成结果，当然在第2次以后只会生成一个时刻的结果。第24行是构建得到整个 prompt 拼接每个时刻生成后的结果。</p>
+<p>例如，在第2次执行上面这个 <code>for</code> 时，第12行中 <code>attn_input = input_embeddings[:, 3:4]</code>，即只取上一个时刻生成的结果作为当前时刻的输入，此时 <code>seqlen=1</code>。</p>
+<h3 id="34-输出结果分析">3.4 输出结果分析<a class="anchor" href="#34-%e8%be%93%e5%87%ba%e7%bb%93%e6%9e%9c%e5%88%86%e6%9e%90">#</a></h3>
+<p>在上述代码执行结束以后，将会得到类似如下结果：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span>  <span style="color:#666">===========</span> decoding at pos: <span style="color:#40a070">3</span> <span style="color:#666">============</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span> input_embeddings shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">3</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span> tensor([[[[<span style="color:#40a070">0.</span>, <span style="color:#666">-</span>inf, <span style="color:#666">-</span>inf],
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>           [<span style="color:#40a070">0.</span>, <span style="color:#40a070">0.</span>, <span style="color:#666">-</span>inf],
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>           [<span style="color:#40a070">0.</span>, <span style="color:#40a070">0.</span>, <span style="color:#40a070">0.</span>]]]])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span> attention <span style="color:#007020">input</span> shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">3</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span> keys(values) shape [bsz, cache_len <span style="color:#666">+</span> seq_len, num_heads, head_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">3</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">2</span>])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span> attention output shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">3</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span> next_token_hidden shape [bsz, <span style="color:#40a070">1</span>, embed_dim] : torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>  <span style="color:#666">===========</span> decoding at pos: <span style="color:#40a070">4</span> <span style="color:#666">============</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span> input_embeddings shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">4</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span> attention <span style="color:#007020">input</span> shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span> keys(values) shape [bsz, cache_len <span style="color:#666">+</span> seq_len, num_heads, head_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">4</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">2</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span> attention output shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span> next_token_hidden shape [bsz, <span style="color:#40a070">1</span>, embed_dim] : torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>  <span style="color:#666">===========</span> decoding at pos: <span style="color:#40a070">5</span> <span style="color:#666">============</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span> input_embeddings shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">5</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span> attention <span style="color:#007020">input</span> shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">21</span> keys(values) shape [bsz, cache_len <span style="color:#666">+</span> seq_len, num_heads, head_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">5</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">2</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">22</span> attention output shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">23</span> next_token_hidden shape [bsz, <span style="color:#40a070">1</span>, embed_dim] : torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">24</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">25</span>  <span style="color:#666">===========</span> decoding at pos: <span style="color:#40a070">6</span> <span style="color:#666">============</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">26</span> input_embeddings shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">6</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">27</span> attention <span style="color:#007020">input</span> shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">28</span> keys(values) shape [bsz, cache_len <span style="color:#666">+</span> seq_len, num_heads, head_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">6</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">2</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">29</span> attention output shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">30</span> next_token_hidden shape [bsz, <span style="color:#40a070">1</span>, embed_dim] : torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">31</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">32</span>  <span style="color:#666">===========</span> decoding at pos: <span style="color:#40a070">7</span> <span style="color:#666">============</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">33</span> input_embeddings shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">7</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">34</span> attention <span style="color:#007020">input</span> shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">35</span> keys(values) shape [bsz, cache_len <span style="color:#666">+</span> seq_len, num_heads, head_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">7</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">2</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">36</span> attention output shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">37</span> next_token_hidden shape [bsz, <span style="color:#40a070">1</span>, embed_dim] : torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">38</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">39</span>  <span style="color:#666">===========</span> decoding at pos: <span style="color:#40a070">8</span> <span style="color:#666">============</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">40</span> input_embeddings shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">8</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">41</span> attention <span style="color:#007020">input</span> shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">42</span> keys(values) shape [bsz, cache_len <span style="color:#666">+</span> seq_len, num_heads, head_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">8</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">2</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">43</span> attention output shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">44</span> next_token_hidden shape [bsz, <span style="color:#40a070">1</span>, embed_dim] : torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">45</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">46</span>  <span style="color:#666">===========</span> decoding at pos: <span style="color:#40a070">9</span> <span style="color:#666">============</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">47</span> input_embeddings shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">9</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">48</span> attention <span style="color:#007020">input</span> shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">49</span> keys(values) shape [bsz, cache_len <span style="color:#666">+</span> seq_len, num_heads, head_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">9</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">2</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">50</span> attention output shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">4</span>])
+</span></span><span style="display:flex;"><span><span style="color:#40a070">51</span> next_token_hidden shape [bsz, <span style="color:#40a070">1</span>, embed_dim] : torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">4</span>])</span></span></code></pre></div><p>在上述代码中，我们打印了每个时刻解码完成之后各个变量的输出形状，我们可以明显的看到，除了在解码 prompt 时，其余时刻<code>attention input</code> 序列长度都是1，<code>keys(values) shape</code> 拼接后的形状也符合我们的预期。</p>
+<h2 id="4-张量并行下的-kv-缓存">4. 张量并行下的 KV 缓存<a class="anchor" href="#4-%e5%bc%a0%e9%87%8f%e5%b9%b6%e8%a1%8c%e4%b8%8b%e7%9a%84-kv-%e7%bc%93%e5%ad%98">#</a></h2>
+<p>下面，我们再来简单看一下张量并行的环境下（即使用 ColumnParallelLinear 和 RowParallelLinear 实现的多头注意力机制），对于 KV 缓存的实现和使用，而这也是 LLaMA 系列模型所使用到的技术。</p>
+<h3 id="41-计算原理图解">4.1 计算原理图解<a class="anchor" href="#41-%e8%ae%a1%e7%ae%97%e5%8e%9f%e7%90%86%e5%9b%be%e8%a7%a3">#</a></h3>
+<p>根据之前在文章「一张图让你看懂 LLaMA 多头注意力在GPU上的并行计算过程！从零实现附源码！」中的介绍可知，在实现张量并行时多头注意力的并行机制是以每个头为整体，将所有的头分配到不同的 GPU 设备上进行计算。</p>
+<p>例如多头的数量是 4，一共有两个 GPU 设备，那么每个 GPU 设备将会同时计算两个头的自注意力计算过程，以此来完成整个并行过程。因此，我们便可以知道，在张量并行下的 KV 缓存其实就是在每个设备上同时进行多个头的计算并缓存各自的 Keys 和 Values，相互独立互不干扰。</p>
+<div align=center><img width="800" src="/images/featured/202507092005.png" alt="图 6. 张量并行使用 KV 缓存自注意力计算过程（图中未体现 ColumnParallelLinear 和 RowParallelLinear）"/> </div><center>图 6. 张量并行使用 KV 缓存自注意力计算过程（图中未体现 ColumnParallelLinear 和 RowParallelLinear）</center>
+<p>如图6所示，便是 4 个头在两个 GPU 设备上使用带 KV 缓存的张量并行计算过程。对于每个设备来说均各自完成2个头的计算过程，同时分别拥有各自的 KV 缓存。</p>
+<h3 id="42-从零开始实现">4.2 从零开始实现<a class="anchor" href="#42-%e4%bb%8e%e9%9b%b6%e5%bc%80%e5%a7%8b%e5%ae%9e%e7%8e%b0">#</a></h3>
+<p>在清楚张量并行下的 KV 缓存的原理以后，我们再来基于第3.2小节中的代码继续改进以使得其支持张量并行，核心代码如下所示：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">class</span> <span style="color:#0e84b5;font-weight:bold">Attention</span>(nn<span style="color:#666">.</span>Module):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">__init__</span>(<span style="color:#007020">self</span>, args: ModelArgs):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>         <span style="color:#007020">super</span>()<span style="color:#666">.</span><span style="color:#06287e">__init__</span>()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>         world_size <span style="color:#666">=</span> fs_init<span style="color:#666">.</span>get_model_parallel_world_size()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>n_local_heads <span style="color:#666">=</span> args<span style="color:#666">.</span>n_heads <span style="color:#666">//</span> world_size
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>head_dim <span style="color:#666">=</span> args<span style="color:#666">.</span>dim <span style="color:#666">//</span> args<span style="color:#666">.</span>n_heads
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>wq <span style="color:#666">=</span> ColumnParallelLinear(args<span style="color:#666">.</span>dim, args<span style="color:#666">.</span>n_heads <span style="color:#666">*</span> <span style="color:#007020">self</span><span style="color:#666">.</span>head_dim,
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>                                        bias<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">False</span>, gather_output<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">False</span>, init_method<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">lambda</span> x: x, )
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>wk <span style="color:#666">=</span> ColumnParallelLinear(args<span style="color:#666">.</span>dim, args<span style="color:#666">.</span>n_heads <span style="color:#666">*</span> <span style="color:#007020">self</span><span style="color:#666">.</span>head_dim,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>                                        bias<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">False</span>, gather_output<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">False</span>, init_method<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">lambda</span> x: x, )
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>wv <span style="color:#666">=</span> ColumnParallelLinear(args<span style="color:#666">.</span>dim, args<span style="color:#666">.</span>n_heads <span style="color:#666">*</span> <span style="color:#007020">self</span><span style="color:#666">.</span>head_dim,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>                                        bias<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">False</span>, gather_output<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">False</span>, init_method<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">lambda</span> x: x, )
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>wo <span style="color:#666">=</span> RowParallelLinear(args<span style="color:#666">.</span>n_heads <span style="color:#666">*</span> <span style="color:#007020">self</span><span style="color:#666">.</span>head_dim, args<span style="color:#666">.</span>dim,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>                                     bias<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">False</span>, input_is_parallel<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">True</span>, init_method<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">lambda</span> x: x, )
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>cache_k <span style="color:#666">=</span> torch<span style="color:#666">.</span>zeros((args<span style="color:#666">.</span>max_batch_size, args<span style="color:#666">.</span>max_seq_len,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>                                     <span style="color:#007020">self</span><span style="color:#666">.</span>n_local_heads, <span style="color:#007020">self</span><span style="color:#666">.</span>head_dim))<span style="color:#666">.</span>to(args<span style="color:#666">.</span>device)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>cache_v <span style="color:#666">=</span> torch<span style="color:#666">.</span>zeros((args<span style="color:#666">.</span>max_batch_size, args<span style="color:#666">.</span>max_seq_len,
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>                                     <span style="color:#007020">self</span><span style="color:#666">.</span>n_local_heads, <span style="color:#007020">self</span><span style="color:#666">.</span>head_dim))<span style="color:#666">.</span>to(args<span style="color:#666">.</span>device)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span>     <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">forward</span>(<span style="color:#007020">self</span>, x, start_pos: <span style="color:#007020">int</span>, mask<span style="color:#666">=</span><span style="color:#007020;font-weight:bold">None</span>):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">21</span>         <span style="color:#666">......</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">22</span>         xq <span style="color:#666">=</span> xq<span style="color:#666">.</span>view(bsz, seqlen, <span style="color:#007020">self</span><span style="color:#666">.</span>n_local_heads, <span style="color:#007020">self</span><span style="color:#666">.</span>head_dim)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">23</span>         xk <span style="color:#666">=</span> xk<span style="color:#666">.</span>view(bsz, seqlen, <span style="color:#007020">self</span><span style="color:#666">.</span>n_local_heads, <span style="color:#007020">self</span><span style="color:#666">.</span>head_dim)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">24</span>         xv <span style="color:#666">=</span> xv<span style="color:#666">.</span>view(bsz, seqlen, <span style="color:#007020">self</span><span style="color:#666">.</span>n_local_heads, <span style="color:#007020">self</span><span style="color:#666">.</span>head_dim)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">25</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>cache_k[:bsz, start_pos: start_pos <span style="color:#666">+</span> seqlen] <span style="color:#666">=</span> xk
+</span></span><span style="display:flex;"><span><span style="color:#40a070">26</span>         <span style="color:#007020">self</span><span style="color:#666">.</span>cache_v[:bsz, start_pos: start_pos <span style="color:#666">+</span> seqlen] <span style="color:#666">=</span> xv
+</span></span><span style="display:flex;"><span><span style="color:#40a070">27</span>         keys <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>cache_k[:bsz, : start_pos <span style="color:#666">+</span> seqlen]
+</span></span><span style="display:flex;"><span><span style="color:#40a070">28</span>         values <span style="color:#666">=</span> <span style="color:#007020">self</span><span style="color:#666">.</span>cache_v[:bsz, : start_pos <span style="color:#666">+</span> seqlen]
+</span></span><span style="display:flex;"><span><span style="color:#40a070">29</span>         xq <span style="color:#666">=</span> xq<span style="color:#666">.</span>transpose(<span style="color:#40a070">1</span>, <span style="color:#40a070">2</span>) 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">30</span>         keys <span style="color:#666">=</span> keys<span style="color:#666">.</span>transpose(<span style="color:#40a070">1</span>, <span style="color:#40a070">2</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">31</span>         values <span style="color:#666">=</span> values<span style="color:#666">.</span>transpose(<span style="color:#40a070">1</span>, <span style="color:#40a070">2</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">32</span>         <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34; Rank: </span><span style="color:#70a0d0">{</span>rank<span style="color:#70a0d0">}</span><span style="color:#4070a0"> keys shape: </span><span style="color:#70a0d0">{</span>keys<span style="color:#666">.</span>shape<span style="color:#70a0d0">}</span><span style="color:#4070a0">, </span><span style="color:#70a0d0">{</span>keys<span style="color:#666">.</span>device<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">33</span>         <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34; Rank: </span><span style="color:#70a0d0">{</span>rank<span style="color:#70a0d0">}</span><span style="color:#4070a0"> self.cache_k shape: </span><span style="color:#70a0d0">{</span><span style="color:#007020">self</span><span style="color:#666">.</span>cache_k<span style="color:#666">.</span>shape<span style="color:#70a0d0">}</span><span style="color:#4070a0">, </span><span style="color:#70a0d0">{</span><span style="color:#007020">self</span><span style="color:#666">.</span>cache_k<span style="color:#666">.</span>device<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>) </span></span></code></pre></div><p>在上述代码中，第5行是计算每个设备上并行计算多头的个数，一定要能够整除。第7~14行则是对应初始化自注意力机制中的 4 个线性变换，具体原理可以参见文章「一张图让你看懂 LLaMA 多头注意力在GPU上的并行计算过程！从零实现附源码！」的介绍。第15~18行是分别为每个设备初始化一个用于缓存的 Keys 和 Values 的变量。例如 4 个头在两个设备上并行，那么每个设备上都会各有一个 <code>cache_k</code> 和 <code>cache_v</code> 变量。第20~33行逻辑则与之前相同这里就不再赘述。</p>
+<p>总之，记住一个原则：在张量并行中，把每个设备上的多头计算过程看成是非并行情况下的多头计算过程即可，每个设备独立并行计算，互不干扰。</p>
+<p>以上完整示例代码可参见 <code>Code/C06_SelfAttention/C03_attention_kv_parallel.py</code> 文件。</p>
+<h3 id="43-推理过程模拟">4.3 推理过程模拟<a class="anchor" href="#43-%e6%8e%a8%e7%90%86%e8%bf%87%e7%a8%8b%e6%a8%a1%e6%8b%9f">#</a></h3>
+<p>在完成张量并行下的多头注意力计算 KV 缓存代码实现后，我们以4个头，两个 GPU 设备，模型维度为 8 时的情况来开始模拟整个推理过程。首先，我们写一个简单的推理函数，代码如下所示：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> <span style="color:#007020;font-weight:bold">def</span> <span style="color:#06287e">inference</span>(args):
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span>     start_pos <span style="color:#666">=</span> seq_len <span style="color:#666">=</span> <span style="color:#40a070">3</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span>     bsz <span style="color:#666">=</span> <span style="color:#40a070">3</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span>     embed_dim, num_heads <span style="color:#666">=</span> args<span style="color:#666">.</span>dim, args<span style="color:#666">.</span>n_heads
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span>     total_len <span style="color:#666">=</span> <span style="color:#40a070">6</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span>     input_embeddings <span style="color:#666">=</span> torch<span style="color:#666">.</span>randn([bsz, seq_len, embed_dim])<span style="color:#666">.</span>to(args<span style="color:#666">.</span>device)
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span>     prev_pos <span style="color:#666">=</span> <span style="color:#40a070">0</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span>     rank <span style="color:#666">=</span> fs_init<span style="color:#666">.</span>get_model_parallel_rank()
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>     attn <span style="color:#666">=</span> Attention(args)<span style="color:#666">.</span>to(args<span style="color:#666">.</span>device)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>     <span style="color:#007020;font-weight:bold">for</span> cur_pos <span style="color:#007020;font-weight:bold">in</span> <span style="color:#007020">range</span>(start_pos, total_len):
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>         <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34; Rank: </span><span style="color:#70a0d0">{</span>rank<span style="color:#70a0d0">}</span><span style="color:#4070a0"> ===== decoding at pos: </span><span style="color:#70a0d0">{</span>cur_pos<span style="color:#70a0d0">}</span><span style="color:#4070a0"> ======  device: </span><span style="color:#70a0d0">{</span>args<span style="color:#666">.</span>device<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>         <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34; Rank: </span><span style="color:#70a0d0">{</span>rank<span style="color:#70a0d0">}</span><span style="color:#4070a0"> input_embeddings shape [bsz, seq_len, embed_dim]:&#34;</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>               <span style="color:#4070a0">f</span><span style="color:#4070a0">&#34; </span><span style="color:#70a0d0">{</span>input_embeddings<span style="color:#666">.</span>shape<span style="color:#70a0d0">}</span><span style="color:#4070a0">, </span><span style="color:#70a0d0">{</span>input_embeddings<span style="color:#666">.</span>device<span style="color:#70a0d0">}</span><span style="color:#4070a0">&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>         attn_input <span style="color:#666">=</span> input_embeddings[:, prev_pos:cur_pos]
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>         bsz, seqlen, _ <span style="color:#666">=</span> attn_input<span style="color:#666">.</span>shape
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>         <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34; Rank: </span><span style="color:#70a0d0">{</span>rank<span style="color:#70a0d0">}</span><span style="color:#4070a0"> attention input shape [bsz, seq_len, embed_dim]:&#34;</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>               <span style="color:#4070a0">f</span><span style="color:#4070a0">&#34; </span><span style="color:#70a0d0">{</span>attn_input<span style="color:#666">.</span>shape<span style="color:#70a0d0">}</span><span style="color:#4070a0">, </span><span style="color:#70a0d0">{</span>attn_input<span style="color:#666">.</span>device<span style="color:#70a0d0">}</span><span style="color:#4070a0"> &#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span>         output <span style="color:#666">=</span> attn(attn_input, prev_pos)  <span style="color:#60a0b0;font-style:italic"># [bsz, seq_len, embed_dim]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span>         <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34; Rank: </span><span style="color:#70a0d0">{</span>rank<span style="color:#70a0d0">}</span><span style="color:#4070a0"> attention output shape [bsz, seq_len, embed_dim]:&#34;</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">21</span>               <span style="color:#4070a0">f</span><span style="color:#4070a0">&#34; </span><span style="color:#70a0d0">{</span>output<span style="color:#666">.</span>shape<span style="color:#70a0d0">}</span><span style="color:#4070a0">, </span><span style="color:#70a0d0">{</span>output<span style="color:#666">.</span>device<span style="color:#70a0d0">}</span><span style="color:#4070a0"> &#34;</span> )
+</span></span><span style="display:flex;"><span><span style="color:#40a070">22</span>         next_token_hidden <span style="color:#666">=</span> output[:, <span style="color:#666">-</span><span style="color:#40a070">1</span>]<span style="color:#666">.</span>unsqueeze(<span style="color:#40a070">1</span>)  <span style="color:#60a0b0;font-style:italic"># [bsz, 1, embed_dim]</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">23</span>         <span style="color:#007020">print</span>(<span style="color:#4070a0">f</span><span style="color:#4070a0">&#34; Rank: </span><span style="color:#70a0d0">{</span>rank<span style="color:#70a0d0">}</span><span style="color:#4070a0"> next_token_hidden shape [bsz, 1, embed_dim] : &#34;</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">24</span>               <span style="color:#4070a0">f</span><span style="color:#4070a0">&#34;</span><span style="color:#70a0d0">{</span>next_token_hidden<span style="color:#666">.</span>shape<span style="color:#70a0d0">}</span><span style="color:#4070a0">, </span><span style="color:#70a0d0">{</span>next_token_hidden<span style="color:#666">.</span>device<span style="color:#70a0d0">}</span><span style="color:#4070a0"> &#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">25</span>         input_embeddings <span style="color:#666">=</span> torch<span style="color:#666">.</span>cat([input_embeddings, next_token_hidden], dim<span style="color:#666">=</span><span style="color:#40a070">1</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">26</span>         prev_pos <span style="color:#666">=</span> cur_pos</span></span></code></pre></div><p>在上述代码中，整理逻辑还是同我们在第3.3小节中介绍的一致，只是新增了部分变量的输出信息，以便我们后续根据结果进行分析。</p>
+<h3 id="44-输出结果分析">4.4 输出结果分析<a class="anchor" href="#44-%e8%be%93%e5%87%ba%e7%bb%93%e6%9e%9c%e5%88%86%e6%9e%90">#</a></h3>
+<p>在上述代码执行结束以后，将会得到整个推理完成后的结果以及各个变量信息的打印输出。这里，我们首先来看对输入 prompt 的编码输出结果，如下所示：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span> <span style="color:#40a070">1</span> Rank: <span style="color:#40a070">0</span>  当前进程 PID: <span style="color:#40a070">15546</span>, 父进程 PPID: <span style="color:#40a070">15540</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">2</span> Rank: <span style="color:#40a070">0</span> initializing model parallel <span style="color:#007020;font-weight:bold">with</span> size <span style="color:#40a070">2</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">3</span> Rank: <span style="color:#40a070">1</span>  当前进程 PID: <span style="color:#40a070">15547</span>, 父进程 PPID: <span style="color:#40a070">15540</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">4</span> Rank: <span style="color:#40a070">1</span> initializing model parallel <span style="color:#007020;font-weight:bold">with</span> size <span style="color:#40a070">2</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">5</span> <span style="color:#666">&gt;</span> initializing model parallel <span style="color:#007020;font-weight:bold">with</span> size 
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">6</span> <span style="color:#666">&gt;</span> initializing context parallel <span style="color:#007020;font-weight:bold">with</span> size <span style="color:#40a070">2</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">7</span> <span style="color:#666">&gt;</span> initializing ddp <span style="color:#007020;font-weight:bold">with</span> size <span style="color:#40a070">1</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">8</span> <span style="color:#666">&gt;</span> initializing pipeline <span style="color:#007020;font-weight:bold">with</span> size <span style="color:#40a070">1</span>
+</span></span><span style="display:flex;"><span> <span style="color:#40a070">9</span>  Rank: <span style="color:#40a070">0</span> <span style="color:#666">===========</span> decoding at pos: <span style="color:#40a070">3</span> <span style="color:#666">===========</span>  device: cuda
+</span></span><span style="display:flex;"><span><span style="color:#40a070">10</span>  Rank: <span style="color:#40a070">0</span> input_embeddings shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">3</span>, <span style="color:#40a070">8</span>]), cuda:<span style="color:#40a070">0</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">11</span>  tensor([[[[<span style="color:#40a070">0.</span>, <span style="color:#666">-</span>inf, <span style="color:#666">-</span>inf],
+</span></span><span style="display:flex;"><span><span style="color:#40a070">12</span>           [<span style="color:#40a070">0.</span>, <span style="color:#40a070">0.</span>, <span style="color:#666">-</span>inf],
+</span></span><span style="display:flex;"><span><span style="color:#40a070">13</span>           [<span style="color:#40a070">0.</span>, <span style="color:#40a070">0.</span>, <span style="color:#40a070">0.</span>]]]], device<span style="color:#666">=</span><span style="color:#4070a0">&#39;cuda:0&#39;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#40a070">14</span>  Rank: <span style="color:#40a070">0</span> attention <span style="color:#007020">input</span> shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">3</span>, <span style="color:#40a070">8</span>]), cuda:<span style="color:#40a070">0</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">15</span>  Rank: <span style="color:#40a070">0</span> keys shape: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">3</span>, <span style="color:#40a070">2</span>]), cuda:<span style="color:#40a070">0</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">16</span>  Rank: <span style="color:#40a070">0</span> <span style="color:#007020">self</span><span style="color:#666">.</span>cache_k shape: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">32</span>, <span style="color:#40a070">16</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">2</span>]), cuda:<span style="color:#40a070">0</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">17</span>  Rank: <span style="color:#40a070">0</span> attention output shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">3</span>, <span style="color:#40a070">8</span>]), cuda:<span style="color:#40a070">0</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">18</span>  Rank: <span style="color:#40a070">0</span> next_token_hidden shape [bsz, <span style="color:#40a070">1</span>, embed_dim] : torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">8</span>]), cuda:<span style="color:#40a070">0</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">19</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">20</span>  Rank: <span style="color:#40a070">1</span> <span style="color:#666">===========</span> decoding at pos: <span style="color:#40a070">3</span> <span style="color:#666">===========</span>  device: cuda
+</span></span><span style="display:flex;"><span><span style="color:#40a070">21</span>  Rank: <span style="color:#40a070">1</span> input_embeddings shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">3</span>, <span style="color:#40a070">8</span>]), cuda:<span style="color:#40a070">1</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">22</span>  tensor([[[[<span style="color:#40a070">0.</span>, <span style="color:#666">-</span>inf, <span style="color:#666">-</span>inf],
+</span></span><span style="display:flex;"><span><span style="color:#40a070">23</span>           [<span style="color:#40a070">0.</span>, <span style="color:#40a070">0.</span>, <span style="color:#666">-</span>inf],
+</span></span><span style="display:flex;"><span><span style="color:#40a070">24</span>           [<span style="color:#40a070">0.</span>, <span style="color:#40a070">0.</span>, <span style="color:#40a070">0.</span>]]]], device<span style="color:#666">=</span><span style="color:#4070a0">&#39;cuda:1&#39;</span>) 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">25</span>  Rank: <span style="color:#40a070">1</span> attention <span style="color:#007020">input</span> shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">3</span>, <span style="color:#40a070">8</span>]), cuda:<span style="color:#40a070">1</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">26</span>  Rank: <span style="color:#40a070">1</span> keys shape: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">3</span>, <span style="color:#40a070">2</span>]), cuda:<span style="color:#40a070">0</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">27</span>  Rank: <span style="color:#40a070">1</span> <span style="color:#007020">self</span><span style="color:#666">.</span>cache_k shape: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">32</span>, <span style="color:#40a070">16</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">2</span>]), cuda:<span style="color:#40a070">0</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">28</span>  Rank: <span style="color:#40a070">1</span> attention output shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">3</span>, <span style="color:#40a070">8</span>]), cuda:<span style="color:#40a070">1</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">29</span>  Rank: <span style="color:#40a070">1</span> next_token_hidden shape [bsz, <span style="color:#40a070">1</span>, embed_dim] : torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">8</span>]), cuda:<span style="color:#40a070">1</span></span></span></code></pre></div><p>根据上面结果我们可以看出，两个设备 <code>cuda:0</code> 和 <code>cuda:1</code> 均有对应输出。输入 <code>input_embeddings</code> 的形状为 <code>[3, 3, 8]</code>；<code>keys</code> 的形状为 <code>[bsz, n_local_heads, seqlen, head_dim]</code>，即上面的 <code>[3, 2, 3, 2]</code>。<code>attention output</code> 的输出为  <code>[3, 3, 8]</code>，但是我们只取最后一个时刻，所以是 <code>[3, 1, 8]</code> ，即 <code>next_token_hidden</code>。此时 <code>self.cache_k[:,:3]</code> 缓存便是当前时刻对应的 Key 状态。</p>
+<p>当前时刻解码介绍后，便开始循环解码生成后续结果，如下所示：</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#f0f0f0;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#40a070">31</span>  Rank: <span style="color:#40a070">0</span> <span style="color:#666">===========</span> decoding at pos: <span style="color:#40a070">4</span> <span style="color:#666">===========</span>  device: cuda
+</span></span><span style="display:flex;"><span><span style="color:#40a070">32</span>  Rank: <span style="color:#40a070">0</span> input_embeddings shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">4</span>, <span style="color:#40a070">8</span>]), cuda:<span style="color:#40a070">0</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">33</span>  Rank: <span style="color:#40a070">0</span> attention <span style="color:#007020">input</span> shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">8</span>]), cuda:<span style="color:#40a070">0</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">34</span>  Rank: <span style="color:#40a070">0</span> keys shape: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">4</span>, <span style="color:#40a070">2</span>]), cuda:<span style="color:#40a070">0</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">35</span>  Rank: <span style="color:#40a070">0</span> <span style="color:#007020">self</span><span style="color:#666">.</span>cache_k shape: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">32</span>, <span style="color:#40a070">16</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">2</span>]), cuda:<span style="color:#40a070">0</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">36</span>  Rank: <span style="color:#40a070">0</span> attention output shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">8</span>]), cuda:<span style="color:#40a070">0</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">37</span>  Rank: <span style="color:#40a070">0</span> next_token_hidden shape [bsz, <span style="color:#40a070">1</span>, embed_dim] : torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">8</span>]), cuda:<span style="color:#40a070">0</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">38</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">39</span>  Rank: <span style="color:#40a070">1</span> <span style="color:#666">===========</span> decoding at pos: <span style="color:#40a070">4</span> <span style="color:#666">===========</span>  device: cuda
+</span></span><span style="display:flex;"><span><span style="color:#40a070">40</span>  Rank: <span style="color:#40a070">1</span> input_embeddings shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">4</span>, <span style="color:#40a070">8</span>]), cuda:<span style="color:#40a070">1</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">41</span>  Rank: <span style="color:#40a070">1</span> attention <span style="color:#007020">input</span> shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">8</span>]), cuda:<span style="color:#40a070">1</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">42</span>  Rank: <span style="color:#40a070">1</span> keys shape: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">4</span>, <span style="color:#40a070">2</span>]), cuda:<span style="color:#40a070">1</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">43</span>  Rank: <span style="color:#40a070">1</span> <span style="color:#007020">self</span><span style="color:#666">.</span>cache_k shape: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">32</span>, <span style="color:#40a070">16</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">2</span>]), cuda:<span style="color:#40a070">1</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">44</span>  Rank: <span style="color:#40a070">1</span> attention output shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">8</span>]), cuda:<span style="color:#40a070">1</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">45</span>  Rank: <span style="color:#40a070">1</span> next_token_hidden shape [bsz, <span style="color:#40a070">1</span>, embed_dim] : torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">8</span>]), cuda:<span style="color:#40a070">1</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">46</span>  
+</span></span><span style="display:flex;"><span><span style="color:#40a070">47</span>  Rank: <span style="color:#40a070">0</span> <span style="color:#666">===========</span> decoding at pos: <span style="color:#40a070">5</span> <span style="color:#666">===========</span>  device: cuda
+</span></span><span style="display:flex;"><span><span style="color:#40a070">48</span>  Rank: <span style="color:#40a070">0</span> input_embeddings shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">5</span>, <span style="color:#40a070">8</span>]), cuda:<span style="color:#40a070">0</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">49</span>  Rank: <span style="color:#40a070">0</span> attention <span style="color:#007020">input</span> shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">8</span>]), cuda:<span style="color:#40a070">0</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">50</span>  Rank: <span style="color:#40a070">0</span> keys shape: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">5</span>, <span style="color:#40a070">2</span>]), cuda:<span style="color:#40a070">0</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">51</span>  Rank: <span style="color:#40a070">0</span> <span style="color:#007020">self</span><span style="color:#666">.</span>cache_k shape: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">32</span>, <span style="color:#40a070">16</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">2</span>]), cuda:<span style="color:#40a070">0</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">52</span>  Rank: <span style="color:#40a070">0</span> attention output shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">8</span>]), cuda:<span style="color:#40a070">0</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">53</span>  Rank: <span style="color:#40a070">0</span> next_token_hidden shape [bsz, <span style="color:#40a070">1</span>, embed_dim] : torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">8</span>]), cuda:<span style="color:#40a070">0</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">54</span> 
+</span></span><span style="display:flex;"><span><span style="color:#40a070">55</span>  Rank: <span style="color:#40a070">1</span> <span style="color:#666">===========</span> decoding at pos: <span style="color:#40a070">5</span> <span style="color:#666">===========</span>  device: cuda
+</span></span><span style="display:flex;"><span><span style="color:#40a070">56</span>  Rank: <span style="color:#40a070">1</span> input_embeddings shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">5</span>, <span style="color:#40a070">8</span>]), cuda:<span style="color:#40a070">1</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">57</span>  Rank: <span style="color:#40a070">1</span> attention <span style="color:#007020">input</span> shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">8</span>]), cuda:<span style="color:#40a070">1</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">58</span>  Rank: <span style="color:#40a070">1</span> keys shape: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">5</span>, <span style="color:#40a070">2</span>]), cuda:<span style="color:#40a070">1</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">59</span>  Rank: <span style="color:#40a070">1</span> <span style="color:#007020">self</span><span style="color:#666">.</span>cache_k shape: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">32</span>, <span style="color:#40a070">16</span>, <span style="color:#40a070">2</span>, <span style="color:#40a070">2</span>]), cuda:<span style="color:#40a070">1</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">60</span>  Rank: <span style="color:#40a070">1</span> attention output shape [bsz, seq_len, embed_dim]: torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">8</span>]), cuda:<span style="color:#40a070">1</span>
+</span></span><span style="display:flex;"><span><span style="color:#40a070">61</span>  Rank: <span style="color:#40a070">1</span> next_token_hidden shape [bsz, <span style="color:#40a070">1</span>, embed_dim] : torch<span style="color:#666">.</span>Size([<span style="color:#40a070">3</span>, <span style="color:#40a070">1</span>, <span style="color:#40a070">8</span>]), cuda:<span style="color:#40a070">1</span></span></span></code></pre></div><p>对于上述逐时刻解码生成的结果来说，变化地方在于 <code>attention input</code> 和 <code>attention output</code> 的形状均固定为了 <code>[bsz, 1, embed_dim]</code>，而 <code>cache_k</code> 也在逐时刻缓存当前时刻计算得到的 Key 状态。</p>
+<p>最后，需要注意的是，由于是并行计算，终端打印出的各个变量的信息在不同 GPU 设备间是穿插（乱序） 的。上面的输出结果顺序是我们手动进行整理的。</p>
+<h2 id="引用">引用<a class="anchor" href="#%e5%bc%95%e7%94%a8">#</a></h2>
+<p>[1] LLaMA-1: <a href="https://github.com/mlwithme/llama/tree/llama_v1">https://github.com/mlwithme/llama/tree/llama_v1</a></p>
+<div class="book-page-pv text-small" id="busuanzi_container_page_pv">
+      <span class="book-page-pv-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" focusable="false">
+          <path d="M1.5 12s3.9-6.5 10.5-6.5S22.5 12 22.5 12s-3.9 6.5-10.5 6.5S1.5 12 1.5 12Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7"/>
+          <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.7"/>
+        </svg>
+      </span>
+      <span class="book-page-pv-label">阅读</span>
+      <span class="book-page-pv-value" id="busuanzi_value_page_pv">--</span>
+    </div><section class="book-article-index book-related-articles" aria-labelledby="related-articles-title">
+    <h2 id="related-articles-title">相关阅读</h2>
+    <div class="book-article-grid"><article class="book-article-card book-related-article-card">
+              <h3 class="book-article-card-title">
+                <a href="/featured/kv-cache-inference/">彻底搞懂KV Cache大模型推理加速的核心！</a>
+              </h3><p class="book-article-card-desc">本文从 ChatGPT、Claude 等大模型首 Token 慢、其余瞬间输出的现象切入，系统讲清 KV Cache 原理：自回归推理中如何缓存每一层的 Key 与 Value 矩阵并避免每步重算历史 token，以及 …</p></article><article class="book-article-card book-related-article-card">
+              <h3 class="book-article-card-title">
+                <a href="/tutorials/transformer/self-attention/">第3节 网络结构与自注意力实现</a>
+              </h3><p class="book-article-card-desc">本文是 Transformer 精读系列第3讲，详细讲解如何用 PyTorch 一步步实现 MultiHeadAttention 模块。先回顾多层 Transformer 与单层 Encoder-Decoder 结构，再系统拆解自注意力实现 …</p></article></div>
+  </section></article>
+ 
+      
+
+
+      <footer class="book-footer">
+        
+  <div class="flex flex-wrap justify-between">
+
+<div>
+
+</div>
+
+<div>
+
+</div>
+
+</div>
+
+<div class="flex flex-wrap justify-between">
+    <span>
+    
+      <a href="/featured/multi-query-attention/" class="flex align-center">
+        <img src="/icons/backward.svg" class="book-icon" alt="Backward" />
+        <span>多查询注意力MQA动机原理与实现</span>
+      </a>
+    
+    </span>
+    <span>
+    
+      <a href="/featured/llama1/" class="flex align-center">
+        <span>LLaMA1 动机原理与实现之我们不需要大力出奇迹</span>
+        <img src="/icons/forward.svg" class="book-icon" alt="Forward" />
+      </a>
+    
+    </span>
+  </div>
+
+ 
+        
+  
+  <div class="book-comments"><div class="giscus"></div>
+<script src="https://giscus.app/client.js"
+        data-repo="mlwithme/mlwithme.github.io"
+        data-repo-id="R_kgDOTBt94Q"
+        data-category="Announcements"
+        data-category-id="DIC_kwDOTBt94c4C_21V"
+        data-mapping="pathname"
+        data-strict="1"
+        data-reactions-enabled="1"
+        data-emit-metadata="0"
+        data-input-position="top"
+        data-theme="preferred_color_scheme"
+        data-lang="zh-CN"
+        data-loading="lazy"
+        crossorigin="anonymous"
+        async>
+</script>
+</div>
+  
+ 
+        
+  <link rel="stylesheet" href="https://mlwithme.github.io/katex/katex.min.css" />
+  <script defer src="https://mlwithme.github.io/katex/katex.min.js"></script>
+  <script defer src="https://mlwithme.github.io/katex/auto-render.min.js"></script>
+  
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        if (window.renderMathInElement) {
+          renderMathInElement(
+            document.querySelector(".book-page"),
+            Object.assign({ throwOnError: false }, {"delimiters":[{"left":"$$","right":"$$","display":true},{"left":"$","right":"$","display":false},{"left":"\\(","right":"\\)","display":false},{"left":"\\[","right":"\\]","display":true}]})
+          );
+        }
+      });
+    </script>
+  
+
+        
+  
+ 
+        
+  
+    <script>(function(){document.querySelectorAll("pre:has(code)").forEach(e=>{e.addEventListener("click",e.focus),e.addEventListener("copy",function(t){if(t.preventDefault(),navigator.clipboard){const t=window.getSelection().toString()||e.textContent;navigator.clipboard.writeText(t)}})})})()</script>
+  
+
+      </footer>
+
+      <label for="menu-control" class="hidden book-menu-overlay"></label>
+    </div>
+
+    
+  
+  <aside class="book-toc">
+    <div class="book-toc-content">
+      
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#1-动机">1. 动机</a></li>
+    <li><a href="#2-不采用-kv-缓存推理过程">2. 不采用 KV 缓存推理过程</a>
+      <ul>
+        <li><a href="#21-计算原理图解">2.1 计算原理图解</a></li>
+        <li><a href="#22-从零开始实现">2.2 从零开始实现</a></li>
+        <li><a href="#23-推理过程模拟">2.3 推理过程模拟</a></li>
+        <li><a href="#24-输出结果分析">2.4 输出结果分析</a></li>
+      </ul>
+    </li>
+    <li><a href="#3-采用-kv-缓存推理过程">3. 采用 KV 缓存推理过程</a>
+      <ul>
+        <li><a href="#31-计算原理图解">3.1 计算原理图解</a></li>
+        <li><a href="#32-从零开始实现">3.2 从零开始实现</a></li>
+        <li><a href="#33-推理过程模拟">3.3 推理过程模拟</a></li>
+        <li><a href="#34-输出结果分析">3.4 输出结果分析</a></li>
+      </ul>
+    </li>
+    <li><a href="#4-张量并行下的-kv-缓存">4. 张量并行下的 KV 缓存</a>
+      <ul>
+        <li><a href="#41-计算原理图解">4.1 计算原理图解</a></li>
+        <li><a href="#42-从零开始实现">4.2 从零开始实现</a></li>
+        <li><a href="#43-推理过程模拟">4.3 推理过程模拟</a></li>
+        <li><a href="#44-输出结果分析">4.4 输出结果分析</a></li>
+      </ul>
+    </li>
+    <li><a href="#引用">引用</a></li>
+  </ul>
+</nav>
+
+
+
+
+    </div>
+  </aside>
+  
+ 
+  </main>
+
+  <button
+  type="button"
+  class="book-back-to-top"
+  aria-label="回到顶部"
+  title="回到顶部"
+>
+  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <path
+      d="M12 5.5l-5.25 5.25 1.5 1.5 2.7-2.7V18.5h2.1V9.55l2.7 2.7 1.5-1.5L12 5.5z"
+      fill="currentColor"
+    ></path>
+  </svg>
+</button>
+
+<script>
+  (function () {
+    var button = document.querySelector(".book-back-to-top");
+    if (!button) {
+      return;
+    }
+
+    var toggleButton = function () {
+      if (window.scrollY > 360) {
+        button.classList.add("is-visible");
+      } else {
+        button.classList.remove("is-visible");
+      }
+    };
+
+    button.addEventListener("click", function () {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+
+    toggleButton();
+    window.addEventListener("scroll", toggleButton, { passive: true });
+  })();
+</script>
+
+<div class="book-floating-toolbox" data-book-floating-toolbox>
+  <ul
+    class="book-floating-toolbox__items"
+    id="book-floating-toolbox-items"
+    role="menu"
+    aria-label="工具箱"
+    hidden
+  >
+    <li class="book-floating-toolbox__item" role="none" style="--book-toolbox-index: 0; --book-toolbox-count: 4;">
+      <a
+        class="book-floating-toolbox__action"
+        role="menuitem"
+        href="/glossary/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="术语百科"
+      >
+        <span class="book-floating-toolbox__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path
+              d="M5 4.5h11.5a2.5 2.5 0 0 1 2.5 2.5V20l-4-2.5L11 20l-4-2.5L3 20V7a2.5 2.5 0 0 1 2-2.5z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linejoin="round"
+            ></path>
+            <path
+              d="M7.5 9.5h7M7.5 12.5h5"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+            ></path>
+          </svg>
+        </span>
+      </a>
+      <span class="book-floating-toolbox__tip" aria-hidden="true">术语百科</span>
+    </li>
+    <li class="book-floating-toolbox__item" role="none" style="--book-toolbox-index: 2; --book-toolbox-count: 4;">
+      <a
+        class="book-floating-toolbox__action"
+        role="menuitem"
+        href="/code-templates/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="代码实现"
+      >
+        <span class="book-floating-toolbox__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path
+              d="M8.5 7.5 4 12l4.5 4.5M15.5 7.5 20 12l-4.5 4.5M13.5 5l-3 14"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            ></path>
+          </svg>
+        </span>
+      </a>
+      <span class="book-floating-toolbox__tip" aria-hidden="true">代码实现</span>
+    </li>
+    <li class="book-floating-toolbox__item" role="none" style="--book-toolbox-index: 1; --book-toolbox-count: 4;">
+      <a
+        class="book-floating-toolbox__action"
+        role="menuitem"
+        href="/syllabus/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="名校公开课"
+      >
+        <span class="book-floating-toolbox__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path
+              d="M12 3 1.5 9 12 14.5 22.5 9 12 3z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linejoin="round"
+            ></path>
+            <path
+              d="M6 11v4.2c0 1.5 2.7 2.8 6 2.8s6-1.3 6-2.8V11"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            ></path>
+            <path
+              d="M21 9.5V14"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+            ></path>
+          </svg>
+        </span>
+      </a>
+      <span class="book-floating-toolbox__tip" aria-hidden="true">名校公开课</span>
+    </li>
+    <li class="book-floating-toolbox__item" role="none" style="--book-toolbox-index: 3; --book-toolbox-count: 4;">
+      <a
+        class="book-floating-toolbox__action"
+        role="menuitem"
+        href="https://www.machinelearningwithme.com"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="开发中……"
+      >
+        <span class="book-floating-toolbox__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path
+              d="M9 3.5h6a1.5 1.5 0 0 1 1.5 1.5V7h2.25A1.75 1.75 0 0 1 20.5 8.75v9A1.75 1.75 0 0 1 18.75 19.5H5.25A1.75 1.75 0 0 1 3.5 17.75v-9A1.75 1.75 0 0 1 5.25 7H7.5V5A1.5 1.5 0 0 1 9 3.5z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linejoin="round"
+            ></path>
+            <path
+              d="M9 7h6"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+            ></path>
+            <circle cx="12" cy="13" r="3" fill="none" stroke="currentColor" stroke-width="1.6"></circle>
+          </svg>
+        </span>
+      </a>
+      <span class="book-floating-toolbox__tip" aria-hidden="true">开发中……</span>
+    </li>
+  </ul>
+  <button
+    type="button"
+    class="book-floating-toolbox__toggle"
+    aria-label="工具箱"
+    aria-haspopup="menu"
+    aria-expanded="false"
+    aria-controls="book-floating-toolbox-items"
+    title="工具箱"
+    data-book-toolbox-toggle
+  >
+    <svg class="book-floating-toolbox__toggle-icon-open" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        d="M14.7 6.3a4 4 0 0 0-5.4 5.4l-6.3 6.3a1 1 0 0 0 0 1.4l2 2a1 1 0 0 0 1.4 0l6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-2.4z"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linejoin="round"
+        stroke-linecap="round"
+      ></path>
+      <circle
+        class="book-floating-toolbox__badge-pulse"
+        cx="19.5"
+        cy="4.5"
+        r="2.2"
+        fill="#d84747"
+        stroke="#fff"
+        stroke-width="0.6"
+      ></circle>
+    </svg>
+    <svg class="book-floating-toolbox__toggle-icon-close" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        d="M6.5 6.5l11 11M17.5 6.5l-11 11"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.8"
+        stroke-linecap="round"
+      ></path>
+    </svg>
+  </button>
+</div>
+
+<script>
+  (function () {
+    var root = document.querySelector("[data-book-floating-toolbox]");
+    if (!root) {
+      return;
+    }
+    var toggle = root.querySelector("[data-book-toolbox-toggle]");
+    var items = root.querySelector(".book-floating-toolbox__items");
+    if (!toggle || !items) {
+      return;
+    }
+
+    var isOpen = function () {
+      return root.classList.contains("is-open");
+    };
+
+    var open = function () {
+      root.classList.add("is-open");
+      items.hidden = false;
+      toggle.setAttribute("aria-expanded", "true");
+    };
+
+    var close = function () {
+      root.classList.remove("is-open");
+      items.hidden = true;
+      toggle.setAttribute("aria-expanded", "false");
+    };
+
+    toggle.addEventListener("click", function (event) {
+      event.stopPropagation();
+      if (isOpen()) {
+        close();
+      } else {
+        open();
+      }
+    });
+
+    document.addEventListener("click", function (event) {
+      if (!isOpen()) {
+        return;
+      }
+      if (root.contains(event.target)) {
+        return;
+      }
+      close();
+    });
+
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape" && isOpen()) {
+        close();
+        toggle.focus();
+      }
+    });
+
+    items.addEventListener("click", function (event) {
+      if (event.target.closest("a")) {
+        close();
+      }
+    });
+
+    window.addEventListener("pageshow", close);
+  })();
+</script>
+
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
